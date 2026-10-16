@@ -285,7 +285,6 @@ export const zh: LocaleDict = {
   'hud.fireMode.bolt': '栓动',
   'hud.fireMode.pump': '泵动',
   'hud.using': '正在使用{item}…',
-  'hud.cancelHint': '移动或开火可取消',
   'hud.reviving': '正在救援 {name}…',
   'hud.beingRevived': '{name} 正在救援你…',
   'hud.downed': '你已倒地——正在流血！',
@@ -563,6 +562,9 @@ export const zh: LocaleDict = {
   'ui.hud.teamsLabel': '队伍',
   'ui.hud.eliminatedHint': '按 {key} 打开菜单并退出对局。',
   'ui.feed.died': '{victim} 阵亡了',
+  'ui.hud.useCancelHint': '冲刺、跳跃或开火可取消',
+  'ui.hud.fragArmed': '{throw} 投掷 · {cancel} 取消',
+  'ui.key.mouseLeftShort': '左键',
 
   // --- feel
   'feel.kill.finished': '你淘汰了倒地的 {name}',

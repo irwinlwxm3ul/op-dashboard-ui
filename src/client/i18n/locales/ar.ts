@@ -286,7 +286,6 @@ export const ar: LocaleDict = {
   'hud.fireMode.bolt': 'ترباس',
   'hud.fireMode.pump': 'مضخّي',
   'hud.using': 'جارٍ استخدام {item}…',
-  'hud.cancelHint': 'تحرّك أو أطلق النار للإلغاء',
   'hud.reviving': 'جارٍ إنعاش {name}…',
   'hud.beingRevived': '{name} يُنعشك…',
   'hud.downed': 'لقد سقطت — أنت تنزف!',
@@ -564,6 +563,9 @@ export const ar: LocaleDict = {
   'ui.hud.teamsLabel': 'الفرق',
   'ui.hud.eliminatedHint': 'اضغط {key} لفتح القائمة ومغادرة المباراة.',
   'ui.feed.died': 'مات {victim}',
+  'ui.hud.useCancelHint': 'اركض أو اقفز أو أطلق النار للإلغاء',
+  'ui.hud.fragArmed': '{throw} رمي · {cancel} إلغاء',
+  'ui.key.mouseLeftShort': 'النقر الأيسر',
 
   // --- feel
   'feel.kill.finished': 'أجهزت على {name}',

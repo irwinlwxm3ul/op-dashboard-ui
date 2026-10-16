@@ -285,7 +285,6 @@ export const de: LocaleDict = {
   'hud.fireMode.bolt': 'Repetierer',
   'hud.fireMode.pump': 'Pump',
   'hud.using': 'Benutze: {item} …',
-  'hud.cancelHint': 'Bewegen oder feuern zum Abbrechen',
   'hud.reviving': 'Belebe {name} wieder …',
   'hud.beingRevived': '{name} belebt dich wieder …',
   'hud.downed': 'Du bist am Boden und verblutest!',
@@ -563,6 +562,9 @@ export const de: LocaleDict = {
   'ui.hud.teamsLabel': 'Teams',
   'ui.hud.eliminatedHint': 'Drücke {key}, um das Menü zu öffnen und das Match zu verlassen.',
   'ui.feed.died': '{victim} ist gestorben',
+  'ui.hud.useCancelHint': 'Sprinten, springen oder schießen zum Abbrechen',
+  'ui.hud.fragArmed': '{throw} werfen · {cancel} abbrechen',
+  'ui.key.mouseLeftShort': 'LMT',
 
   // --- feel
   'feel.kill.finished': 'Du hast {name} erledigt',

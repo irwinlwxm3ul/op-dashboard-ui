@@ -285,7 +285,6 @@ export const fr: LocaleDict = {
   'hud.fireMode.bolt': 'Verrou',
   'hud.fireMode.pump': 'Pompe',
   'hud.using': 'Utilisation : {item}…',
-  'hud.cancelHint': 'Bougez ou tirez pour annuler',
   'hud.reviving': 'Réanimation de {name}…',
   'hud.beingRevived': '{name} vous réanime…',
   'hud.downed': 'Vous êtes à terre et vous vous videz de votre sang !',
@@ -563,6 +562,9 @@ export const fr: LocaleDict = {
   'ui.hud.teamsLabel': 'Équipes',
   'ui.hud.eliminatedHint': 'Appuyez sur {key} pour ouvrir le menu et quitter la partie.',
   'ui.feed.died': '{victim} est mort',
+  'ui.hud.useCancelHint': 'Sprintez, sautez ou tirez pour annuler',
+  'ui.hud.fragArmed': '{throw} lancer · {cancel} annuler',
+  'ui.key.mouseLeftShort': 'Clic G',
 
   // --- feel
   'feel.kill.finished': 'Vous avez achevé {name}',

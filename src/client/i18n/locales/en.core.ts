@@ -293,7 +293,6 @@ export const enCore = {
   'hud.fireMode.bolt': 'Bolt',
   'hud.fireMode.pump': 'Pump',
   'hud.using': 'Using {item}…',
-  'hud.cancelHint': 'Move or fire to cancel',
   'hud.reviving': 'Reviving {name}…',
   'hud.beingRevived': 'Being revived by {name}…',
   'hud.downed': 'You are down — bleeding out!',

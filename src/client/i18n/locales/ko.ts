@@ -285,7 +285,6 @@ export const ko: LocaleDict = {
   'hud.fireMode.bolt': '볼트액션',
   'hud.fireMode.pump': '펌프액션',
   'hud.using': '{item} 사용 중…',
-  'hud.cancelHint': '이동하거나 사격하면 취소됩니다',
   'hud.reviving': '{name} 님을 부활시키는 중…',
   'hud.beingRevived': '{name} 님이 부활시키는 중…',
   'hud.downed': '기절했습니다 — 출혈 중!',
@@ -563,6 +562,9 @@ export const ko: LocaleDict = {
   'ui.hud.teamsLabel': '팀',
   'ui.hud.eliminatedHint': '{key} 키를 눌러 메뉴를 열고 매치에서 나갈 수 있습니다.',
   'ui.feed.died': '{victim} 님이 사망',
+  'ui.hud.useCancelHint': '달리기, 점프 또는 사격으로 취소',
+  'ui.hud.fragArmed': '{throw} 던지기 · {cancel} 취소',
+  'ui.key.mouseLeftShort': '좌클릭',
 
   // --- feel
   'feel.kill.finished': '{name} 님에게 마무리 일격을 가했습니다',

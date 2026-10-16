@@ -285,7 +285,6 @@ export const ru: LocaleDict = {
   'hud.fireMode.bolt': 'Затвор',
   'hud.fireMode.pump': 'Помпа',
   'hud.using': 'Используется: {item}…',
-  'hud.cancelHint': 'Двигайтесь или стреляйте, чтобы отменить',
   'hud.reviving': 'Вы поднимаете игрока {name}…',
   'hud.beingRevived': 'Вас поднимает {name}…',
   'hud.downed': 'Вы ранены — истекаете кровью!',
@@ -563,6 +562,9 @@ export const ru: LocaleDict = {
   'ui.hud.teamsLabel': 'Команды',
   'ui.hud.eliminatedHint': 'Нажмите {key}, чтобы открыть меню и покинуть матч.',
   'ui.feed.died': '{victim} погибает',
+  'ui.hud.useCancelHint': 'Бег, прыжок или выстрел — отмена',
+  'ui.hud.fragArmed': '{throw} бросить · {cancel} отмена',
+  'ui.key.mouseLeftShort': 'ЛКМ',
 
   // --- feel
   'feel.kill.finished': 'Вы добили: {name}',

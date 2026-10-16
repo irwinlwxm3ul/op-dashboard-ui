@@ -285,7 +285,6 @@ export const ja: LocaleDict = {
   'hud.fireMode.bolt': 'ボルト',
   'hud.fireMode.pump': 'ポンプ',
   'hud.using': '{item}を使用中…',
-  'hud.cancelHint': '移動か射撃でキャンセル',
   'hud.reviving': '{name}を蘇生中…',
   'hud.beingRevived': '{name}が蘇生中…',
   'hud.downed': 'ダウン中 — 出血しています！',
@@ -563,6 +562,9 @@ export const ja: LocaleDict = {
   'ui.hud.teamsLabel': 'チーム',
   'ui.hud.eliminatedHint': '{key}でメニューを開くと、マッチを抜けられます。',
   'ui.feed.died': '{victim}が死亡',
+  'ui.hud.useCancelHint': 'ダッシュ・ジャンプ・射撃でキャンセル',
+  'ui.hud.fragArmed': '{throw} 投げる · {cancel} キャンセル',
+  'ui.key.mouseLeftShort': '左クリック',
 
   // --- feel
   'feel.kill.finished': '{name}にとどめを刺した',
