@@ -110,7 +110,11 @@ export function assetGrassSet(g: GLTF, shared: WorldUniforms, fade: { value: THR
     geometries.push(geometry);
     // Wide clumps (1.2-1.5 m at unit height) stay low; the narrow tuft can be a bit taller.
     const narrow = v.width < 1;
-    variants.push({ geometry, material: mat, scaleMin: narrow ? 0.4 : 0.32, scaleMax: narrow ? 0.72 : 0.58, tint: 'relative' });
+    // The narrow MegaKit tuft is a brighter lime than the Ultimate Nature clumps.
+    variants.push({
+      geometry, material: mat, scaleMin: narrow ? 0.4 : 0.32, scaleMax: narrow ? 0.72 : 0.58, tint: 'relative',
+      multiply: narrow ? [0.66, 0.72, 0.55] : [1.05, 1.08, 1.0],
+    });
   }
   if (variants.length === 0) return null;
   return {

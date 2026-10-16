@@ -68,10 +68,15 @@ float dzS = sway * sway * uWind;
 transformed.x += (sin(dzPh) * 0.7 + sin(dzPh * 2.7 + 0.8) * 0.3) * dzS * 0.11;
 transformed.z += (cos(dzPh * 0.9 + 1.1) * 0.6 + sin(dzPh * 3.3) * 0.25) * dzS * 0.08;`,
       );
-    // Blades / cards are drawn double-sided: keep the authored (up-leaning) normal on both faces.
-    shader.fragmentShader = patchShader(shader.fragmentShader, 'normal_fragment_begin', '#include <normal_fragment_begin>\nnormal = normalize(vNormal);');
+    // Blades / cards are thin and double-sided: light them like the ground they grow from
+    // (world-up normal on both faces) so they never turn black when seen from behind.
+    shader.fragmentShader = patchShader(
+      shader.fragmentShader,
+      'normal_fragment_begin',
+      '#include <normal_fragment_begin>\nnormal = normalize((viewMatrix * vec4(0.0, 1.0, 0.0, 0.0)).xyz);',
+    );
   };
-  mat.customProgramCacheKey = () => `dz-grass-${key}-v2`;
+  mat.customProgramCacheKey = () => `dz-grass-${key}-v3`;
 }
 
 /** One kind of tuft drawn by its own InstancedMesh. */
@@ -84,6 +89,8 @@ export interface GrassVariant {
   /** Instance colour: 'terrain' = terrain albedo (vertex-coloured tufts), 'relative' = tint
    *  relative to lush grass (textured tufts). */
   tint: 'terrain' | 'relative';
+  /** Extra colour multiplier for this variant (palette matching). */
+  multiply?: readonly [number, number, number];
 }
 
 export interface GrassModelSet {
@@ -303,9 +310,10 @@ export class GrassRenderer {
           cols[co + 2] = tb * v * 0.95;
         } else {
           // Follow the meadow's lush/dry variation relative to the base grass colour.
-          cols[co] = Math.min(1.4, Math.max(0.6, tr / LUSH[0])) * v;
-          cols[co + 1] = Math.min(1.4, Math.max(0.6, tg / LUSH[1])) * v;
-          cols[co + 2] = Math.min(1.4, Math.max(0.6, tb / LUSH[2])) * v;
+          const mul = variant.multiply;
+          cols[co] = Math.min(1.4, Math.max(0.6, tr / LUSH[0])) * v * (mul ? mul[0] : 1);
+          cols[co + 1] = Math.min(1.4, Math.max(0.6, tg / LUSH[1])) * v * (mul ? mul[1] : 1);
+          cols[co + 2] = Math.min(1.4, Math.max(0.6, tb / LUSH[2])) * v * (mul ? mul[2] : 1);
         }
       }
     }
