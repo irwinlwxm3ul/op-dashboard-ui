@@ -28,6 +28,8 @@ export interface StartServerOptions {
   jitterMs?: number;
   /** Console logging (default true). */
   log?: boolean;
+  /** Custom logger (overrides `log`), e.g. to ship logs elsewhere or capture them in tests. */
+  logger?: Logger;
   /**
    * Match runner factory. Default: the real MatchRunner + bot driver, one worker thread per match
    * (in-process on the main thread when `matchWorkers` is false). Tests inject fakes. An injected
@@ -74,7 +76,7 @@ function resolveStaticDir(opt: string | null | undefined, log: Logger): string |
 }
 
 export async function startServer(opts: StartServerOptions = {}): Promise<ServerHandle> {
-  const log = createLogger(opts.log ?? true);
+  const log = opts.logger ?? createLogger(opts.log ?? true);
   const limits: ServerLimits = { ...DEFAULT_LIMITS, ...opts.limits };
   const lagMs = Math.max(0, Math.min(5000, opts.lagMs ?? 0));
   const jitterMs = Math.max(0, Math.min(5000, opts.jitterMs ?? 0));
@@ -258,10 +260,16 @@ export async function startServer(opts: StartServerOptions = {}): Promise<Server
     manager.refreshPings();
     manager.pruneLimiters();
   }, limits.heartbeatMs);
+  // In-match clients get more frequent RTT samples: the runner bounds their lag compensation by it.
+  const rttProbe = setInterval(() => {
+    const now = performance.now();
+    for (const c of conns) if (c.inMatch) c.probeRtt(now);
+  }, limits.rttProbeMs);
 
   await new Promise<void>((resolve, reject) => {
     const onError = (err: Error): void => {
       clearInterval(heartbeat);
+      clearInterval(rttProbe);
       manager.dispose();
       void ownedWorkers?.dispose();
       reject(err);
@@ -289,6 +297,7 @@ export async function startServer(opts: StartServerOptions = {}): Promise<Server
   const close = (): Promise<void> => {
     closing ??= (async () => {
       clearInterval(heartbeat);
+      clearInterval(rttProbe);
       manager.dispose();
       const workersStopped = ownedWorkers?.dispose();
       // Stop accepting, then close every client with "going away" and give the close handshake a

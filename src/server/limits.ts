@@ -41,6 +41,8 @@ export interface ServerLimits {
   /** Heartbeat: ws ping interval and the silence after which a connection is terminated. */
   heartbeatMs: number;
   heartbeatTimeoutMs: number;
+  /** RTT probe interval for clients in a match (lag-compensation bound; ms). */
+  rttProbeMs: number;
   /** Outgoing bytes buffered on a socket before it is considered a dead/slow consumer. */
   maxBufferedBytes: number;
   /** Minimum interval between pushed lobby list updates to browsing clients. */
@@ -71,6 +73,7 @@ export const DEFAULT_LIMITS: ServerLimits = {
   minLobbyAgeMs: 3000,
   heartbeatMs: 10_000,
   heartbeatTimeoutMs: 30_000,
+  rttProbeMs: 2000,
   maxBufferedBytes: 4 * 1024 * 1024,
   lobbyListThrottleMs: 500,
 };

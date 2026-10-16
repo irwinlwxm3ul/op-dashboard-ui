@@ -11,9 +11,10 @@ import type { ClientMessage, LobbySettings, LobbyState, ServerMessage } from '..
 import type { MatchResults, PlayerInput } from '../src/shared/types';
 import type { Worker } from 'node:worker_threads';
 import {
-  createWorkerRunnerFactory, startServer, type MatchRunnerLike, type RunnerOptions, type ServerHandle,
+  createWorkerRunnerFactory, startServer, type Logger, type MatchRunnerLike, type RunnerOptions, type ServerHandle,
   type ServerLimits,
 } from '../src/server';
+import type { CheatFlag } from '../src/shared/sim';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -149,14 +150,17 @@ class FakeRunner implements MatchRunnerLike {
 
   constructor(readonly opts: RunnerOptions) {}
 
+  /** Flags handed out (and drained) by the next stats() call. */
+  pendingFlags: CheatFlag[] = [];
+
   start(nowMs: number): void {
     this.started = true;
-    for (const c of this.opts.clients) {
+    for (const [i, c] of this.opts.clients.entries()) {
       c.send({
         t: 'matchInit',
         init: {
           config: this.opts.config,
-          you: 1,
+          you: i + 1,
           team: c.team ?? 0,
           roster: [],
           loot: [],
@@ -181,7 +185,9 @@ class FakeRunner implements MatchRunnerLike {
     return this.over;
   }
   stats() {
-    return { tickMsAvg: 0, tickMsMax: 0, players: this.opts.clients.length, bots: 0 };
+    const flags = this.pendingFlags;
+    this.pendingFlags = [];
+    return { tickMsAvg: 0, tickMsMax: 0, players: this.opts.clients.length, bots: 0, flags };
   }
   dispose(): void {
     this.disposed = true;
@@ -955,4 +961,84 @@ describe('server limits', () => {
       await s.close();
     }
   });
+});
+
+describe('latency and cheat flags', () => {
+  const captureLogger = (warns: { msg: string; fields?: Record<string, unknown> }[]): Logger => ({
+    info: () => undefined,
+    error: () => undefined,
+    warn: (msg, fields) => warns.push({ msg, fields }),
+  });
+
+  it("hands each client's transport RTT (incl. LAG_MS) to the runner and logs cheat flags with client details", async () => {
+    const lag = 40;
+    const warns: { msg: string; fields?: Record<string, unknown> }[] = [];
+    const s = await startServer({
+      port: 0,
+      logger: captureLogger(warns),
+      lagMs: lag,
+      limits: RELAXED,
+      runnerFactory: (o) => {
+        const r = new FakeRunner(o);
+        runners.push(r); // startedMatch() expects the shared registry
+        return r;
+      },
+    });
+    try {
+      const a = await TestClient.hello(s.port, 'A');
+      const b = await TestClient.hello(s.port, 'B');
+      const runner = await startedMatch(a, [b]);
+      const rttOf = (id: string): number => runner.opts.clients.find((c) => c.id === id)?.rttMs?.() ?? NaN;
+      const deadline = Date.now() + 3000;
+      while (!(rttOf(a.clientId) >= 0) && Date.now() < deadline) await sleep(50);
+      expect(rttOf(a.clientId)).toBeGreaterThanOrEqual(2 * lag);
+      expect(rttOf(a.clientId)).toBeLessThan(2 * lag + 300);
+      expect(rttOf(b.clientId)).toBeGreaterThanOrEqual(2 * lag);
+
+      // A flag for B's player (matchInit told B it is player 2) is logged with B's identity.
+      runner.pendingFlags.push({ player: 2, name: 'B', kind: 'aimSnap', value: 4, time: 12.5 });
+      const until = Date.now() + 3000;
+      while (!warns.some((w) => w.msg === 'cheat flag') && Date.now() < until) await sleep(50);
+      const flag = warns.find((w) => w.msg === 'cheat flag');
+      expect(flag?.fields).toMatchObject({ kind: 'aimSnap', value: 4, player: 2, client: b.clientId, clientName: 'B', ip: '127.0.0.1' });
+    } finally {
+      await s.close();
+    }
+  });
+
+  it('forwards client RTTs into match worker threads', async () => {
+    const lag = 40;
+    const workers = createWorkerRunnerFactory();
+    const created: MatchRunnerLike[] = [];
+    const s = await startServer({
+      port: 0,
+      log: false,
+      lagMs: lag,
+      limits: RELAXED,
+      runnerFactory: (o) => {
+        const r = workers(o);
+        created.push(r);
+        return r;
+      },
+    });
+    try {
+      const a = await TestClient.hello(s.port, 'A');
+      a.send({ t: 'createLobby', settings: settings({ maxPlayers: 4, botFill: true, botDifficulty: 'easy' }) });
+      await a.next('lobbyState');
+      a.send({ t: 'startMatch' });
+      await a.next('matchInit', () => true, 20_000);
+      // The worker reports the RTT it applied via MatchRunner.setClientLatency.
+      let applied = -1;
+      const deadline = Date.now() + 8000;
+      while (applied < 0 && Date.now() < deadline) {
+        await sleep(200);
+        applied = created[0].stats().rttAvgMs ?? -1;
+      }
+      expect(applied).toBeGreaterThanOrEqual(2 * lag);
+      expect(applied).toBeLessThan(2 * lag + 300);
+    } finally {
+      await s.close();
+      await workers.dispose();
+    }
+  }, 60_000);
 });

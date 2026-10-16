@@ -28,6 +28,8 @@ let failed = false;
 // Outgoing messages of the current loop iteration (parallel arrays: one postMessage per batch).
 let outIds: string[] = [];
 let outMsgs: ServerMessage[] = [];
+/** Latest RTT per client as applied to the runner (for the stats average). */
+const rtts = new Map<string, number>();
 
 const post = (m: FromWorker): void => port.postMessage(m);
 
@@ -116,7 +118,12 @@ function handle(m: ToWorker): void {
       flush();
       loop = setInterval(tick, LOOP_MS);
       statsTimer = setInterval(() => {
-        if (runner) post({ k: 'stats', stats: runner.stats(), over: runner.isOver() });
+        if (!runner) return;
+        let sum = 0;
+        for (const v of rtts.values()) sum += v;
+        // stats() drains the runner's cheat flags; they travel to the main thread for logging.
+        const stats = { ...runner.stats(), rttAvgMs: rtts.size > 0 ? sum / rtts.size : -1 };
+        post({ k: 'stats', stats, over: runner.isOver() });
       }, STATS_MS);
       return;
     }
@@ -128,7 +135,17 @@ function handle(m: ToWorker): void {
     case 'remove':
       if (!runner) return;
       runner.removeClient(m.id);
+      rtts.delete(m.id);
       flush();
+      return;
+    case 'rtt':
+      if (!runner) return;
+      for (let i = 0; i < m.ids.length; i++) {
+        const v = m.rtts[i];
+        if (!Number.isFinite(v) || v < 0) continue;
+        runner.setClientLatency(m.ids[i], v);
+        rtts.set(m.ids[i], v);
+      }
       return;
   }
 }

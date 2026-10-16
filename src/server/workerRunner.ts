@@ -13,6 +13,7 @@ import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { Worker, type ResourceLimits } from 'node:worker_threads';
 import type { ClientMessage } from '../shared/protocol';
+import type { CheatFlag } from '../shared/sim/index';
 import { createLogger, type Logger } from './log';
 import type { FromWorker, ToWorker } from './matchWorkerProtocol';
 import type { MatchRunnerLike, RunnerClient, RunnerFactory, RunnerOptions, RunnerStats } from './runner';
@@ -33,6 +34,10 @@ export interface WorkerRunnerFactoryOptions {
   resourceLimits?: ResourceLimits;
 }
 
+/** How often the clients' transport RTTs are forwarded to the worker (ms). */
+const RTT_FORWARD_MS = 1000;
+/** Cheat flags buffered between two stats() reads. */
+const MAX_PENDING_FLAGS = 200;
 /** Delay before booting a replacement spare, so it does not compete with a starting match. */
 const SPARE_RESPAWN_DELAY_MS = 2000;
 const DEFAULT_LIMITS: ResourceLimits = { maxOldGenerationSizeMb: 1024 };
@@ -82,8 +87,9 @@ class WorkerRunner implements MatchRunnerLike {
   private disposed = false;
   private failed = false;
   private latest: RunnerStats = { tickMsAvg: 0, tickMsMax: 0, players: 0, bots: 0 };
-  private maxSinceRead = 0;
+  private flags: CheatFlag[] = [];
   private errorLogs = 0;
+  private readonly rttTimer: ReturnType<typeof setInterval>;
 
   constructor(
     private readonly worker: Worker,
@@ -100,7 +106,22 @@ class WorkerRunner implements MatchRunnerLike {
       config: opts.config,
       clients: opts.clients.map((c) => ({ id: c.id, name: c.name, team: c.team })),
     });
+    // RunnerClient.rttMs getters cannot cross the thread boundary: push their values instead.
+    this.rttTimer = setInterval(this.forwardRtts, RTT_FORWARD_MS);
+    this.rttTimer.unref();
   }
+
+  private readonly forwardRtts = (): void => {
+    const ids: string[] = [];
+    const rtts: number[] = [];
+    for (const c of this.clients.values()) {
+      const v = c.rttMs?.();
+      if (v === undefined || !Number.isFinite(v) || v < 0) continue;
+      ids.push(c.id);
+      rtts.push(v);
+    }
+    if (ids.length > 0) this.post({ k: 'rtt', ids, rtts });
+  };
 
   start(): void {
     this.post({ k: 'start' });
@@ -124,15 +145,17 @@ class WorkerRunner implements MatchRunnerLike {
     return this.over;
   }
 
+  /** Latest tick stats reported by the worker plus the cheat flags received since the last read. */
   stats(): RunnerStats {
-    const s = { ...this.latest, tickMsMax: Math.max(this.maxSinceRead, this.latest.tickMsMax) };
-    this.maxSinceRead = 0;
-    return s;
+    const flags = this.flags;
+    this.flags = [];
+    return { ...this.latest, flags };
   }
 
   dispose(): void {
     if (this.disposed) return;
     this.disposed = true;
+    clearInterval(this.rttTimer);
     this.clients.clear();
     this.worker.terminate().catch(() => undefined);
     this.released(this.worker);
@@ -157,11 +180,13 @@ class WorkerRunner implements MatchRunnerLike {
         this.over = true;
         this.opts.onEnd(m.results);
         break;
-      case 'stats':
-        this.latest = m.stats;
-        if (m.stats.tickMsMax > this.maxSinceRead) this.maxSinceRead = m.stats.tickMsMax;
+      case 'stats': {
+        const { flags, ...rest } = m.stats;
+        this.latest = rest;
+        if (flags) for (const f of flags) if (this.flags.length < MAX_PENDING_FLAGS) this.flags.push(f);
         if (m.over) this.over = true;
         break;
+      }
       case 'inited':
         this.log.info('match runner ready in worker', {
           threadId: this.worker.threadId,
@@ -193,6 +218,7 @@ class WorkerRunner implements MatchRunnerLike {
   private fail(err: Error): void {
     if (this.disposed || this.failed) return;
     this.failed = true;
+    clearInterval(this.rttTimer);
     this.log.error('match worker failed', { threadId: this.worker.threadId, err });
     this.worker.terminate().catch(() => undefined);
     this.released(this.worker);

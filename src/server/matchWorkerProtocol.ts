@@ -24,7 +24,9 @@ export type ToWorker =
   /** Start the match (matchInit to every client) and the worker's own fixed-step loop. */
   | { k: 'start' }
   | { k: 'msg'; id: string; msg: ClientMessage }
-  | { k: 'remove'; id: string };
+  | { k: 'remove'; id: string }
+  /** Transport-measured RTTs (ms) of the match's clients: rtts[i] belongs to ids[i]. */
+  | { k: 'rtt'; ids: string[]; rtts: number[] };
 
 /** Worker -> main thread. */
 export type FromWorker =
@@ -37,6 +39,7 @@ export type FromWorker =
   /** Outgoing ServerMessages batched per loop iteration: msgs[i] goes to client ids[i]. */
   | { k: 'out'; ids: string[]; msgs: ServerMessage[] }
   | { k: 'end'; results: MatchResults }
+  /** Runner stats incl. cheat flags drained in the worker and the average applied RTT. */
   | { k: 'stats'; stats: RunnerStats; over: boolean }
   /** Runner exception. Fatal errors end the match. */
   | { k: 'error'; message: string; fatal: boolean };

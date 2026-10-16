@@ -18,6 +18,7 @@ export type { MatchRunnerLike, RunnerClient, RunnerFactory, RunnerOptions, Runne
 export { loadInProcessRunnerFactory } from './runner';
 export { createWorkerRunnerFactory, type WorkerRunnerFactory, type WorkerRunnerFactoryOptions } from './workerRunner';
 export { DEFAULT_LIMITS, type ServerLimits } from './limits';
+export type { Logger } from './log';
 
 function envInt(name: string, fallback: number, min: number, max: number): number {
   const raw = process.env[name];
