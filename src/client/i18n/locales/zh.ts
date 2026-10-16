@@ -564,6 +564,15 @@ export const zh: LocaleDict = {
   'ui.feed.died': '{victim} 阵亡了',
   'ui.hud.useCancelHint': '冲刺、跳跃或开火可取消',
   'ui.hud.fragArmed': '{throw} 投掷 · {cancel} 取消',
+  'ui.credits.title': '鸣谢',
+  'ui.credits.intro': 'DROPZONE 使用了以下免费素材，感谢它们的创作者！',
+  'ui.credits.models': '3D 模型',
+  'ui.credits.sounds': '音效',
+  'ui.credits.fonts': '字体',
+  'ui.credits.modifiedNote': '这些模型已为 DROPZONE 进行转换、合并、重新着色和缩放。',
+  'ui.credits.colAsset': '素材',
+  'ui.credits.colAuthor': '作者',
+  'ui.credits.colLicense': '许可证',
   'ui.key.mouseLeftShort': '左键',
 
   // --- feel

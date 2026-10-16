@@ -564,6 +564,15 @@ export const ja: LocaleDict = {
   'ui.feed.died': '{victim}が死亡',
   'ui.hud.useCancelHint': 'ダッシュ・ジャンプ・射撃でキャンセル',
   'ui.hud.fragArmed': '{throw} 投げる · {cancel} キャンセル',
+  'ui.credits.title': 'クレジット',
+  'ui.credits.intro': 'DROPZONE は以下の無料アセットを使用しています。制作者の皆さんに感謝します！',
+  'ui.credits.models': '3D モデル',
+  'ui.credits.sounds': 'サウンド',
+  'ui.credits.fonts': 'フォント',
+  'ui.credits.modifiedNote': 'モデルは DROPZONE 用に変換・結合・再着色・サイズ調整されています。',
+  'ui.credits.colAsset': 'アセット',
+  'ui.credits.colAuthor': '作者',
+  'ui.credits.colLicense': 'ライセンス',
   'ui.key.mouseLeftShort': '左クリック',
 
   // --- feel

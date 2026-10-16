@@ -564,6 +564,15 @@ export const de: LocaleDict = {
   'ui.feed.died': '{victim} ist gestorben',
   'ui.hud.useCancelHint': 'Sprinten, springen oder schießen zum Abbrechen',
   'ui.hud.fragArmed': '{throw} werfen · {cancel} abbrechen',
+  'ui.credits.title': 'Mitwirkende',
+  'ui.credits.intro': 'DROPZONE nutzt diese kostenlosen Assets. Danke an ihre Urheber!',
+  'ui.credits.models': '3D-Modelle',
+  'ui.credits.sounds': 'Sounds',
+  'ui.credits.fonts': 'Schriftarten',
+  'ui.credits.modifiedNote': 'Die Modelle wurden für DROPZONE konvertiert, zusammengeführt, umgefärbt und skaliert.',
+  'ui.credits.colAsset': 'Asset',
+  'ui.credits.colAuthor': 'Urheber',
+  'ui.credits.colLicense': 'Lizenz',
   'ui.key.mouseLeftShort': 'LMT',
 
   // --- feel

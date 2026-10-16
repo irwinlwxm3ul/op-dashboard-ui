@@ -565,6 +565,15 @@ export const ar: LocaleDict = {
   'ui.feed.died': 'مات {victim}',
   'ui.hud.useCancelHint': 'اركض أو اقفز أو أطلق النار للإلغاء',
   'ui.hud.fragArmed': '{throw} رمي · {cancel} إلغاء',
+  'ui.credits.title': 'الشكر والتقدير',
+  'ui.credits.intro': 'صُنعت DROPZONE باستخدام هذه الموارد المجانية. شكرًا لمبدعيها!',
+  'ui.credits.models': 'نماذج ثلاثية الأبعاد',
+  'ui.credits.sounds': 'الأصوات',
+  'ui.credits.fonts': 'الخطوط',
+  'ui.credits.modifiedNote': 'حُوِّلت النماذج ودُمجت وأُعيد تلوينها وتغيير حجمها من أجل DROPZONE.',
+  'ui.credits.colAsset': 'المورد',
+  'ui.credits.colAuthor': 'المؤلف',
+  'ui.credits.colLicense': 'الترخيص',
   'ui.key.mouseLeftShort': 'النقر الأيسر',
 
   // --- feel

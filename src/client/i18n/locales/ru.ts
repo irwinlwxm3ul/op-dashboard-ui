@@ -564,6 +564,15 @@ export const ru: LocaleDict = {
   'ui.feed.died': '{victim} погибает',
   'ui.hud.useCancelHint': 'Бег, прыжок или выстрел — отмена',
   'ui.hud.fragArmed': '{throw} бросить · {cancel} отмена',
+  'ui.credits.title': 'Авторы',
+  'ui.credits.intro': 'DROPZONE создана с использованием этих бесплатных ресурсов. Спасибо их авторам!',
+  'ui.credits.models': '3D-модели',
+  'ui.credits.sounds': 'Звуки',
+  'ui.credits.fonts': 'Шрифты',
+  'ui.credits.modifiedNote': 'Модели были конвертированы, объединены, перекрашены и масштабированы для DROPZONE.',
+  'ui.credits.colAsset': 'Ресурс',
+  'ui.credits.colAuthor': 'Автор',
+  'ui.credits.colLicense': 'Лицензия',
   'ui.key.mouseLeftShort': 'ЛКМ',
 
   // --- feel

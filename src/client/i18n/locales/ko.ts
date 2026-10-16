@@ -564,6 +564,15 @@ export const ko: LocaleDict = {
   'ui.feed.died': '{victim} 님이 사망',
   'ui.hud.useCancelHint': '달리기, 점프 또는 사격으로 취소',
   'ui.hud.fragArmed': '{throw} 던지기 · {cancel} 취소',
+  'ui.credits.title': '크레딧',
+  'ui.credits.intro': 'DROPZONE은 다음 무료 에셋으로 제작되었습니다. 제작자분들께 감사드립니다!',
+  'ui.credits.models': '3D 모델',
+  'ui.credits.sounds': '사운드',
+  'ui.credits.fonts': '글꼴',
+  'ui.credits.modifiedNote': '모델은 DROPZONE에 맞게 변환, 병합, 색상 변경 및 크기 조정되었습니다.',
+  'ui.credits.colAsset': '에셋',
+  'ui.credits.colAuthor': '제작자',
+  'ui.credits.colLicense': '라이선스',
   'ui.key.mouseLeftShort': '좌클릭',
 
   // --- feel
