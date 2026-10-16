@@ -33,6 +33,10 @@ const EXPLOSION_DEDUP_DIST = 4;
 const EXPLOSION_DEDUP_TIME = 0.3;
 /** A near-miss only counts when the shooter is at least this far away (otherwise you hear the shot itself). */
 const NEAR_MISS_MIN_ORIGIN = SUPPRESSION_RADIUS * 2;
+/** Shell insert sounds lead the actual insert slightly so the click lands with the motion (s). */
+const SHELL_LEAD = 0.08;
+/** Empty shell-by-shell reload: pump this long after the last shell (viewmodel 'pump' stage) (s). */
+const PUMP_AFTER_RELOAD = 0.14;
 /** Max remote footsteps triggered per frame (squads moving together). */
 const MAX_STEPS_PER_FRAME = 6;
 
@@ -157,10 +161,11 @@ export class SoundRouter {
 
   /**
    * Reload phase sounds over the reload duration: mag out at 20 %, mag in at 70 %, bolt at the end
-   * for empty reloads. Shell-by-shell weapons follow the predicted timeline (client-net / sim): an
-   * empty tube first spends the extra empty time racking the action, then one shell per
-   * `reloadPerShell` until full or out of reserve. `mag` is the magazine count when the reload
-   * started, `reserve` the rounds available (Infinity when unknown or infinite).
+   * for empty reloads. Shell-by-shell weapons follow the predicted timeline (client-net / sim): one
+   * shell inserted every `reloadPerShell` until full or out of reserve; each shell sound plays just
+   * before its insert, and an empty tube is pumped after the last shell (the viewmodel's 'pump'
+   * stage). `mag` is the magazine count when the reload started, `reserve` the rounds available
+   * (Infinity when unknown or infinite). Firing (localShot) or switching weapons cancels the rest.
    */
   reload(weapon: WeaponId, empty: boolean, mag: number, reserve: number, local: boolean): void {
     const def = WEAPONS[weapon];
@@ -168,17 +173,32 @@ export class SoundRouter {
     if (local) this.localReloadStarted = this.now;
     const kind = def.sound;
     if (def.reloadPerShell !== undefined && def.reloadPerShell > 0) {
+      const per = def.reloadPerShell;
       const missing = def.magSize - Math.max(0, Math.min(def.magSize, empty ? 0 : mag));
       const shells = Math.max(1, Math.min(missing, reserve));
-      const rack = empty ? Math.max(0, def.reloadEmptyTime - def.reloadTime) : 0;
-      if (empty) this.schedule(rack * 0.45, kind, 'bolt', 'reload', local);
-      for (let i = 0; i < shells; i++) this.schedule(rack + (i + 0.7) * def.reloadPerShell, kind, 'shell', 'reload', local);
+      for (let i = 0; i < shells; i++) this.schedule(Math.max(0.05, (i + 1) * per - SHELL_LEAD), kind, 'shell', 'reload', local);
+      if (empty) this.schedule(shells * per + PUMP_AFTER_RELOAD, kind, 'bolt', 'reload', local);
       return;
     }
     const total = empty ? def.reloadEmptyTime : def.reloadTime;
     this.schedule(total * 0.2, kind, 'out', 'reload', local);
     this.schedule(total * 0.7, kind, 'in', 'reload', local);
     if (empty) this.schedule(total * 0.88, kind, 'bolt', 'reload', local);
+  }
+
+  /**
+   * The local reload completed normally (possibly earlier than scheduled, e.g. fewer shells than
+   * expected): drop shells / mag phases that have not played yet but keep the closing bolt / pump.
+   */
+  reloadDone(): void {
+    for (let i = this.pending.length - 1; i >= 0; i--) {
+      const s = this.pending[i];
+      if (!s.local || s.group !== 'reload' || s.phase === 'bolt' || s.at <= this.now + 0.05) continue;
+      this.pending[i] = this.pending[this.pending.length - 1];
+      this.pending.pop();
+      this.spare.push(s);
+    }
+    this.localReloadStarted = -1;
   }
 
   /** Cancels pending weapon-handling sounds (reload phases and/or bolt cycles) of one owner. */
@@ -299,7 +319,8 @@ export class SoundRouter {
     const self = frame.self;
 
     // ---- Scheduled weapon-handling sounds ----
-    // A local reload that the prediction aborted (sprint, slot switch, ...) drops its later phases.
+    // A local reload that the prediction aborted without a localReloadDone (slot switch, item use,
+    // death, ...) drops its later phases; normal completion is handled by reloadDone().
     if (this.localReloadStarted >= 0 && self && self.reloadProgress < 0 && this.now - this.localReloadStarted > 0.2) {
       this.dropFutureLocalReload();
     }

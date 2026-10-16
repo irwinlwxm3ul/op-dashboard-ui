@@ -173,6 +173,9 @@ export class FeelController implements Feel {
       case 'localReload':
         this.sound.reload(ev.weapon, ev.empty, currentMag(self, ev.weapon), reserveFor(self, ev.weapon, f), true);
         break;
+      case 'localReloadDone':
+        this.sound.reloadDone();
+        break;
       case 'localDryFire':
         audio.dryFire();
         break;
@@ -191,7 +194,6 @@ export class FeelController implements Feel {
         this.sound.cancel(true, 'all');
         audio.weaponSwitch();
         break;
-      case 'localReloadDone':
       case 'localStance':
       case 'localAds':
       case 'localSnapshot':
