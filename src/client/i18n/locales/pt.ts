@@ -581,10 +581,8 @@ export const pt: LocaleDict = {
   // --- flow
   'flow.loading.world': 'Gerando terreno…',
   'flow.loading.scene': 'Construindo o mundo…',
-  'flow.loading.connecting': 'Conectando à partida…',
   'flow.loading.waiting': 'Aguardando dados da partida…',
   'flow.loading.starting': 'Iniciando simulação…',
   'flow.loading.ready': 'Pronto',
-  'flow.clickToPlay': 'Clique para jogar',
   'flow.webglUnsupported': 'Seu navegador não suporta WebGL 2, necessário para o DROPZONE.',
 };

@@ -581,10 +581,8 @@ export const ru: LocaleDict = {
   // --- flow
   'flow.loading.world': 'Генерация ландшафта…',
   'flow.loading.scene': 'Построение мира…',
-  'flow.loading.connecting': 'Подключение к матчу…',
   'flow.loading.waiting': 'Ожидание данных матча…',
   'flow.loading.starting': 'Запуск симуляции…',
   'flow.loading.ready': 'Готово',
-  'flow.clickToPlay': 'Нажмите, чтобы играть',
   'flow.webglUnsupported': 'Ваш браузер не поддерживает WebGL 2, а без него DROPZONE не запустится.',
 };

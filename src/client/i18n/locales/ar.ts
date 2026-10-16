@@ -582,10 +582,8 @@ export const ar: LocaleDict = {
   // --- flow
   'flow.loading.world': 'جارٍ إنشاء التضاريس…',
   'flow.loading.scene': 'جارٍ بناء العالم…',
-  'flow.loading.connecting': 'جارٍ الاتصال بالمباراة…',
   'flow.loading.waiting': 'بانتظار بيانات المباراة…',
   'flow.loading.starting': 'جارٍ بدء المحاكاة…',
   'flow.loading.ready': 'جاهز',
-  'flow.clickToPlay': 'انقر للعب',
   'flow.webglUnsupported': 'متصفحك لا يدعم WebGL 2، وهو ضروري لتشغيل DROPZONE.',
 };
