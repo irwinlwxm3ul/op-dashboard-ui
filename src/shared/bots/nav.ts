@@ -3,19 +3,23 @@
 // The map is covered by 1 m cells grouped into 64 x 64 cell tiles that are generated lazily the
 // first time something needs them. Each cell stores:
 //   * its walkable floor height ("base"): the terrain, or the top of a low box the character can
-//     stand on (foundations, floor slabs, low steps),
+//     stand on (foundations, floor slabs, stair steps),
 //   * flags: BLOCKED (something occupies the standing character's vertical span at the cell
 //     centre, deep water, too steep, map edge), NEAR (an obstacle within ~0.5 m: used to keep
 //     paths off walls and to keep smoothing honest), ON_BOX (base comes from a box), and edge
-//     flags for the east/south neighbour moves crossing a thin obstacle (walls are 0.25 m thick,
-//     much thinner than a cell, so a wall can sit between two free cell centres),
-//   * a direction mask: which of the 8 neighbour moves are allowed (both cells free, no edge
-//     obstacle, step height <= MAX_STEP_UP; diagonals only when the whole 2 x 2 block is open).
+//     flags for the east/south neighbour moves that are impossible (walls are 0.25 m thick, much
+//     thinner than a cell, so a wall can sit between two free cell centres; stairs rise ~0.7 m
+//     per metre yet are climbable step by step),
+//   * a direction mask: which of the 8 neighbour moves are allowed (both cells free, edge open;
+//     diagonals only when the whole 2 x 2 block is open).
 //
-// Cell centres are tested against obstacles inflated by only 0.15 m: with 1 m cells this
-// guarantees that every door gap >= 1.3 m wide keeps at least one free column of cells, while
-// the edge flags guarantee that no move crosses a wall. Waypoints in NEAR cells are later
-// "relaxed" away from walls (see relaxPoint) so bots walk through the middle of doorways.
+// Box geometry is rasterised on a 0.25 m sub-grid (floor height + obstruction per sample); each
+// 1 m edge is then "walked" over its sub-samples: every sample must be unobstructed and every
+// sub-step must stay within the character's step height. That makes stairs, curbs and door
+// thresholds work while thin walls and ledges always block. Cell centres are tested against
+// obstacles inflated by only 0.05 m so every doorway >= 1.1 m keeps a free column of cells;
+// waypoints in NEAR cells are later "relaxed" away from walls (see relaxPoint) so bots walk
+// through the middle of doorways.
 
 import { STEP_HEIGHT } from '../constants';
 import type { RockDef, TreeDef, Vec3, World, WorldBox } from '../types';
@@ -31,6 +35,8 @@ export const NF_EDGE_E = 2;
 export const NF_EDGE_S = 4;
 export const NF_NEAR = 8;
 export const NF_ON_BOX = 16;
+/** Set when any box touches the cell (fine edge walking is needed). Generation-time only. */
+const NF_TOUCHED = 32;
 /** Returned by non-forcing lookups for cells whose tile has not been generated yet. */
 export const NF_UNKNOWN = 128;
 
@@ -46,8 +52,10 @@ const CLEAR_LO = STEP_HEIGHT;
 const CLEAR_HI = 1.75;
 /** Box tops at most this far above the terrain may become the walkable floor of a cell. */
 const FLOOR_MAX_ABOVE_TERRAIN = 2.0;
-/** Max floor height difference between neighbouring cells when a box floor is involved. */
-export const MAX_STEP_UP = 0.5;
+/** Max floor height change between neighbouring sub-samples when a box floor is involved. */
+export const MAX_STEP_UP = STEP_HEIGHT + 0.02;
+/** Sub-samples per metre for box rasterisation. */
+const FINE = 4;
 /** Minimum terrain normal Y that is comfortably walkable (MAX_SLOPE_DEG is 50 deg, keep margin). */
 const MIN_WALK_NORMAL_Y = 0.68;
 /** Water deeper than this (m) is treated as blocked (bots avoid swimming). */
@@ -67,6 +75,13 @@ const RELAX_RADIUS = 0.55;
 const padBase = new Float32Array(PADW * PADW);
 const padTerr = new Float32Array(PADW * PADW);
 const padFlags = new Uint8Array(PADW * PADW);
+const FW = PADW * FINE;
+/** Fine floor height per sub-sample (0.25 m spacing; sample i sits at wx0 + i / FINE). */
+const fineFloor = new Float32Array(FW * FW);
+/** Fine flags: 1 = obstructed, 2 = floor is a box top. */
+const fineFlags = new Uint8Array(FW * FW);
+const FF_OBS = 1;
+const FF_BOX = 2;
 const boxBuf: WorldBox[] = [];
 const boxSorted: WorldBox[] = [];
 const treeBuf: TreeDef[] = [];
@@ -341,35 +356,54 @@ export class NavGrid {
     const wx0 = gx0 - half, wz0 = gz0 - half;
     const wx1 = wx0 + PADW, wz1 = wz0 + PADW;
 
-    // 2. Low boxes become floors (ascending by top so stacked steps/slabs build up).
+    // 2. Boxes on the 0.25 m sub-grid: floors (ascending by top so stacked steps build up), then
+    //    obstructions relative to those floors.
     boxBuf.length = 0;
     const found = w.queryBoxes(wx0 - QUERY_MARGIN, wz0 - QUERY_MARGIN, wx1 + QUERY_MARGIN, wz1 + QUERY_MARGIN, boxBuf);
     boxSorted.length = 0;
     for (let i = 0; i < found.length; i++) boxSorted.push(found[i]);
     boxSorted.sort(byTop);
-    for (let i = 0; i < boxSorted.length; i++) {
-      const b = boxSorted[i];
-      const pi0 = Math.max(0, Math.ceil(b.min.x - wx0 - 0.5));
-      const pi1 = Math.min(PADW - 1, Math.floor(b.max.x - wx0 - 0.5));
-      const pj0 = Math.max(0, Math.ceil(b.min.z - wz0 - 0.5));
-      const pj1 = Math.min(PADW - 1, Math.floor(b.max.z - wz0 - 0.5));
-      for (let pj = pj0; pj <= pj1; pj++) {
-        for (let pi = pi0; pi <= pi1; pi++) {
+    const hasBoxes = boxSorted.length > 0;
+    if (hasBoxes) {
+      for (let fj = 0; fj < FW; fj++) {
+        const row = (fj >> 2) * PADW;
+        for (let fi = 0; fi < FW; fi++) {
+          const o = fj * FW + fi;
+          fineFloor[o] = padTerr[row + (fi >> 2)];
+          fineFlags[o] = 0;
+        }
+      }
+      for (let i = 0; i < boxSorted.length; i++) this.rasterFloor(boxSorted[i], wx0, wz0);
+      for (let i = 0; i < boxSorted.length; i++) this.rasterBox(boxSorted[i], wx0, wz0);
+      // Coarse cells take the sub-sample at their centre.
+      for (let pj = 0; pj < PADW; pj++) {
+        for (let pi = 0; pi < PADW; pi++) {
           const k = pj * PADW + pi;
-          if (padFlags[k] & NF_BLOCKED) continue;
-          const top = b.max.y;
-          if (top > padBase[k] && top <= padTerr[k] + FLOOR_MAX_ABOVE_TERRAIN && b.min.y <= padBase[k] + MAX_STEP_UP) {
-            padBase[k] = top;
-            padFlags[k] |= NF_ON_BOX;
+          if (padFlags[k] & NF_BLOCKED && padTerr[k] === 0 && padBase[k] === 0) {
+            // Map edge cell: keep blocked.
+            continue;
+          }
+          const o = (pj * FINE + 2) * FW + pi * FINE + 2;
+          padBase[k] = fineFloor[o];
+          if (fineFlags[o] & FF_BOX) padFlags[k] |= NF_ON_BOX;
+          if (fineFlags[o] & FF_OBS) padFlags[k] |= NF_BLOCKED;
+        }
+      }
+      // Box-touched edges: walk the sub-samples between the two cell centres.
+      for (let pj = 0; pj < PADW; pj++) {
+        for (let pi = 0; pi < PADW; pi++) {
+          const k = pj * PADW + pi;
+          if (pi < PADW - 1 && (padFlags[k] | padFlags[k + 1]) & NF_TOUCHED) {
+            if (!walkFine((pj * FINE + 2) * FW + pi * FINE + 2, 1)) padFlags[k] |= NF_EDGE_E;
+          }
+          if (pj < PADW - 1 && (padFlags[k] | padFlags[k + PADW]) & NF_TOUCHED) {
+            if (!walkFine((pj * FINE + 2) * FW + pi * FINE + 2, FW)) padFlags[k] |= NF_EDGE_S;
           }
         }
       }
     }
 
-    // 3. Boxes: blocked cells, NEAR cells, blocked edges.
-    for (let i = 0; i < boxSorted.length; i++) this.rasterBox(boxSorted[i], wx0, wz0);
-
-    // 4. Tree trunks and rocks (vertical cylinders).
+    // 3. Tree trunks and rocks (vertical cylinders).
     treeBuf.length = 0;
     const trees = w.queryTrees(wx0 - QUERY_MARGIN, wz0 - QUERY_MARGIN, wx1 + QUERY_MARGIN, wz1 + QUERY_MARGIN, treeBuf);
     for (let i = 0; i < trees.length; i++) {
@@ -383,7 +417,7 @@ export class NavGrid {
       this.rasterCylinder(r.x, r.z, r.r, r.y - 1, r.y + r.h, wx0, wz0);
     }
 
-    // 5. Deep water and steep terrain.
+    // 4. Deep water and steep terrain.
     for (let pj = 0; pj < PADW; pj++) {
       for (let pi = 0; pi < PADW; pi++) {
         const k = pj * PADW + pi;
@@ -398,7 +432,7 @@ export class NavGrid {
       }
     }
 
-    // 6. Store inner cells + direction masks.
+    // 5. Store inner cells + direction masks.
     const flags = new Uint8Array(TILE_CELLS);
     const dirs = new Uint8Array(TILE_CELLS);
     const base = new Float32Array(TILE_CELLS);
@@ -406,7 +440,7 @@ export class NavGrid {
       for (let i = 0; i < NAV_TILE; i++) {
         const k = (j + 1) * PADW + (i + 1);
         const o = (j << TILE_SHIFT) | i;
-        flags[o] = padFlags[k];
+        flags[o] = padFlags[k] & ~NF_TOUCHED;
         base[o] = padBase[k];
         dirs[o] = padFlags[k] & NF_BLOCKED ? 0 : dirMask(k);
       }
@@ -418,55 +452,64 @@ export class NavGrid {
     this.tilesGenerated++;
   }
 
+  /** Low boxes become the floor of the sub-samples they cover. */
+  private rasterFloor(b: WorldBox, wx0: number, wz0: number): void {
+    const fi0 = Math.max(0, Math.ceil((b.min.x - wx0) * FINE));
+    const fi1 = Math.min(FW - 1, Math.floor((b.max.x - wx0) * FINE));
+    const fj0 = Math.max(0, Math.ceil((b.min.z - wz0) * FINE));
+    const fj1 = Math.min(FW - 1, Math.floor((b.max.z - wz0) * FINE));
+    const top = b.max.y, bottom = b.min.y;
+    for (let fj = fj0; fj <= fj1; fj++) {
+      const row = (fj >> 2) * PADW;
+      for (let fi = fi0; fi <= fi1; fi++) {
+        const o = fj * FW + fi;
+        const fl = fineFloor[o];
+        if (top > fl && top <= padTerr[row + (fi >> 2)] + FLOOR_MAX_ABOVE_TERRAIN && bottom <= fl + MAX_STEP_UP) {
+          fineFloor[o] = top;
+          fineFlags[o] |= FF_BOX;
+        }
+      }
+    }
+  }
+
+  /** Obstruction of sub-samples, coarse NEAR flags and the "touched" marks for edge walking. */
   private rasterBox(b: WorldBox, wx0: number, wz0: number): void {
     const I = BLOCK_INFLATE, N = NEAR_INFLATE;
     const by0 = b.min.y, by1 = b.max.y;
-    // Cells (NEAR range includes the BLOCK range).
-    const pi0 = Math.max(0, Math.ceil(b.min.x - N - wx0 - 0.5));
-    const pi1 = Math.min(PADW - 1, Math.floor(b.max.x + N - wx0 - 0.5));
-    const pj0 = Math.max(0, Math.ceil(b.min.z - N - wz0 - 0.5));
-    const pj1 = Math.min(PADW - 1, Math.floor(b.max.z + N - wz0 - 0.5));
-    const bx0 = b.min.x - I, bx1 = b.max.x + I, bz0 = b.min.z - I, bz1 = b.max.z + I;
+    // Sub-samples (inflated by I).
+    const fi0 = Math.max(0, Math.ceil((b.min.x - I - wx0) * FINE));
+    const fi1 = Math.min(FW - 1, Math.floor((b.max.x + I - wx0) * FINE));
+    const fj0 = Math.max(0, Math.ceil((b.min.z - I - wz0) * FINE));
+    const fj1 = Math.min(FW - 1, Math.floor((b.max.z + I - wz0) * FINE));
+    for (let fj = fj0; fj <= fj1; fj++) {
+      for (let fi = fi0; fi <= fi1; fi++) {
+        const o = fj * FW + fi;
+        const fl = fineFloor[o];
+        if (by0 < fl + CLEAR_HI && by1 > fl + CLEAR_LO) fineFlags[o] |= FF_OBS;
+      }
+    }
+    // Coarse cells: touched (square overlaps the inflated footprint) and NEAR.
+    const pi0 = Math.max(0, Math.floor(b.min.x - N - wx0));
+    const pi1 = Math.min(PADW - 1, Math.floor(b.max.x + N - wx0));
+    const pj0 = Math.max(0, Math.floor(b.min.z - N - wz0));
+    const pj1 = Math.min(PADW - 1, Math.floor(b.max.z + N - wz0));
+    const nx0 = b.min.x - N, nx1 = b.max.x + N, nz0 = b.min.z - N, nz1 = b.max.z + N;
     for (let pj = pj0; pj <= pj1; pj++) {
       const cz = wz0 + pj + 0.5;
       for (let pi = pi0; pi <= pi1; pi++) {
         const k = pj * PADW + pi;
-        const base = padBase[k];
-        if (by0 >= base + CLEAR_HI || by1 <= base + CLEAR_LO) continue;
-        let f = padFlags[k] | NF_NEAR;
+        let f = padFlags[k];
+        // Square [pi, pi+1] x [pj, pj+1] vs footprint inflated by I.
+        if (wx0 + pi <= b.max.x + I && wx0 + pi + 1 >= b.min.x - I && wz0 + pj <= b.max.z + I && wz0 + pj + 1 >= b.min.z - I) {
+          f |= NF_TOUCHED;
+        }
         const cx = wx0 + pi + 0.5;
-        if (cx >= bx0 && cx <= bx1 && cz >= bz0 && cz <= bz1) f |= NF_BLOCKED;
+        if (cx >= nx0 && cx <= nx1 && cz >= nz0 && cz <= nz1) {
+          // Vertical relevance against the cell's (centre) floor.
+          const fl = fineFloor[(pj * FINE + 2) * FW + pi * FINE + 2];
+          if (by0 < fl + CLEAR_HI && by1 > fl + CLEAR_LO) f |= NF_NEAR;
+        }
         padFlags[k] = f;
-      }
-    }
-    // East edges: segment (cx, cz) -> (cx + 1, cz) for rows whose centre z is inside the inflated box.
-    {
-      const j0 = Math.max(0, Math.ceil(bz0 - wz0 - 0.5));
-      const j1 = Math.min(PADW - 1, Math.floor(bz1 - wz0 - 0.5));
-      const i0 = Math.max(0, Math.ceil(bx0 - wx0 - 1.5));
-      const i1 = Math.min(PADW - 2, Math.floor(bx1 - wx0 - 0.5));
-      for (let pj = j0; pj <= j1; pj++) {
-        for (let pi = i0; pi <= i1; pi++) {
-          const a = pj * PADW + pi;
-          const ba = padBase[a], bb = padBase[a + 1];
-          const lo = (ba < bb ? ba : bb) + CLEAR_LO, hi = (ba > bb ? ba : bb) + CLEAR_HI;
-          if (by0 < hi && by1 > lo) padFlags[a] |= NF_EDGE_E;
-        }
-      }
-    }
-    // South edges: segment (cx, cz) -> (cx, cz + 1).
-    {
-      const i0 = Math.max(0, Math.ceil(bx0 - wx0 - 0.5));
-      const i1 = Math.min(PADW - 1, Math.floor(bx1 - wx0 - 0.5));
-      const j0 = Math.max(0, Math.ceil(bz0 - wz0 - 1.5));
-      const j1 = Math.min(PADW - 2, Math.floor(bz1 - wz0 - 0.5));
-      for (let pj = j0; pj <= j1; pj++) {
-        for (let pi = i0; pi <= i1; pi++) {
-          const a = pj * PADW + pi;
-          const ba = padBase[a], bb = padBase[a + PADW];
-          const lo = (ba < bb ? ba : bb) + CLEAR_LO, hi = (ba > bb ? ba : bb) + CLEAR_HI;
-          if (by0 < hi && by1 > lo) padFlags[a] |= NF_EDGE_S;
-        }
       }
     }
   }
@@ -515,16 +558,31 @@ export class NavGrid {
   }
 }
 
-/** Orthogonal move between padded cells a -> b; `edgeCell`/`edgeBit` hold the thin-obstacle flag. */
-function orthOpen(a: number, b: number, edgeCell: number, edgeBit: number): boolean {
-  const fa = padFlags[a], fb = padFlags[b];
-  if ((fa | fb) & NF_BLOCKED) return false;
-  if (padFlags[edgeCell] & edgeBit) return false;
-  if ((fa | fb) & NF_ON_BOX) {
-    const d = padBase[a] - padBase[b];
-    if (d > MAX_STEP_UP || d < -MAX_STEP_UP) return false;
+/**
+ * Walk the 1 m edge starting at sub-sample `o` in steps of `stride` (1 = east, FW = south) over
+ * FINE sub-steps: every sample must be unobstructed and each step between box floors must stay
+ * within the step height (terrain-to-terrain steps are governed by the slope test instead).
+ */
+function walkFine(o: number, stride: number): boolean {
+  let h = fineFloor[o];
+  let box = (fineFlags[o] & FF_BOX) !== 0;
+  for (let s = 1; s <= FINE; s++) {
+    const q = o + s * stride;
+    const ff = fineFlags[q];
+    if (ff & FF_OBS) return false;
+    const fl = fineFloor[q];
+    const qbox = (ff & FF_BOX) !== 0;
+    if ((box || qbox) && Math.abs(fl - h) > MAX_STEP_UP) return false;
+    h = fl;
+    box = qbox;
   }
   return true;
+}
+
+/** Orthogonal move between padded cells a -> b; `edgeCell`/`edgeBit` hold the edge flag. */
+function orthOpen(a: number, b: number, edgeCell: number, edgeBit: number): boolean {
+  if ((padFlags[a] | padFlags[b]) & NF_BLOCKED) return false;
+  return (padFlags[edgeCell] & edgeBit) === 0;
 }
 
 /** Allowed-move mask for an inner padded cell k. */

@@ -161,7 +161,7 @@ export class WeaponPanel implements Widget {
     for (const q of this.quick) q.set(self.items[q.item] ?? 0, keys[q.action], useItem === q.item);
 
     const slot = self.activeSlot;
-    const inst = slot >= 0 ? self.weapons[slot] : null;
+    const inst = slot === -1 ? null : self.weapons[slot];
     const id = inst ? inst.id : null;
     if (id !== this.lastWeapon) {
       this.lastWeapon = id;

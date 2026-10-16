@@ -286,7 +286,7 @@ class Ui implements UiApi, UiCtx {
 
   private readonly onHoverSound = (ev: PointerEvent): void => {
     if (ev.pointerType !== 'mouse') return;
-    const el = (ev.target as HTMLElement | null)?.closest('.dz-screens button, .dz-modals button, .dz-inventory button');
+    const el = (ev.target as HTMLElement | null)?.closest('.dz-screens button, .dz-modals button, .dz-inventory button') ?? null;
     if (el === this.lastHover) return;
     this.lastHover = el;
     if (!el || (el as HTMLButtonElement).disabled) return;

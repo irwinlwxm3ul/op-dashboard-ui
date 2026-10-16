@@ -83,7 +83,7 @@ export class MainMenu implements ScreenView {
     nameLabel.htmlFor = this.nameInput.id;
     this.nameInput.type = 'text';
     this.nameInput.maxLength = MAX_NAME_LEN;
-    this.nameInput.autocomplete = 'nickname';
+    this.nameInput.setAttribute('autocomplete', 'nickname');
     this.nameInput.spellcheck = false;
     placeholderTx(this.nameInput, 'menu.playerNamePlaceholder');
     this.nameInput.addEventListener('change', () => this.commitName());

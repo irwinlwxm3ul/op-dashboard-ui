@@ -41,7 +41,7 @@ export class Inventory {
   private readonly capFill: BarFill;
   private readonly gear: HTMLDivElement;
   private readonly weapons: HTMLDivElement;
-  private readonly palette: HTMLDivElement;
+  private readonly palette: HTMLElement;
   private readonly paletteGrid: HTMLDivElement;
   private groundSig = '';
   private packSig = '';

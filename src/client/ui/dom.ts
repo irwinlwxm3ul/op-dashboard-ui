@@ -4,7 +4,7 @@
 // which also tags the element with `data-i18n` so `translateDom()` re-translates it when the
 // language changes. Text with parameters is re-rendered by its owning component instead.
 
-import { t, type TKey } from '../i18n';
+import { t, type PluralKey, type TKey } from '../i18n';
 
 export type Params = Record<string, string | number>;
 
@@ -27,7 +27,7 @@ export function tx<E extends HTMLElement>(el: E, key: TKey): E {
 }
 
 /** Translated text with parameters (owner must call again on language change). */
-export function txp<E extends HTMLElement>(el: E, key: TKey, params: Params): E {
+export function txp<E extends HTMLElement>(el: E, key: TKey | PluralKey, params: Params): E {
   delete el.dataset.i18n;
   el.textContent = t(key, params);
   return el;

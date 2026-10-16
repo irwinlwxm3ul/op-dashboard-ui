@@ -188,7 +188,7 @@ function buildWheel(type: VehicleType): THREE.BufferGeometry {
   // Tread blocks so the spin reads.
   for (let i = 0; i < 8; i++) {
     const a = (i / 8) * Math.PI * 2;
-    b.box(w * 1.04, 0.05, r * 0.32, xform(0, Math.cos(a) * r * 0.97, Math.sin(a) * r * 0.97, -a), { color: 0x141414 });
+    b.box(w * 1.04, 0.05, r * 0.32, xform(0, Math.cos(a) * r * 0.97, Math.sin(a) * r * 0.97, a), { color: 0x141414 });
   }
   const rim = type === 'bike' ? METAL : 0x4a4f45;
   b.cyl(r * 0.55, r * 0.55, w * 1.06, 10, xform(0, 0, 0, 0, 0, rz), { color: rim });
