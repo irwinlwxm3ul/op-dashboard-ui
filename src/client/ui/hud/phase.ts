@@ -3,6 +3,7 @@
 
 import { fmtDuration, t } from '../../i18n';
 import { AUTO_CHUTE_HEIGHT, PLANE_ALTITUDE } from '../../../shared/constants';
+import { PLANE_AUTO_EJECT } from '../../../shared/sim/tuning';
 import { VEHICLES } from '../../../shared/vehicles';
 import type { EntityId, VehicleType } from '../../../shared/types';
 import type { FrameState } from '../../game/types';
@@ -36,7 +37,12 @@ export class PlanePanel implements Widget {
     const plane = frame.plane;
     const pos = frame.planePos;
     let remaining = -1;
-    if (plane && pos && plane.speed > 0) remaining = Math.hypot(plane.end.x - pos.x, plane.end.z - pos.z) / plane.speed;
+    if (plane && plane.speed > 0) {
+      // The sim ejects everyone at PLANE_AUTO_EJECT of the path, not at its end. Use the
+      // interpolated plane position for a smooth countdown.
+      const traveled = pos ? Math.hypot(pos.x - plane.start.x, pos.z - plane.start.z) : plane.traveled;
+      remaining = Math.max(0, plane.length * PLANE_AUTO_EJECT - traveled) / plane.speed;
+    }
     const sec = remaining < 0 ? -1 : ceilSeconds(remaining);
     if (sec !== this.lastSec) {
       this.lastSec = sec;

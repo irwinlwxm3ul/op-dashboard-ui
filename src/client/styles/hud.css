@@ -2096,3 +2096,29 @@
     height: 34px;
   }
 }
+
+/* Armed frag grenade: frag slot highlighted, counter shows frags left, throw / cancel hint. */
+.dz-quick-slot.dz-active {
+  background: rgba(242, 169, 0, 0.28);
+  box-shadow: inset 0 0 0 2px var(--dz-accent);
+}
+
+.dz-ammo-frag .dz-ammo-mag {
+  color: #c8e08a;
+}
+
+.dz-ammo-frag .dz-ammo-reserve {
+  color: var(--dz-text);
+  font-size: 16px;
+}
+
+.dz-frag-hint {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 5px;
+  margin-top: 4px;
+  font-size: 11.5px;
+  font-weight: 650;
+  color: var(--dz-text-dim);
+}

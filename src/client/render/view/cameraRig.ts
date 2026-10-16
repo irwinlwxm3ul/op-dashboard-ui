@@ -12,14 +12,14 @@
 // and lean roll. Mode switches blend from the previous pose so nothing snaps.
 
 import { EYE_HEIGHT } from '../../../shared/constants';
-import { angleDiff, clamp, damp, lerp, lerpAngle, wrapAngle } from '../../../shared/math';
+import { angleDiff, clamp, damp, dirFromAngles, lerp, lerpAngle, wrapAngle } from '../../../shared/math';
 import { raycastWorld } from '../../../shared/physics';
 import type { RayHit, Vec3, World } from '../../../shared/types';
 import { VEHICLES } from '../../../shared/vehicles';
 import type { FrameState, LocalPlayerView, PlayerView } from '../../game/types';
 import type { CameraState, CameraViewMode, FeelState } from '../contracts';
 import { WEAPONS } from '../../../shared/items';
-import { adsZoomMul, sineNoise, smoother01, verticalFovFromSetting, zoomFov } from './cameraMath';
+import { adsZoomMul, sineNoise, smooth01, smoother01, verticalFovFromSetting, zoomFov } from './cameraMath';
 
 /** TPP shoulder boom per stance: back distance, right offset, up offset (m). */
 const TPP = {
@@ -36,6 +36,12 @@ const BLEND_TIME = 0.42;
 const FPP_TOGGLE_TIME = 0.2;
 /** Scope overlay appears at this ADS amount. */
 const SCOPE_AT = 0.97;
+/** TPP crosshair convergence distance limits (m). */
+const CONVERGE_MIN = 3;
+const CONVERGE_MAX = 150;
+/** Collided boom length (m) below which the TPP camera blends into first person. */
+const CLOSE_FPP_MIN = 0.4;
+const CLOSE_FPP_MAX = 0.75;
 
 type Category = 'foot' | 'vehicle' | 'plane' | 'drop' | 'spectate' | 'death' | 'menu';
 
@@ -82,7 +88,14 @@ export class CameraRig {
   private readonly from: RigPose = { pos: { x: 0, y: 0, z: 0 }, yaw: 0, pitch: 0, roll: 0, fov: 60 };
   private readonly last: RigPose = { pos: { x: 0, y: 0, z: 0 }, yaw: 0, pitch: 0, roll: 0, fov: 60 };
   private readonly pose: RigPose = { pos: { x: 0, y: 0, z: 0 }, yaw: 0, pitch: 0, roll: 0, fov: 60 };
+  // TPP crosshair convergence distance (m) along the bullet line.
+  private convDist = 60;
   // Vehicle chase
+  private lastVehYaw = 0;
+  private lastVehPitch = 0;
+  /** One-frame look override after handing the chase cam direction back to the aim. */
+  private lookOverride = false;
+  private readonly handoff = { yaw: 0, pitch: 0 };
   private vehYaw = 0;
   private vehOffYaw = 0;
   private vehOffPitch = -0.16;
@@ -111,6 +124,7 @@ export class CameraRig {
   private readonly rayD: Vec3 = { x: 0, y: 0, z: 0 };
   private readonly desired: Vec3 = { x: 0, y: 0, z: 0 };
   private readonly pivot: Vec3 = { x: 0, y: 0, z: 0 };
+  private readonly aimDir: Vec3 = { x: 0, y: 0, z: 0 };
 
   constructor(private readonly world: World) {}
 
@@ -126,6 +140,8 @@ export class CameraRig {
     st.scope = null;
     st.ads = 0;
     st.hideLocalBody = false;
+    st.aimHandoff = null;
+    this.lookOverride = false;
     this.info.firstPerson = false;
     this.info.strafe = 0;
     this.info.speed = 0;
@@ -161,6 +177,14 @@ export class CameraRig {
     }
     const specId = specTarget ? specTarget.id : null;
     if (cat !== this.category || (cat === 'spectate' && specId !== this.specTarget)) {
+      if (this.category === 'vehicle' && self && self.life === 'alive') {
+        // Leaving the chase cam: hand its direction to the aim (one frame) so the view does not
+        // whip back to the aim the player had when getting in.
+        this.handoff.yaw = this.lastVehYaw;
+        this.handoff.pitch = clamp(this.lastVehPitch, -0.6, 0.6);
+        st.aimHandoff = this.handoff;
+        this.lookOverride = true;
+      }
       this.startBlend(this.category === 'menu' ? 0 : BLEND_TIME);
       if (cat === 'spectate') this.specInit = false;
       if (cat === 'vehicle') this.vehId = null;
@@ -300,8 +324,12 @@ export class CameraRig {
     const eye = this.pivot;
     this.smoothEye(self, dt, eye);
     eye.y += feel.landDip;
-    const lookYaw = frame.camera.yaw;
-    const lookPitch = frame.camera.pitch;
+    // The true aim (where bullets go) and the look direction (aim + free look). On the frame the
+    // chase cam hands its direction to the aim, both use the handed-off direction.
+    const aimYaw = this.lookOverride ? this.handoff.yaw : self.aimYaw;
+    const aimPitch = this.lookOverride ? this.handoff.pitch : self.aimPitch;
+    const lookYaw = this.lookOverride ? this.handoff.yaw : frame.camera.yaw;
+    const lookPitch = this.lookOverride ? this.handoff.pitch : frame.camera.pitch;
     this.info.lookYaw = lookYaw;
     this.info.lookPitch = lookPitch;
 
@@ -315,7 +343,7 @@ export class CameraRig {
     const ads = def ? clamp(self.ads, 0, 1) : 0;
     // TPP aiming switches to the first-person sight view.
     const adsCam = smoother01((ads - 0.05) / 0.6);
-    const tppW = smoother01(this.tppBlend) * (1 - adsCam);
+    const tppBlendW = smoother01(this.tppBlend) * (1 - adsCam);
 
     // Velocity in the look frame
     const rx = Math.cos(lookYaw), rz = -Math.sin(lookYaw);
@@ -325,12 +353,17 @@ export class CameraRig {
     this.info.speed = speed;
 
     let px = eye.x, py = eye.y, pz = eye.z;
+    let tppW = tppBlendW;
     if (tppW > 1e-3) {
       const stance = self.life === 'downed' ? 'prone' : self.stance;
       const o = TPP[stance];
       // Pivot for the boom: the head centre (no lateral offset) so the ray starts in free space.
       this.shoulder(eye, lookYaw, lookPitch, o.back, o.right, o.up, this.desired);
       this.boomTo(eye, this.desired, dt, this.desired);
+      // Backed against a wall the boom collapses into the head: blend into first person instead
+      // (the body hides and the viewmodel shows once past half way).
+      const camDist = Math.hypot(this.desired.x - eye.x, this.desired.y - eye.y, this.desired.z - eye.z);
+      tppW *= smooth01((camDist - CLOSE_FPP_MIN) / (CLOSE_FPP_MAX - CLOSE_FPP_MIN));
       px = lerp(eye.x, this.desired.x, tppW);
       py = lerp(eye.y, this.desired.y, tppW);
       pz = lerp(eye.z, this.desired.z, tppW);
@@ -365,9 +398,28 @@ export class CameraRig {
     this.sprintFov += (sprintTarget - this.sprintFov) * damp(5, dt);
     v += this.sprintFov * 3 * (1 - ads);
 
+    // TPP crosshair convergence: the shoulder camera is offset from the eye the bullets leave
+    // from, so aim it at the point P where the bullet line meets the world (screen centre = hit).
+    let yaw = lookYaw, pitch = lookPitch;
+    if (tppW > 1e-3) {
+      dirFromAngles(aimYaw, aimPitch, this.aimDir);
+      const h = raycastWorld(this.world, self.eye, this.aimDir, CONVERGE_MAX, this.hit);
+      const target = h ? clamp(h.dist, CONVERGE_MIN, CONVERGE_MAX) : CONVERGE_MAX;
+      // Snap closer quickly (walls), ease out slowly (no jitter grazing edges).
+      this.convDist += (target - this.convDist) * damp(target < this.convDist ? 16 : 5, dt);
+      const tx = self.eye.x + this.aimDir.x * this.convDist;
+      const ty = self.eye.y + this.aimDir.y * this.convDist;
+      const tz = self.eye.z + this.aimDir.z * this.convDist;
+      const convYaw = Math.atan2(-(tx - px), -(tz - pz));
+      const convPitch = Math.atan2(ty - py, Math.hypot(tx - px, tz - pz));
+      // Keep any free-look offset on top of the converged direction.
+      yaw = lookYaw + angleDiff(aimYaw, convYaw) * tppW;
+      pitch = lookPitch + (convPitch - aimPitch) * tppW;
+    }
+
     p.pos.x = px; p.pos.y = py; p.pos.z = pz;
-    p.yaw = lookYaw;
-    p.pitch = lookPitch;
+    p.yaw = yaw;
+    p.pitch = pitch;
     p.roll = roll;
     p.fov = v;
 
@@ -394,6 +446,8 @@ export class CameraRig {
       this.shoulder(this.pivot, lookYaw, lookPitch, 4, 0, 0.6, this.desired);
       this.boomTo(this.pivot, this.desired, dt, p.pos);
       p.yaw = lookYaw; p.pitch = lookPitch; p.roll = 0; p.fov = baseV;
+      this.lastVehYaw = lookYaw;
+      this.lastVehPitch = lookPitch;
       return 'vehicle';
     }
     // Mouse deltas accumulate a look-around offset relative to the vehicle heading.
@@ -426,6 +480,8 @@ export class CameraRig {
     this.vehYaw = lerpAngle(this.vehYaw, v.yaw, damp(fpp ? 30 : 7, dt));
     const camYaw = wrapAngle(this.vehYaw + this.vehOffYaw);
     const camPitch = this.vehOffPitch;
+    this.lastVehYaw = camYaw;
+    this.lastVehPitch = camPitch;
     this.info.lookYaw = camYaw;
     this.info.lookPitch = camPitch;
     const def = VEHICLES[v.type];

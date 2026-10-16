@@ -58,4 +58,7 @@ export const uiStrings = {
   'ui.hud.teamsLabel': 'Teams',
   'ui.hud.eliminatedHint': 'Press {key} to open the menu and leave the match.',
   'ui.feed.died': '{victim} died',
+  'ui.hud.useCancelHint': 'Sprint, jump or fire to cancel',
+  'ui.hud.fragArmed': '{throw} throw · {cancel} cancel',
+  'ui.key.mouseLeftShort': 'LMB',
 } as const;

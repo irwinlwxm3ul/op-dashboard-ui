@@ -75,6 +75,15 @@ export class Slider implements Control {
     this.paint(this.value);
   }
 
+  /** Change the lower bound (clamping the current value up to it). Returns the resulting value. */
+  setMin(min: number): number {
+    this.opts.min = min;
+    this.input.min = String(min);
+    if (Number(this.input.value) < min) this.input.value = String(min);
+    this.paint(this.value);
+    return this.value;
+  }
+
   private paint(v: number): void {
     const { min, max } = this.opts;
     const f = max > min ? (v - min) / (max - min) : 0;

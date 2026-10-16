@@ -79,6 +79,8 @@ export interface BotState {
   avoidX: number;
   avoidZ: number;
   avoidUntil: number;
+  /** Rotates through roof edges when getting down from a stranded spot fails. */
+  descendTry: number;
 
   // ---- aim ----
   aimYaw: number;
@@ -238,6 +240,7 @@ export function createBotState(p: PlayerState, seed: number, thinkSlot: number, 
     avoidX: 0,
     avoidZ: 0,
     avoidUntil: -1e9,
+    descendTry: 0,
     aimYaw: p.yaw,
     aimPitch: p.pitch,
     errYaw: 0,

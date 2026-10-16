@@ -143,7 +143,7 @@ export class ActionProgress implements Widget {
     this.time = new TextSlot(h('span', 'dz-action-time', top));
     const bar = h('div', 'dz-action-bar', this.el);
     this.fill = new BarFill(h('div', 'dz-action-fill', bar));
-    const hint = tx(h('div', 'dz-action-hint', this.el), 'hud.cancelHint');
+    const hint = tx(h('div', 'dz-action-hint', this.el), 'ui.hud.useCancelHint');
     this.hint = new Vis(hint);
   }
 

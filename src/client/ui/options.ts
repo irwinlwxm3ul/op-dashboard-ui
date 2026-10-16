@@ -51,6 +51,11 @@ export function zoneSpeedKey(v: number): TKey {
   return ZONE_SPEED_OPTIONS.find((o) => o.value === n)?.label ?? 'sp.zoneNormal';
 }
 
+/** Smallest player count that still gives at least two teams (no enemy-less matches). */
+export function minPlayersFor(teamSize: TeamSize): number {
+  return Math.max(2, teamSize + 1);
+}
+
 export function isTeamSize(v: unknown): v is TeamSize {
   return v === 1 || v === 2 || v === 4;
 }

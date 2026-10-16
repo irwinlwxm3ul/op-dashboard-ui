@@ -53,7 +53,9 @@ export class Crosshair implements Widget {
 
   update(frame: FrameState, cam: CameraState): void {
     const self = frame.self;
-    let show = !!self && self.life === 'alive' && !cam.scope && !NO_CROSSHAIR_MODES.has(cam.mode) && self.ads < ADS_HIDE;
+    // Hidden while free-looking: the camera no longer points where shots go.
+    let show = !!self && self.life === 'alive' && !cam.scope && !NO_CROSSHAIR_MODES.has(cam.mode) && self.ads < ADS_HIDE
+      && !frame.camera.freeLook;
     if (show && self) {
       if (self.mode === 'plane' || self.mode === 'freefall' || self.mode === 'parachute') show = false;
       else if (self.vehicleId !== null) {

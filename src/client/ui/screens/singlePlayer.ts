@@ -8,7 +8,7 @@ import { fieldRow, Segmented, Select, Slider } from '../controls';
 import { button, h, tx, txp } from '../dom';
 import { ICONS } from '../icons';
 import {
-  DIFFICULTY_OPTIONS, difficultyDescKey, difficultyKey, isDifficulty, isTeamSize, loadJson, nearestZoneSpeed, saveJson,
+  DIFFICULTY_OPTIONS, difficultyDescKey, difficultyKey, isDifficulty, isTeamSize, loadJson, minPlayersFor, nearestZoneSpeed, saveJson,
   TEAM_SIZE_OPTIONS, teamSizeKey, ZONE_SPEED_OPTIONS,
 } from '../options';
 import { menuBackdrop } from './mainMenu';
@@ -21,12 +21,13 @@ const DEFAULTS: SinglePlayerOptions = { maxPlayers: 32, teamSize: 4, botDifficul
 export function loadSpOptions(): SinglePlayerOptions {
   const raw = loadJson(STORE_KEY) as Partial<SinglePlayerOptions> | null;
   if (!raw || typeof raw !== 'object') return { ...DEFAULTS };
+  const teamSize = isTeamSize(raw.teamSize) ? raw.teamSize : DEFAULTS.teamSize;
   const mp = typeof raw.maxPlayers === 'number' && Number.isFinite(raw.maxPlayers)
-    ? Math.round(Math.min(MAX_PLAYERS, Math.max(MIN_PLAYERS, raw.maxPlayers)))
+    ? Math.round(Math.min(MAX_PLAYERS, Math.max(minPlayersFor(teamSize), raw.maxPlayers)))
     : DEFAULTS.maxPlayers;
   return {
     maxPlayers: mp,
-    teamSize: isTeamSize(raw.teamSize) ? raw.teamSize : DEFAULTS.teamSize,
+    teamSize,
     botDifficulty: isDifficulty(raw.botDifficulty) ? raw.botDifficulty : DEFAULTS.botDifficulty,
     zoneSpeed: typeof raw.zoneSpeed === 'number' ? nearestZoneSpeed(raw.zoneSpeed) : DEFAULTS.zoneSpeed,
   };
@@ -65,8 +66,11 @@ export class SinglePlayerScreen implements ScreenView {
 
     this.teamSize = new Select(TEAM_SIZE_OPTIONS, this.opts.teamSize, (v) => {
       this.opts.teamSize = v;
+      // At least two teams: the player count can never drop to one team's size.
+      this.opts.maxPlayers = this.players.setMin(minPlayersFor(v));
       this.refreshSummary();
     });
+    this.players.setMin(minPlayersFor(this.opts.teamSize));
     this.teamSize.el.dataset.testid = 'sp-teamsize';
     fieldRow(panel, 'sp.teamSize', this.teamSize, 'sp.teamSizeHint');
 
@@ -96,6 +100,7 @@ export class SinglePlayerScreen implements ScreenView {
 
   onShow(): void {
     this.opts = loadSpOptions();
+    this.players.setMin(minPlayersFor(this.opts.teamSize));
     this.players.value = this.opts.maxPlayers;
     this.teamSize.value = this.opts.teamSize;
     this.difficulty.value = this.opts.botDifficulty;

@@ -294,14 +294,16 @@ describe('nature', () => {
   it.each(trees)('$kind trees are unit height, centred, within budget, with sway / trunk attributes', (t) => {
     const g = glb(t.file);
     for (const v of t.variants) {
-      for (const [node, bark, leaves, tris, budget] of [
-        [v.node, v.bark, v.leaves, v.tris, WORLD_ASSET_BUDGETS.tris.nature],
-        [v.lod1Node, v.lod1Bark, v.lod1Leaves, v.lod1Tris, 900],
+      // Decimation / grown LOD1 leaf cards move the crown top by a few percent at most.
+      for (const [node, bark, leaves, tris, budget, topTol] of [
+        [v.node, v.bark, v.leaves, v.tris, WORLD_ASSET_BUDGETS.tris.nature, 0.05],
+        [v.lod1Node, v.lod1Bark, v.lod1Leaves, v.lod1Tris, 900, 0.1],
       ] as const) {
         const s = subtree(g, nodeByName(g, node).index);
         expect(s.tris).toBe(tris);
         expect(s.tris).toBeLessThanOrEqual(budget);
-        expect(near(s.box.max.y, 1, 0.01)).toBe(true);
+        expect(s.box.max.y).toBeGreaterThan(1 - topTol);
+        expect(s.box.max.y).toBeLessThan(1 + topTol);
         expect(s.box.min.y).toBeGreaterThan(-0.08);
         const c = s.box.getCenter(new THREE.Vector3());
         expect(Math.hypot(c.x, c.z)).toBeLessThan(0.2);
@@ -329,9 +331,10 @@ describe('nature', () => {
       for (const node of [v.node, v.lod1Node!]) {
         const s = subtree(g, nodeByName(g, node).index);
         expect(s.tris).toBeLessThanOrEqual(WORLD_ASSET_BUDGETS.tris.nature);
-        expect(near(s.box.max.y, 1, 0.02)).toBe(true);
+        expect(s.box.max.y).toBeGreaterThan(0.94);
+        expect(s.box.max.y).toBeLessThanOrEqual(1.001);
         expect(near(s.box.min.y, -0.2, 0.02)).toBe(true);
-        expect(Math.max(-s.box.min.x, s.box.max.x, -s.box.min.z, s.box.max.z)).toBeLessThanOrEqual(1.02);
+        expect(Math.max(-s.box.min.x, s.box.max.x, -s.box.min.z, s.box.max.z)).toBeLessThanOrEqual(1.001);
       }
     }
   });

@@ -35,8 +35,9 @@ export const SOURCES = {
     repo: 'https://github.com/EliteGamer007/6dof-drone-sim',
     commit: '3b97077101bedb1326cf6483e04dc51ccf130fa3',
     dir: 'world-drone/repo',
-    sparse: ['barrel_03', 'Barrel_01', 'metal_jerrycan', 'concrete_road_barrier', 'wooden_crate_01', 'modular_chainlink_fence', 'boulder_01']
-      .map((m) => `/assets/polyhaven/models/${m}/*`),
+    sparse: ['barrel_03', 'Barrel_01', 'metal_jerrycan', 'concrete_road_barrier', 'modular_chainlink_fence']
+      .map((m) => `/assets/polyhaven/models/${m}/*`)
+      .concat('/assets/CREDITS.md'),
   },
   /** Poly Haven models (CC0), mirror #2 (the CREDITS.md there lists them as Poly Haven CC0). */
   polyhavenB: {

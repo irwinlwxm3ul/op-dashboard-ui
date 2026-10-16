@@ -7,7 +7,7 @@ import type { LobbySettings } from '../../../shared/protocol';
 import { sanitizeText } from '../../../shared/validate';
 import { fieldRow, Segmented, Select, Slider, Toggle, type Control } from '../controls';
 import { h, placeholderTx } from '../dom';
-import { DIFFICULTY_OPTIONS, nearestZoneSpeed, TEAM_SIZE_OPTIONS, ZONE_SPEED_OPTIONS } from '../options';
+import { DIFFICULTY_OPTIONS, minPlayersFor, nearestZoneSpeed, TEAM_SIZE_OPTIONS, ZONE_SPEED_OPTIONS } from '../options';
 
 export class LobbyForm {
   readonly el: HTMLDivElement;
@@ -42,7 +42,11 @@ export class LobbyForm {
     });
     fieldRow(this.el, 'lobby.maxPlayers', this.maxPlayers);
 
-    this.teamSize = new Select(TEAM_SIZE_OPTIONS, initial.teamSize, changed);
+    this.teamSize = new Select(TEAM_SIZE_OPTIONS, initial.teamSize, (v) => {
+      // At least two teams: never allow a lobby that is a single team.
+      this.maxPlayers.setMin(minPlayersFor(v));
+      changed();
+    });
     fieldRow(this.el, 'lobby.teamSize', this.teamSize);
 
     this.botFill = new Toggle(initial.botFill, changed);
@@ -65,6 +69,7 @@ export class LobbyForm {
 
   set(s: LobbySettings): void {
     this.name.value = s.name;
+    this.maxPlayers.setMin(minPlayersFor(s.teamSize));
     this.maxPlayers.value = s.maxPlayers;
     this.teamSize.value = s.teamSize;
     this.botFill.value = s.botFill;

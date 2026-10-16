@@ -142,8 +142,8 @@ const TOWN_DETOUR_MARGIN = 15;
 /** Terrain sample spacing (m), water depth and grade (rise / run) a driver avoids. */
 const TERRAIN_STEP = 2.5;
 const MAX_WATER_DEPTH = 0.35;
-const MAX_UPHILL = 0.6;
-const MAX_DOWNHILL = 0.85;
+const MAX_UPHILL = 0.8;
+const MAX_DOWNHILL = 1.0;
 /** Downed teammates within this range pull drivers and passengers out (matches the revive search). */
 const DOWNED_EXIT_DIST = 120;
 /** A bot driver keeps driving toward a downed teammate until it is this close (m). */
@@ -642,7 +642,6 @@ export function vehicleTick(sys: BotSystem, b: BotState, p: PlayerState, think: 
     // Never crawl below walking pace when the way is open (obstacle contacts that slow are harmless).
     if (avail > 0) vt = Math.max(vt, MIN_CREEP);
     b.driveTargetSpeed = vt;
-    const dbg = (globalThis as any).__vdbg; if (dbg) dbg({ t, x: v.pos.x, z: v.pos.z, sp, desired, chosen, chosenF, need, L, w, aheadF, turn, vt, obsN, dist, stuck: b.driveStuckCount, rev: b.reverseUntil > t ? 1 : 0, yaw: v.yaw });
 
     // Steady progress forgives earlier stuck episodes.
     if (sp > 6 && t >= b.reverseUntil) {

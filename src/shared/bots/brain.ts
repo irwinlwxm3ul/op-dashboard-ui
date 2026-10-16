@@ -276,25 +276,57 @@ function pathEnded(b: BotState): boolean {
   return b.path.status !== PATH_QUEUED && b.path.status !== PATH_RUNNING && b.pathIdx >= b.path.count - 1;
 }
 
-/** Walk off the roof over the nearest footprint edge (the drop is survivable from one storey). */
+/**
+ * Walk off the roof over a footprint edge (the drop is survivable from one storey): the nearest
+ * edge first; after a give-up (parapet too high, obstacle) the next one, and so on in turn.
+ */
 function descendThink(sys: BotSystem, b: BotState, p: PlayerState): void {
   const w = sys.world;
-  let ex = p.pos.x + Math.cos(p.id) * 4, ez = p.pos.z + Math.sin(p.id) * 4;
-  let best = Infinity;
+  let n = 0;
+  let found = -1, bestM = Infinity;
   for (let i = 0; i < w.buildings.length; i++) {
     const bd = w.buildings[i];
     if (p.pos.x < bd.min.x - 0.5 || p.pos.x > bd.max.x + 0.5 || p.pos.z < bd.min.z - 0.5 || p.pos.z > bd.max.z + 0.5) continue;
-    const dW = p.pos.x - bd.min.x, dE = bd.max.x - p.pos.x, dN = p.pos.z - bd.min.z, dS = bd.max.z - p.pos.z;
-    const m = Math.min(dW, dE, dN, dS);
-    if (m >= best) continue;
-    best = m;
-    if (m === dW) { ex = bd.min.x - 2.5; ez = p.pos.z; }
-    else if (m === dE) { ex = bd.max.x + 2.5; ez = p.pos.z; }
-    else if (m === dN) { ex = p.pos.x; ez = bd.min.z - 2.5; }
-    else { ex = p.pos.x; ez = bd.max.z + 2.5; }
+    const m = Math.min(p.pos.x - bd.min.x, bd.max.x - p.pos.x, p.pos.z - bd.min.z, bd.max.z - p.pos.z);
+    if (m < bestM) {
+      bestM = m;
+      found = i;
+    }
   }
+  if (found >= 0) {
+    const bd = w.buildings[found];
+    const x = p.pos.x, z = p.pos.z;
+    n = 4;
+    edgeD[0] = x - bd.min.x; edgeX[0] = bd.min.x - 2.5; edgeZ[0] = z;
+    edgeD[1] = bd.max.x - x; edgeX[1] = bd.max.x + 2.5; edgeZ[1] = z;
+    edgeD[2] = z - bd.min.z; edgeX[2] = x; edgeZ[2] = bd.min.z - 2.5;
+    edgeD[3] = bd.max.z - z; edgeX[3] = x; edgeZ[3] = bd.max.z + 2.5;
+    // Nearest first (insertion sort of four).
+    for (let i = 1; i < 4; i++) {
+      for (let j = i; j > 0 && edgeD[j] < edgeD[j - 1]; j--) {
+        const d = edgeD[j]; edgeD[j] = edgeD[j - 1]; edgeD[j - 1] = d;
+        const ex = edgeX[j]; edgeX[j] = edgeX[j - 1]; edgeX[j - 1] = ex;
+        const ez = edgeZ[j]; edgeZ[j] = edgeZ[j - 1]; edgeZ[j - 1] = ez;
+      }
+    }
+  } else {
+    // Not over a building (container, rock ledge): fan out around the bot.
+    n = 4;
+    for (let i = 0; i < 4; i++) {
+      const a = p.id + (i * Math.PI) / 2;
+      edgeX[i] = p.pos.x + Math.cos(a) * 4;
+      edgeZ[i] = p.pos.z + Math.sin(a) * 4;
+    }
+  }
+  let k = b.descendTry % n;
+  for (let tries = 0; tries < n && isAvoided(sys, b, edgeX[k], edgeZ[k]); tries++) k = (k + 1) % n;
+  const ex = edgeX[k], ez = edgeZ[k];
   if (!b.hasDest || hyp(b.destX - ex, b.destZ - ez) > 1) setDirectDest(sys, b, ex, ez, 0.8);
 }
+
+const edgeD = [0, 0, 0, 0];
+const edgeX = [0, 0, 0, 0];
+const edgeZ = [0, 0, 0, 0];
 
 function hasAnyRounds(p: PlayerState): boolean {
   return slotRounds(p, 0) > 0 || slotRounds(p, 1) > 0 || slotRounds(p, 2) > 0;
@@ -314,6 +346,9 @@ function onGaveUp(sys: BotSystem, b: BotState): void {
     b.vehicleId = -1;
   } else if (b.goal === 'idle') {
     b.wanderUntil = t;
+  } else if (b.goal === 'descend') {
+    // Try the next roof edge.
+    b.descendTry++;
   }
 }
 

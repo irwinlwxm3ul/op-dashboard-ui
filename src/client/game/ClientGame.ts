@@ -420,6 +420,11 @@ export class ClientGame implements ClientGameApi {
     this.input.queueAction(a);
   }
 
+  /** Set the base aim (camera aim handoff, e.g. after leaving a vehicle). Pitch is clamped. */
+  setAim(yaw: number, pitch: number): void {
+    this.input.setAim(yaw, pitch);
+  }
+
   performInteraction(): void {
     const i = this.interaction;
     if (!i) return;
@@ -1342,6 +1347,8 @@ export class ClientGame implements ClientGameApi {
       ? Math.max(0, sv.pos.y - this.world.groundAt(sv.pos.x, sv.pos.z, sv.pos.y)) : 0;
     sv.jumpY = p.jumpY;
     sv.throwCooldown = p.throwCooldown;
+    sv.grenadeArmed = this.input.isGrenadeArmed;
+    sv.holdBreath = this.input.holdBreath;
     sv.stats = p.stats;
     sv.placement = p.placement;
     sv.killerId = p.killerId;

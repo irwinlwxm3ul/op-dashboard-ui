@@ -3,7 +3,7 @@
 // actions) and edge events for the UI. The raw handlers (keyDown, mouseMove, ...) are public so
 // the controller can be driven without a DOM (tests, bots-in-browser, replays).
 
-import { clamp, DEG, damp, lerp } from '../../shared/math';
+import { angleDiff, clamp, DEG, damp, lerp, smoothstep } from '../../shared/math';
 import type { ClientAction, ConsumableId, LifeState, MovementMode, PlayerInput, Stance, WeaponInstance } from '../../shared/types';
 import { BTN, STANCE_CODE } from '../../shared/types';
 import type { CameraMode, InputApi, InputUiEvent, KeyAction, Settings, SettingsStore } from './types';
@@ -18,6 +18,22 @@ const FREE_LOOK_RETURN_RATE = 14;
 const MAX_MOUSE_DELTA = 600;
 /** Max actions per input (validate.ts limit). */
 const MAX_ACTIONS_PER_INPUT = 4;
+/** Breathing sway: amplitude (rad) at 1x zoom standing, scaled by 1/adsZoom; figure-8 period (s). */
+const SWAY_BASE = 0.00035;
+const SWAY_PERIOD = 3.6;
+const SWAY_PITCH_RATIO = 0.6;
+const SWAY_CROUCH_MUL = 0.6;
+const SWAY_PRONE_MUL = 0.3;
+/** ADS blend at which sway starts to fade in (it is full at 1). */
+const SWAY_ADS_START = 0.7;
+/** Holding breath: sway multiplier, budget (s), regeneration (s per s), exhausted multiplier / time. */
+const SWAY_HOLD_MUL = 0.1;
+const BREATH_HOLD_MAX = 4;
+const BREATH_REGEN = 0.8;
+const SWAY_EXHAUSTED_MUL = 1.8;
+const BREATH_EXHAUSTED_TIME = 2;
+/** How fast the sway strength follows breath changes (1/s). */
+const SWAY_FACTOR_RATE = 6;
 /** Escape keydown arriving this soon after losing pointer lock is the same press (do not toggle twice). */
 const LOCK_LOSS_ESC_WINDOW_MS = 400;
 
@@ -89,6 +105,15 @@ export class InputController implements InputApi {
   private reloadLatch = false;
   private interactLatch = false;
   private freeLookHeld = false;
+
+  // Scoped breathing sway (applied offsets, phase, breath budget).
+  private swayYaw = 0;
+  private swayPitch = 0;
+  private swayTime = 0;
+  private swayFactor = 1;
+  private breathLeft = BREATH_HOLD_MAX;
+  private exhausted = 0;
+  private steadying = false;
 
   /** Desired stance (toggle / hold logic applied). */
   private wantStance: Stance = 'stand';
@@ -321,7 +346,7 @@ export class InputController implements InputApi {
           return;
         }
         if (this.grenadeArmed) {
-          this.throwGrenade();
+          if (!this.freeLookHeld) this.throwGrenade();
           return;
         }
         this.fireHeld = true;
@@ -391,10 +416,16 @@ export class InputController implements InputApi {
     if (this.grenadeArmed && ctx.frags <= 0) this.cancelGrenade();
   }
 
-  /** Set the aim (spawn heading, spectator handoff). */
+  /**
+   * Set the base aim (spawn heading, camera handoff after leaving a vehicle). The yaw is unwrapped
+   * next to the current one so cameras following it never see a 2π jump; free look is cleared.
+   */
   setAim(yaw: number, pitch: number): void {
-    this.yaw = yaw;
+    if (!Number.isFinite(yaw) || !Number.isFinite(pitch)) return;
+    this.yaw += angleDiff(this.yaw, yaw);
     this.pitch = clamp(pitch, -PITCH_LIMIT, PITCH_LIMIT);
+    this.freeYaw = 0;
+    this.freePitch = 0;
   }
 
   /** Free look is active while Alt is held or the camera is still easing back. */
@@ -426,12 +457,18 @@ export class InputController implements InputApi {
     return this.grenadeArmed;
   }
 
+  /** Holding breath right now (sprint key while scoped, breath left): the scope is steadied. */
+  get holdBreath(): boolean {
+    return this.steadying;
+  }
+
   queueAction(a: ClientAction): void {
     if (this.actions.length < 16) this.actions.push(a);
   }
 
-  /** Per frame: free look easing. */
+  /** Per frame: free look easing and scoped breathing sway. */
   update(dt: number): void {
+    if (!(dt > 0)) return;
     if (!this.freeLookHeld && (this.freeYaw !== 0 || this.freePitch !== 0)) {
       const k = damp(FREE_LOOK_RETURN_RATE, dt);
       this.freeYaw -= this.freeYaw * k;
@@ -439,6 +476,64 @@ export class InputController implements InputApi {
       if (Math.abs(this.freeYaw) < 1e-4) this.freeYaw = 0;
       if (Math.abs(this.freePitch) < 1e-4) this.freePitch = 0;
     }
+    this.updateSway(dt);
+  }
+
+  /** Current breathing sway offsets (radians) included in the aim (diagnostics / camera effects). */
+  get swayOffset(): { yaw: number; pitch: number } {
+    return { yaw: this.swayYaw, pitch: this.swayPitch };
+  }
+
+  /** Remaining breath (0..1) for holding the scope steady. */
+  get breath(): number {
+    return this.breathLeft / BREATH_HOLD_MAX;
+  }
+
+  /**
+   * Scoped breathing sway: a slow figure-8 added to the base aim (so camera, crosshair and bullets
+   * agree), applied as per-frame deltas so mouse input stays additive. Holding breath damps it to
+   * ~10 % for up to BREATH_HOLD_MAX seconds; running out of breath makes it stronger for a moment.
+   */
+  private updateSway(dt: number): void {
+    const c = this.ctx;
+    // Breath budget.
+    const holding = this.wantsHoldBreath();
+    if (this.exhausted > 0) {
+      this.exhausted = Math.max(0, this.exhausted - dt);
+      this.breathLeft = Math.min(BREATH_HOLD_MAX, this.breathLeft + BREATH_REGEN * dt);
+    } else if (holding && this.breathLeft > 0) {
+      this.breathLeft = Math.max(0, this.breathLeft - dt);
+      if (this.breathLeft <= 0) this.exhausted = BREATH_EXHAUSTED_TIME;
+    } else {
+      this.breathLeft = Math.min(BREATH_HOLD_MAX, this.breathLeft + BREATH_REGEN * dt);
+    }
+    this.steadying = holding && this.exhausted <= 0 && this.breathLeft > 0;
+    const factorTarget = this.exhausted > 0 ? SWAY_EXHAUSTED_MUL : this.steadying ? SWAY_HOLD_MUL : 1;
+    this.swayFactor += (factorTarget - this.swayFactor) * damp(SWAY_FACTOR_RATE, dt);
+
+    // Engagement: only through a magnified scope at (nearly) full ADS, alive and on foot.
+    const mounted = c.seat >= 0 || (c.mode !== 'ground' && c.mode !== 'swim');
+    const engaged = this.enabledFlag && c.scoped && !mounted && c.life === 'alive'
+      ? smoothstep(SWAY_ADS_START, 1, c.ads) : 0;
+    this.swayTime += dt;
+    const zoom = c.adsZoom > 0.01 ? c.adsZoom : 1;
+    const stanceMul = c.stance === 'prone' ? SWAY_PRONE_MUL : c.stance === 'crouch' ? SWAY_CROUCH_MUL : 1;
+    const amp = (SWAY_BASE / zoom) * stanceMul * this.swayFactor * engaged;
+    const ph = (this.swayTime / SWAY_PERIOD) * Math.PI * 2;
+    const ty = amp * Math.sin(ph);
+    const tp = amp * SWAY_PITCH_RATIO * Math.sin(2 * ph);
+    // Apply the change of the offset only; the mouse keeps full control of the rest.
+    this.yaw += ty - this.swayYaw;
+    const before = this.pitch;
+    this.pitch = clamp(this.pitch + (tp - this.swayPitch), -PITCH_LIMIT, PITCH_LIMIT);
+    this.swayYaw = ty;
+    this.swayPitch += this.pitch - before;
+  }
+
+  private wantsHoldBreath(): boolean {
+    const c = this.ctx;
+    const mounted = c.seat >= 0 || (c.mode !== 'ground' && c.mode !== 'swim');
+    return this.enabledFlag && !mounted && c.scoped && this.wantsAds && this.held.has('sprint');
   }
 
   /** Build the input for the next fixed tick and clear per-tick latches. */
@@ -459,7 +554,8 @@ export class InputController implements InputApi {
     let buttons = 0;
     if (on) {
       const ads = this.wantsAds;
-      if ((this.fireHeld || this.fireLatch) && !this.grenadeArmed) buttons |= BTN.FIRE;
+      // No shooting while free-looking (Alt): the crosshair is not where the bullets would go.
+      if ((this.fireHeld || this.fireLatch) && !this.grenadeArmed && !this.freeLookHeld) buttons |= BTN.FIRE;
       if (driving) {
         if (h.has('jump')) buttons |= BTN.HANDBRAKE;
         if (h.has('sprint')) buttons |= BTN.BOOST;

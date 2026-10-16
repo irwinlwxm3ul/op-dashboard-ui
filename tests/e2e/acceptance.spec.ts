@@ -420,8 +420,10 @@ test('AT5 two windows: lobby -> match -> each window sees the other human -> lea
       await expect(w.page.locator('[data-screen="lobby"]')).toBeVisible({ timeout: 30_000 });
     }
     await expect(A.page.locator(tid('lobby-start'))).toBeVisible();
-    await expect(A.page.getByText('Ben').first()).toBeVisible();
-    await expect(B.page.getByText('Ann').first()).toBeVisible();
+    // Both players are listed in the room's team slots in both windows.
+    for (const w of [A, B]) {
+      for (const name of ['Ann', 'Ben']) await expect(w.page.locator('[data-testid^="team-"]').filter({ hasText: name })).toBeVisible();
+    }
     expect([...A.errors, ...B.errors]).toEqual([]);
   } finally {
     await A.close();

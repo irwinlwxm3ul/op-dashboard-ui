@@ -18,6 +18,7 @@ const FIRE_MODE_KEYS: Record<string, TKey> = {
 };
 
 const SLOT_KEYS: readonly KeyAction[] = ['slot1', 'slot2', 'slot3'];
+const MARK = '\u0001';
 
 const QUICK: readonly { item: ConsumableId; action: KeyAction }[] = [
   { item: 'bandage', action: 'useBandage' },
@@ -74,6 +75,7 @@ class QuickSlot {
   private readonly count: NumSlot;
   private readonly none: ClassFlag;
   private readonly using: ClassFlag;
+  private readonly active: ClassFlag;
 
   constructor(parent: HTMLElement, readonly item: ConsumableId | 'frag', readonly action: KeyAction) {
     this.el = h('div', `dz-quick-slot dz-quick-${item}`, parent);
@@ -83,13 +85,15 @@ class QuickSlot {
     this.key = new TextSlot(h('span', 'dz-key dz-key-xs', this.el));
     this.none = new ClassFlag(this.el, 'dz-is-empty');
     this.using = new ClassFlag(this.el, 'dz-using');
+    this.active = new ClassFlag(this.el, 'dz-active');
   }
 
-  set(count: number, keyCode: string, using: boolean): void {
+  set(count: number, keyCode: string, using: boolean, active = false): void {
     this.count.set(count);
     this.key.set(keyCapLabel(keyCode));
     this.none.set(count <= 0);
     this.using.set(using);
+    this.active.set(active);
   }
 
   invalidate(): void {
@@ -115,9 +119,13 @@ export class WeaponPanel implements Widget {
   private readonly slots: WeaponSlotView[] = [];
   private readonly frag: QuickSlot;
   private readonly quick: QuickSlot[] = [];
-  private lastWeapon: WeaponId | null | undefined = undefined;
+  private lastWeapon: WeaponId | 'frag' | null | undefined = undefined;
   private lastReserve = Number.NaN;
   private lastStatus = '';
+  /** "LMB throw · 4 cancel" hint while a frag is armed. */
+  private readonly fragHint: HTMLElement;
+  private readonly fragHintVis: Vis;
+  private fragHintDirty = true;
 
   constructor() {
     this.el = h('div', 'dz-weapons');
@@ -136,6 +144,8 @@ export class WeaponPanel implements Widget {
     const meta = h('div', 'dz-ammo-meta', this.ammo);
     this.fireMode = new TextSlot(h('span', 'dz-firemode', meta));
     this.status = new TextSlot(h('span', 'dz-ammo-status', meta));
+    this.fragHint = h('div', 'dz-frag-hint', this.ammo);
+    this.fragHintVis = new Vis(this.fragHint);
     const reload = h('div', 'dz-reload', this.ammo);
     this.reloadVis = new Vis(reload);
     this.reloadFill = new BarFill(h('div', 'dz-reload-fill', reload));
@@ -156,21 +166,35 @@ export class WeaponPanel implements Widget {
     const keys = env.keys;
 
     for (let i = 0; i < 3; i++) this.slots[i].set(self.weapons[i], self.activeSlot === i, keys[SLOT_KEYS[i]]);
-    this.frag.set(self.items.frag ?? 0, keys.slot4, false);
+    const frags = self.items.frag ?? 0;
+    const armed = !!self.grenadeArmed && frags > 0;
+    this.frag.set(frags, keys.slot4, false, armed);
     const useItem = self.use ? self.use.item : null;
     for (const q of this.quick) q.set(self.items[q.item] ?? 0, keys[q.action], useItem === q.item);
 
     const slot = self.activeSlot;
-    const inst = slot === -1 ? null : self.weapons[slot];
+    const inst = armed || slot === -1 ? null : self.weapons[slot];
     const id = inst ? inst.id : null;
-    if (id !== this.lastWeapon) {
-      this.lastWeapon = id;
+    const shown = armed ? 'frag' : id;
+    if (shown !== this.lastWeapon) {
+      this.lastWeapon = shown;
       this.lastReserve = Number.NaN;
       this.fireMode.set(id ? t(FIRE_MODE_KEYS[WEAPONS[id].fireMode]) : '');
-      this.ammo.classList.toggle('dz-ammo-fists', !id);
+      this.ammo.classList.toggle('dz-ammo-fists', !id && !armed);
+      this.ammo.classList.toggle('dz-ammo-frag', armed);
     }
+    this.fragHintVis.set(armed);
+    if (armed && this.fragHintDirty) this.renderFragHint(env);
     let status = '';
-    if (!inst || !id) {
+    if (armed) {
+      // Armed frag: the counter shows the frags left; the hint explains throw / cancel.
+      this.mag.set(frags);
+      this.reserve.set(itemName('frag'));
+      this.sep.set(false);
+      this.low.set(false);
+      this.out.set(false);
+      this.reloadVis.set(false);
+    } else if (!inst || !id) {
       this.mag.invalidate();
       this.reserve.set(t('hud.fists'));
       this.sep.set(false);
@@ -204,7 +228,22 @@ export class WeaponPanel implements Widget {
     }
   }
 
+  private renderFragHint(env: HudEnv): void {
+    this.fragHintDirty = false;
+    this.fragHint.textContent = '';
+    const text = t('ui.hud.fragArmed', { throw: `${MARK}t${MARK}`, cancel: `${MARK}c${MARK}` });
+    text.split(MARK).forEach((part, i) => {
+      if (i % 2 === 1) {
+        const cap = h('span', 'dz-key dz-key-sm', this.fragHint);
+        cap.textContent = part === 't' ? t('ui.key.mouseLeftShort') : keyCapLabel(env.keys.slot4);
+      } else if (part.trim()) {
+        h('span', '', this.fragHint).textContent = part.trim();
+      }
+    });
+  }
+
   relabel(): void {
+    this.fragHintDirty = true;
     for (const s of this.slots) s.invalidate();
     for (const q of this.quick) q.invalidate();
     this.frag.invalidate();
