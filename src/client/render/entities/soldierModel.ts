@@ -155,10 +155,14 @@ export function buildVest(level: number, b: GeoBuilder, base: THREE.Matrix4, bon
   b.box(0.012, 0.16, 0.012, at(base, 0.22, 0.18, 0.06), solid(0x1d1d1b, bone)); // antenna
 }
 
-/** Chest-bone space. Packs sit behind the torso with a vertical team-colour stripe. */
-export function buildPack(level: number, b: GeoBuilder, base: THREE.Matrix4, bone = 0): void {
+/**
+ * Chest-bone space. Packs sit behind the torso with a vertical team-colour stripe; `withStraps`
+ * adds the shoulder straps that wrap over the chest (worn packs only).
+ */
+export function buildPack(level: number, b: GeoBuilder, base: THREE.Matrix4, bone = 0, withStraps = true): void {
   const strapZ = -0.135;
   const straps = (y: number, h: number): void => {
+    if (!withStraps) return;
     b.box(0.045, h, 0.02, at(base, -0.1, y, strapZ, -0.08), solid(COL.strap, bone));
     b.box(0.045, h, 0.02, at(base, 0.1, y, strapZ, -0.08), solid(COL.strap, bone));
   };

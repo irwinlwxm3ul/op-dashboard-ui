@@ -5,6 +5,7 @@
 // path planner runs, then every bot is ticked. Bots "think" (perception, goal selection,
 // planning) at ~6 Hz staggered by id and steer / aim / fire every tick.
 
+import { hyp } from './util';
 import { TICK_DT } from '../constants';
 import { clamp, wrapAngle } from '../math';
 import type { BotDriver, SimView } from '../sim/view';
@@ -135,7 +136,7 @@ class Driver implements BotDriverEx {
           // Passengers may shoot from seats that allow it (validated by the sim).
           const c = findContact(b, b.targetId);
           if (c && c.visible) {
-            if (think) manageWeapon(sys, b, p, true, Math.hypot(c.x - p.pos.x, c.z - p.pos.z));
+            if (think) manageWeapon(sys, b, p, true, hyp(c.x - p.pos.x, c.z - p.pos.z));
             b.moveScale = 0;
             out.buttons |= combatAct(sys, b, p);
           } else {

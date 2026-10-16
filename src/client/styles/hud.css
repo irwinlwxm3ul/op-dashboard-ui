@@ -769,16 +769,30 @@
 
 .dz-key-prompt {
   position: relative;
-  z-index: 0;
+  min-width: 0;
+  height: auto;
+  padding: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.dz-key-prompt .dz-key-label {
+  position: relative;
+  display: grid;
+  place-items: center;
   min-width: 26px;
   height: 26px;
+  padding: 0 6px;
+  border-radius: 4px;
+  background: #f3f1ea;
+  color: #121212;
   font-size: 13px;
+  box-shadow: 0 2px 0 rgba(0, 0, 0, 0.45);
 }
 
 .dz-key-ring {
   position: absolute;
   inset: -4px;
-  z-index: -1;
   border-radius: 7px;
   opacity: 0;
   background: conic-gradient(var(--dz-accent) calc(var(--p) * 360deg), rgba(255, 255, 255, 0.18) 0);
@@ -1693,7 +1707,7 @@
   display: flex;
   flex-direction: column;
   min-height: 280px;
-  max-height: 62vh;
+  max-height: calc(100vh - 140px);
   overflow-y: auto;
   padding: 14px;
 }
@@ -2060,7 +2074,7 @@
 
   .dz-inv-col {
     min-height: 220px;
-    max-height: 52vh;
+    max-height: calc(100vh - 110px);
   }
 
   .dz-inv-palette {

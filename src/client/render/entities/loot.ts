@@ -83,10 +83,14 @@ export class LootRenderer {
     this.ringMat = new THREE.MeshBasicMaterial({
       vertexColors: true,
       transparent: true,
-      opacity: 0.55,
+      opacity: 0.32,
       blending: THREE.AdditiveBlending,
       depthWrite: false,
       fog: true,
+      // Lying on the ground: bias toward the camera so coarse terrain LODs never swallow it.
+      polygonOffset: true,
+      polygonOffsetFactor: -4,
+      polygonOffsetUnits: -8,
     });
     this.rings = new THREE.InstancedMesh(ring, this.ringMat, MAX_VISIBLE);
     this.rings.name = 'loot-rings';
@@ -185,7 +189,7 @@ export class LootRenderer {
     if (n >= MAX_VISIBLE) return;
     const pulse = 1 + 0.08 * Math.sin(t * 3 + e.phase);
     _q.identity();
-    _p.set(e.x, e.y + 0.015, e.z);
+    _p.set(e.x, e.y + 0.04, e.z);
     _s.set(pulse, 1, pulse);
     _m.compose(_p, _q, _s);
     this.rings.setMatrixAt(n, _m);

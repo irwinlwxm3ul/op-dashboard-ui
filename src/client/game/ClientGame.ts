@@ -16,7 +16,7 @@ import { trainingTargetPosition } from '../../shared/sim';
 import { FISTS_DRAW_TIME, VEHICLE_SLEEP_SPEED } from '../../shared/sim/tuning';
 import { BTN, STANCE_FROM_CODE } from '../../shared/types';
 import type {
-  ClientAction, EntityId, LifeState, LootItem, MatchResults, MovementMode, PlayerInput, PlayerState, SurfaceMaterial,
+  ClientAction, EntityId, GameEvent, LifeState, LootItem, MatchResults, MovementMode, PlayerInput, PlayerState, SurfaceMaterial,
   TrainingTarget, Vec3, VehicleState, World, WorldBox, ZoneState,
 } from '../../shared/types';
 import { seatWorldPosition, stepVehicle, vehicleHitsPoint } from '../../shared/vehicles';
@@ -75,6 +75,13 @@ const REMOTE_SMOOTH_DECAY = 12;
 const OTHERS_RANGE = 40;
 /** PF.FIRING duration after a predicted shot (s). */
 const FIRING_FLAG_TIME = 0.2;
+
+/** No update() for this long (ms) means the tab is in the background. */
+const BACKGROUND_MS = 1000;
+/** Cosmetic events skipped while in the background (state-changing events are always kept). */
+const TRANSIENT_EVENTS: ReadonlySet<GameEvent['type']> = new Set<GameEvent['type']>([
+  'shot', 'impact', 'reload', 'draw', 'dryfire', 'footstep', 'jump', 'land', 'throw', 'vehicleCrash',
+]);
 
 const MODE_LIST = MODE_CODES as readonly MovementMode[];
 const LIFE_LIST = LIFE_CODES as readonly LifeState[];
@@ -158,6 +165,7 @@ export class ClientGame implements ClientGameApi {
   private readonly renderClock = new RenderClock();
   private renderTime = 0;
   private serverNow = 0;
+  private lastUpdateAt: number;
 
   // Snapshots & remote entities
   private readonly snapshots = new SampleRing<Snapshot>(SNAPSHOT_RING);
@@ -257,10 +265,18 @@ export class ClientGame implements ClientGameApi {
     this.transport = transport;
     this.init = init;
     this.now = opts.now ?? (() => performance.now());
+    this.lastUpdateAt = this.now();
     this.world = opts.world ?? generateWorld(init.config.seed, init.config.mode === 'training' ? 'training' : 'island');
     this.input = opts.input ?? new InputController(settings);
     this.input.onInteract = () => this.performInteraction();
     this.input.onDeadClick = () => this.spectateNext();
+    // Rendering stops in background tabs: tell the server right away that nothing is held, so it
+    // does not keep repeating a running / firing input.
+    this.input.onFocusLost = () => {
+      if (this.disposed || this.init.you === null) return;
+      this.runTick();
+      this.flushOutbox();
+    };
 
     for (const r of init.roster) this.roster.set(r.id, r);
     for (const l of init.loot) this.addLoot(l);
@@ -358,6 +374,7 @@ export class ClientGame implements ClientGameApi {
     if (this.disposed) return;
     if (!(dt >= 0) || !Number.isFinite(dt)) dt = 0;
     const now = this.now();
+    this.lastUpdateAt = now;
     if (this.clock.shouldPing(now)) this.transport.send({ t: 'ping', c: now });
     this.serverNow = this.clock.serverNow(now);
     this.renderTime = this.renderClock.update(dt * 1000, this.serverNow - this.clock.interpDelay());
@@ -530,9 +547,12 @@ export class ClientGame implements ClientGameApi {
     if (s.lootAdd) for (const l of s.lootAdd) this.addLoot(l);
     if (s.lootRemove) for (const id of s.lootRemove) this.removeLoot(id);
 
-    // Events
+    // Events (in order). While the client is not rendering (background tab) purely cosmetic
+    // events are not queued: replaying seconds of gunshots / footsteps on return helps nobody.
+    const rendering = now - this.lastUpdateAt < BACKGROUND_MS;
     for (const ev of s.events) {
       if (ev.type === 'matchEnd') this.results = ev.results;
+      if (!rendering && TRANSIENT_EVENTS.has(ev.type)) continue;
       this.events.push(ev);
     }
 
@@ -1145,31 +1165,28 @@ export class ClientGame implements ClientGameApi {
     const a = br.a.zone, b = br.b.zone;
     const z = this.zone;
     const k = br.alpha;
-    // Positions blend only within one stage (a new circle must not slide in from the old one).
+    // Circle geometry at the render time; positions blend only within one stage (a new circle
+    // must not slide in from the old one).
     const same = a.phase === b.phase && a.stage === b.stage;
-    z.phase = b.phase;
-    z.stage = b.stage;
     z.cx = same ? lerp(a.cx, b.cx, k) : b.cx;
     z.cz = same ? lerp(a.cz, b.cz, k) : b.cz;
     z.r = same ? lerp(a.r, b.r, k) : b.r;
-    z.nx = b.nx;
-    z.nz = b.nz;
-    z.nr = b.nr;
-    z.stageTotal = b.stageTotal;
-    z.damagePerSec = b.damagePerSec;
-    // Timer counts down smoothly from the newest snapshot using the estimated server clock.
-    const latest = this.latest;
-    if (latest) {
-      const lz = latest.zone;
-      z.timer = Math.max(0, lz.timer - Math.max(0, this.serverNow - latest.time) / 1000);
-      if (lz.phase !== z.phase || lz.stage !== z.stage) z.timer = lz.timer;
-    }
-    if (br.extra > 0 && same && b.stage === 'shrinking') {
+    if (br.extra > 0 && same && b.stage === 'shrinking' && b.timer > 1e-3) {
       // Starved: continue the shrink at its current rate (bounded) so the circle never stalls.
-      const ex = Math.min(br.extra, 150) / 1000;
-      const rate = b.stageTotal > 0 ? (b.r - b.nr) / Math.max(b.timer, 1e-3) : 0;
-      z.r = Math.max(b.nr, b.r - rate * ex);
+      const ex = Math.min(br.extra, MAX_EXTRAPOLATE_MS) / 1000;
+      z.r = Math.max(b.nr, b.r - ((b.r - b.nr) / b.timer) * ex);
     }
+    // Stage, target circle and a smoothly counting-down timer from the newest snapshot.
+    const latest = this.latest ?? br.b;
+    const lz = latest.zone;
+    z.phase = lz.phase;
+    z.stage = lz.stage;
+    z.nx = lz.nx;
+    z.nz = lz.nz;
+    z.nr = lz.nr;
+    z.stageTotal = lz.stageTotal;
+    z.damagePerSec = lz.damagePerSec;
+    z.timer = Math.max(0, lz.timer - clamp((this.serverNow - latest.time) / 1000, 0, 1));
   }
 
   // ---------------------------------------------------------------------------
@@ -1269,7 +1286,7 @@ export class ClientGame implements ClientGameApi {
     sv.recoilYaw = lerp(this.prevRecoilY, p.recoilYaw, alpha) + this.recoilOffY;
     sv.aimYaw = sv.baseYaw + sv.recoilYaw;
     sv.aimPitch = clamp(sv.basePitch + sv.recoilPitch, -1.553, 1.553);
-    eyePosition(sv, sv.lean, sv.aimYaw, sv.eye);
+    eyePosition(sv, sv.lean, sv.baseYaw, sv.eye);
 
     sv.health = p.health;
     sv.boost = p.boost;

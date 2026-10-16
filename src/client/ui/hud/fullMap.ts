@@ -260,7 +260,7 @@ export class FullMap {
     if (frame.plane && (frame.phase === 'plane' || self?.mode === 'plane' || frame.plane.active)) drawPlane(ctx, v, frame);
     drawWaypoint(ctx, v, env.waypoint, false);
     if (self) drawMates(ctx, v, frame, env, false, self.id);
-    if (self && pos) drawSelf(ctx, v, pos.x, pos.z, this.heading, self.life === 'dead' ? '#cfd3d6' : env.memberColor(self.id) ?? MEMBER_COLORS[0]);
+    if (self && pos) drawSelf(ctx, v, pos.x, pos.z, this.heading, self.life === 'dead' ? '#cfd3d6' : env.memberColor(self.id) ?? MEMBER_COLORS[0], 10);
     this.drawGridLabels(ctx, step);
   }
 

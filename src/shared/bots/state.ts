@@ -135,6 +135,11 @@ export interface BotState {
   lootSince: number;
   lootTries: number;
   lootActionAt: number;
+  /** Loot scan cadence and its cached result. */
+  lootScanAt: number;
+  lootPick: EntityId;
+  lootPickScore: number;
+  exploreScanAt: number;
   blacklist: Map<EntityId, number>;
   explored: Uint8Array;
   exploreBuilding: number;
@@ -268,6 +273,10 @@ export function createBotState(p: PlayerState, seed: number, thinkSlot: number, 
     lootSince: 0,
     lootTries: 0,
     lootActionAt: -1e9,
+    lootScanAt: 0,
+    lootPick: -1,
+    lootPickScore: 0,
+    exploreScanAt: 0,
     blacklist: new Map(),
     explored: new Uint8Array(Math.max(1, buildings)),
     exploreBuilding: -1,

@@ -89,7 +89,7 @@ function buildItem(id: ItemId, b: GeoBuilder): void {
       const z = lvl === 1 ? 0.24 : lvl === 2 ? 0.26 : 0.285;
       const h = lvl === 1 ? 0.3 : lvl === 2 ? 0.42 : 0.56;
       // Standing upright, straps facing -Z.
-      buildPack(lvl, b, xform(0, h / 2 - 0.08 + 0.02, -z));
+      buildPack(lvl, b, xform(0, h / 2 - 0.08 + 0.02, -z), 0, false);
       return;
     }
   }

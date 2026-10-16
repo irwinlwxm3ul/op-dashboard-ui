@@ -2,6 +2,7 @@
 // with grid feelers while a path is pending, stuck detection with escalating recovery, and the
 // conversion of a world-space move direction into PlayerInput axes.
 
+import { hyp } from './util';
 import { angleDiff } from '../math';
 import type { PlayerState } from '../types';
 import { NF_BLOCKED, NF_NEAR, NF_UNKNOWN } from './nav';
@@ -24,7 +25,7 @@ export function setDest(sys: BotSystem, b: BotState, p: PlayerState, x: number, 
   b.hasDest = true;
   b.destX = x;
   b.destZ = z;
-  const moved = Math.hypot(x - b.pathGX, z - b.pathGZ);
+  const moved = hyp(x - b.pathGX, z - b.pathGZ);
   if (b.path.status === PATH_IDLE || b.path.status === PATH_FAILED || moved > REPATH_MOVE) requestPath(sys, b, p);
 }
 
@@ -36,17 +37,32 @@ export function clearDest(sys: BotSystem, b: BotState): void {
   b.path.count = 0;
 }
 
+/** Destinations closer than this with a clear straight walk skip A* entirely. */
+const DIRECT_DIST = 30;
+
 export function requestPath(sys: BotSystem, b: BotState, p: PlayerState): void {
-  sys.planner.request(b.path, p.pos.x, p.pos.z, b.destX, b.destZ);
   b.pathIdx = 0;
   b.pathGX = b.destX;
   b.pathGZ = b.destZ;
   b.pathTime = sys.now;
+  const px = p.pos.x, pz = p.pos.z;
+  if (hyp(b.destX - px, b.destZ - pz) <= DIRECT_DIST && sys.grid.lineOfWalk(px, pz, b.destX, b.destZ, false, false) &&
+      sys.grid.clearSegment(px, pz, b.destX, b.destZ, 0.3)) {
+    // Straight shot: a one-point "path" without touching the planner.
+    sys.planner.cancel(b.path);
+    b.path.pts[0] = b.destX;
+    b.path.pts[1] = b.destZ;
+    b.path.count = 1;
+    b.path.partial = false;
+    b.path.status = PATH_DONE;
+    return;
+  }
+  sys.planner.request(b.path, px, pz, b.destX, b.destZ);
 }
 
 /** Distance to the current destination (XZ), Infinity without one. */
 export function destDistance(b: BotState, p: PlayerState): number {
-  return b.hasDest ? Math.hypot(b.destX - p.pos.x, b.destZ - p.pos.z) : Infinity;
+  return b.hasDest ? hyp(b.destX - p.pos.x, b.destZ - p.pos.z) : Infinity;
 }
 
 export function arrived(b: BotState, p: PlayerState): boolean {
@@ -66,7 +82,7 @@ export function followPath(sys: BotSystem, b: BotState, p: PlayerState): void {
   b.moveScale = 0;
   if (!b.hasDest) return;
   const px = p.pos.x, pz = p.pos.z;
-  const dd = Math.hypot(b.destX - px, b.destZ - pz);
+  const dd = hyp(b.destX - px, b.destZ - pz);
   if (dd <= b.arrive) return;
   let tx = b.destX, tz = b.destZ;
   const path = b.path;
@@ -76,14 +92,17 @@ export function followPath(sys: BotSystem, b: BotState, p: PlayerState): void {
     let i = b.pathIdx;
     while (i < path.count) {
       const wx = path.pts[i * 2], wz = path.pts[i * 2 + 1];
-      const d = Math.hypot(wx - px, wz - pz);
+      const d = hyp(wx - px, wz - pz);
       // Tight waypoints (doorways, corners) must really be reached before turning.
       const reach = i === path.count - 1 ? b.arrive : sys.grid.flagsAt(wx, wz, false) & NF_NEAR ? 0.4 : 0.75;
       if (d > reach) break;
       i++;
     }
     b.pathIdx = i;
-    if (i < path.count) {
+    if (path.count === 1 && !path.partial) {
+      // Straight-shot path: follow the live destination (it may drift a little, e.g. a target).
+      direct = false;
+    } else if (i < path.count) {
       tx = path.pts[i * 2];
       tz = path.pts[i * 2 + 1];
       direct = false;
@@ -95,7 +114,7 @@ export function followPath(sys: BotSystem, b: BotState, p: PlayerState): void {
     requestPath(sys, b, p);
   }
   let dx = tx - px, dz = tz - pz;
-  const l = Math.hypot(dx, dz);
+  const l = hyp(dx, dz);
   if (l < 1e-4) return;
   dx /= l;
   dz /= l;
@@ -119,7 +138,7 @@ export function followPath(sys: BotSystem, b: BotState, p: PlayerState): void {
     const sx = -dz * b.sidestepDir, sz = dx * b.sidestepDir;
     dx = sx * 0.9 + dx * 0.3;
     dz = sz * 0.9 + dz * 0.3;
-    const sl = Math.hypot(dx, dz);
+    const sl = hyp(dx, dz);
     dx /= sl;
     dz /= sl;
   }
@@ -152,7 +171,7 @@ export function checkStuck(sys: BotSystem, b: BotState, p: PlayerState): boolean
     return false;
   }
   if (t - b.stuckRefTime < STUCK_TIME) return false;
-  const moved = Math.hypot(p.pos.x - b.stuckRefX, p.pos.z - b.stuckRefZ);
+  const moved = hyp(p.pos.x - b.stuckRefX, p.pos.z - b.stuckRefZ);
   b.stuckRefX = p.pos.x;
   b.stuckRefZ = p.pos.z;
   b.stuckRefTime = t;

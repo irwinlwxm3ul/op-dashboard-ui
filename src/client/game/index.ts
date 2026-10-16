@@ -15,10 +15,12 @@ export type { Bracket } from './interpolation';
 export { resolveInteraction, interactionAction, firstFreeSeat, PROMPT_RANGE } from './interaction';
 export type { InteractionEnv, InteractionSelf } from './interaction';
 export { LootIndex } from './lootIndex';
+// Prediction helpers: the same per-input rules as the authoritative sim (predictMovement is the
+// name used in the module spec for the per-tick predictor).
 export {
-  predictTick, buildMoveIntent, movementSpeedMul, activeWeapon, canShootFrom, currentSpread, vehicleControls,
-  createPredictRt, copyPredictRt, createTickEvents, createPredictedPlayer, applySelfState, vehicleFromNet,
-  applyNetVehicle, planePositionAt, planeTraveledAt,
+  predictTick, predictTick as predictMovement, buildMoveIntent, buildDropIntent, movementSpeedMul, activeWeapon,
+  canShootFrom, currentSpread, vehicleControls, createPredictRt, copyPredictRt, createTickEvents,
+  createPredictedPlayer, applySelfState, vehicleFromNet, applyNetVehicle, planePositionAt, planeTraveledAt,
 } from './predict';
 export type { PredictEnv, PredictRt, TickEvents } from './predict';
 export type * from './types';

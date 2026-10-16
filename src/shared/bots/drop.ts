@@ -3,6 +3,7 @@
 // the human), jump near the closest point of the flight path, steer the freefall, open the
 // chute early for far targets (or rely on the auto-open), and glide onto the target.
 
+import { hyp } from './util';
 import { MIN_CHUTE_DROP, PARACHUTE_DESCENT, PARACHUTE_HORIZONTAL } from '../constants';
 import { angleDiff } from '../math';
 import type { PlayerState } from '../types';
@@ -171,7 +172,7 @@ export function dropTick(sys: BotSystem, b: BotState, p: PlayerState, think: boo
     tz = leader.pos.z + Math.sin(a) * 7;
   }
   const dx = tx - p.pos.x, dz = tz - p.pos.z;
-  const dist = Math.hypot(dx, dz);
+  const dist = hyp(dx, dz);
   const h = Math.max(0, p.pos.y - sys.world.heightAt(p.pos.x, p.pos.z));
   const yaw = Math.atan2(-dx, -dz);
   steerAim(sys, b, dist > 3 ? yaw : b.aimYaw, -0.5, 0.7);

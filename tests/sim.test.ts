@@ -836,6 +836,54 @@ describe('vehicles', () => {
     }
   });
 
+  it('runs over players on foot (credited to the driver); only shooting seats can fire', () => {
+    const h = new Harness({ maxPlayers: 3, teamSize: 1 });
+    const a = h.add('Driver');
+    const b = h.add('Walker');
+    const c = h.add('Gunner');
+    h.sim.start();
+    const clearAhead = (veh: { pos: Vec3; yaw: number }) => {
+      const fx = -Math.sin(veh.yaw), fz = -Math.cos(veh.yaw);
+      for (let d = 4; d <= 34; d += 2) {
+        const x = veh.pos.x + fx * d, z = veh.pos.z + fz * d;
+        if (!areaClear(h.world, x - 2.5, z - 2.5, x + 2.5, z + 2.5) || h.world.heightAt(x, z) < 1) return false;
+        if (Math.abs(h.world.heightAt(x, z) - h.world.heightAt(veh.pos.x, veh.pos.z)) > 3) return false;
+      }
+      return true;
+    };
+    const v = [...h.sim.vehicles.values()].find((veh) => veh.seats.length >= 2 && clearAhead(veh))!;
+    expect(v).toBeTruthy();
+    v.fuel = 80;
+    const ex = exitPosition(v, 0, h.world);
+    h.place(a, ex.x, ex.z, v.yaw);
+    const ex1 = exitPosition(v, 1, h.world);
+    h.place(c, ex1.x, ex1.z, v.yaw);
+    // The walker stands in the vehicle's path, 24 m ahead.
+    const fx = -Math.sin(v.yaw), fz = -Math.cos(v.yaw);
+    h.place(b, v.pos.x + fx * 24, v.pos.z + fz * 24, v.yaw);
+    h.step(2);
+    h.step(1, () => ({ [a]: { actions: [{ a: 'enter', id: v.id, seat: 0 }] }, [c]: { actions: [{ a: 'enter', id: v.id, seat: 1 }] } }));
+    expect(h.p(a).seat).toBe(0);
+    expect(h.p(c).seat).toBe(1);
+    // The driver cannot shoot, the passenger can.
+    h.p(a).weapons[0] = { id: 'ar', mag: 30 };
+    h.p(c).weapons[0] = { id: 'ar', mag: 30 };
+    h.setIdle(a, { slot: 0 });
+    h.setIdle(c, { slot: 0, pitch: 0.8 });
+    h.step(25);
+    h.step(3, () => ({ [a]: { buttons: BTN.FIRE }, [c]: { buttons: BTN.FIRE, pitch: 0.8 } }));
+    expect(h.p(a).stats.shotsFired).toBe(0);
+    expect(h.p(c).stats.shotsFired).toBeGreaterThan(0);
+    h.clearEvents();
+    const hb = h.p(b).health;
+    h.stepUntil(() => h.p(b).health < hb || h.p(b).life !== 'alive', 150, () => ({ [a]: { mz: 1 } }));
+    expect(h.p(b).health).toBeLessThan(hb);
+    const hit = h.of('hit').find((e) => e.victim === b)!;
+    expect(hit).toMatchObject({ attacker: a, source: 'vehicle' });
+    // Knocked aside, not dragged along.
+    expect(h.p(b).mode).toBe('ground');
+  });
+
   it('a destroyed vehicle burns, explodes and stays a wreck', () => {
     const h = new Harness({ maxPlayers: 2 });
     h.add('Nobody');

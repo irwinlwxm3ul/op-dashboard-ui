@@ -51,11 +51,6 @@ const QUICK_USE: Partial<Record<KeyAction, ConsumableId>> = {
 };
 const SLOT_KEYS: Partial<Record<KeyAction, number>> = { slot1: 0, slot2: 1, slot3: 2, slot4: 3 };
 
-/** Keys that never trigger the browser default while the game has focus. */
-const PREVENT_DEFAULT: ReadonlySet<KeyAction> = new Set<KeyAction>([
-  'inventory', 'stats', 'freeLook', 'jump', 'menu', 'map', 'scoreboard',
-]);
-
 export class InputController implements InputApi {
   /** Base aim (radians). Yaw is continuous (not wrapped) so cameras never see a 2π jump. */
   yaw = 0;
@@ -68,6 +63,8 @@ export class InputController implements InputApi {
   onInteract: (() => void) | null = null;
   /** Called on a left click while dead (ClientGame cycles the spectated player). */
   onDeadClick: (() => void) | null = null;
+  /** Called after focus loss / tab hide released every key (ClientGame sends a neutral input). */
+  onFocusLost: (() => void) | null = null;
 
   private settingsValue: Settings;
   private codeToAction = new Map<string, KeyAction>();
@@ -188,7 +185,14 @@ export class InputController implements InputApi {
       this.intentionalUnlock = false;
       this.lockedFlag = now;
     });
-    listen(win, 'blur', () => this.releaseAll());
+    const focusLost = (): void => {
+      this.releaseAll();
+      this.onFocusLost?.();
+    };
+    listen(win, 'blur', focusLost);
+    listen(doc, 'visibilitychange', () => {
+      if (doc.visibilityState === 'hidden') focusLost();
+    });
     this.lockedFlag = doc.pointerLockElement === target;
   }
 
@@ -255,21 +259,23 @@ export class InputController implements InputApi {
     if (!action) return false;
     if (repeat) return true;
 
-    // UI toggles work even while game input is disabled (closing the inventory / map with the same key).
+    // UI toggles work even while game input is disabled (closing the inventory / map with the same
+    // key); browser defaults (Tab focus navigation...) are only suppressed while playing.
+    const playing = this.enabledFlag;
     switch (action) {
-      case 'inventory': this.emitUi('toggleInventory'); return true;
-      case 'map': this.emitUi('toggleMap'); return true;
+      case 'inventory': this.emitUi('toggleInventory'); return playing;
+      case 'map': this.emitUi('toggleMap'); return playing;
       case 'stats': this.emitUi('toggleStats'); return true;
-      case 'scoreboard': this.emitUi('toggleScoreboard'); return true;
+      case 'scoreboard': this.emitUi('toggleScoreboard'); return playing;
       case 'menu': {
         // Browsers release pointer lock on Esc; that release already opens the menu.
         const now = typeof performance !== 'undefined' ? performance.now() : 0;
         if (!this.lockedFlag && now - this.lastLockLoss > LOCK_LOSS_ESC_WINDOW_MS) this.emitUi('menu');
-        return true;
+        return playing;
       }
       default: break;
     }
-    if (!this.enabledFlag) return PREVENT_DEFAULT.has(action);
+    if (!playing) return false;
     this.held.add(action);
     this.onPress(action);
     return true;
@@ -405,7 +411,7 @@ export class InputController implements InputApi {
     return this.slotChangedSeq;
   }
 
-  /** The authoritative state settled on another slot (pickup auto-equip, weapon dropped...). */
+  /** The authoritative state settled on another slot (weapon dropped, death, refused switch...). */
   adoptSlot(slot: -1 | 0 | 1 | 2): void {
     this.slot = slot;
     this.slotDirty = false;
@@ -503,6 +509,7 @@ export class InputController implements InputApi {
     this.uiListeners.clear();
     this.onInteract = null;
     this.onDeadClick = null;
+    this.onFocusLost = null;
   }
 
   // ---------------------------------------------------------------------------

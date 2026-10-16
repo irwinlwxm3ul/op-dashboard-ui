@@ -7,6 +7,7 @@
 // relaxed toward the middle of doorways, and results are cached by (goal cell, coarse start) so
 // squadmates heading for the same spot reuse one search.
 
+import { hyp } from './util';
 import { NavGrid, NF_BLOCKED, NF_NEAR, DIR_DX, DIR_DZ } from './nav';
 
 export const PATH_IDLE = 0;
@@ -138,7 +139,7 @@ export class PathPlanner {
         if (!next) return;
         // Start / goal tiles must exist; generate them within the tick budget or wait.
         if (!this.grid.ready(next.sx, next.sz, 5) || !this.grid.ready(next.gx, next.gz, 9)) {
-          if (Math.hypot(next.gx - next.sx, next.gz - next.sz) <= MAX_PLAN_DIST) return;
+          if (hyp(next.gx - next.sx, next.gz - next.sz) <= MAX_PLAN_DIST) return;
           // Long trips are clamped in begin(); only the start must be ready.
           if (!this.grid.ready(next.sx, next.sz, 5)) return;
         }
@@ -194,7 +195,7 @@ export class PathPlanner {
     // Goal: clamp very long trips, then nearest free cell.
     let gx = req.gx, gz = req.gz;
     const dx = gx - sx, dz = gz - sz;
-    const d = Math.hypot(dx, dz);
+    const d = hyp(dx, dz);
     if (d > MAX_PLAN_DIST) {
       gx = sx + (dx / d) * MAX_PLAN_DIST;
       gz = sz + (dz / d) * MAX_PLAN_DIST;
@@ -355,7 +356,7 @@ export class PathPlanner {
       const last = k === n - 1;
       const px = last ? endX : this.cx(this.cellBuf[k]);
       const pz = last ? endZ : this.cz(this.cellBuf[k]);
-      const seg = Math.hypot(px - ax, pz - az);
+      const seg = hyp(px - ax, pz - az);
       if (seg <= MAX_SEGMENT && grid.lineOfWalk(ax, az, px, pz, false, true) && grid.clearSegment(ax, az, px, pz, SMOOTH_CLEARANCE)) continue;
       // Emit the previous cell as a waypoint. If that is the anchor itself (the anchor sits off the
       // cell centre after relaxing), emit this cell instead: the A* step between them is valid.

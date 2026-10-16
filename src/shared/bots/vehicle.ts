@@ -2,6 +2,7 @@
 // drive toward the rotation target with throttle/steer and grid feelers around obstacles,
 // recover from getting stuck by reversing, and exit when close, stuck, out of fuel or burning.
 
+import { hyp } from './util';
 import { VEHICLE_ENTER_RANGE } from '../constants';
 import { angleDiff, clamp } from '../math';
 import type { PlayerState, VehicleState } from '../types';
@@ -39,7 +40,7 @@ export function findVehicle(sys: BotSystem, b: BotState, p: PlayerState, radius:
     const v = near[i];
     if (v.id === b.vehicleBlacklist || !usable(sys, v)) continue;
     const def = VEHICLES[v.type];
-    const d = Math.hypot(v.pos.x - p.pos.x, v.pos.z - p.pos.z);
+    const d = hyp(v.pos.x - p.pos.x, v.pos.z - p.pos.z);
     const driver = v.seats[0];
     let s = Infinity;
     if (driver === null) {
@@ -74,7 +75,7 @@ export function approachVehicle(sys: BotSystem, b: BotState, p: PlayerState): bo
     b.vehicleId = -1;
     return false;
   }
-  const d = Math.hypot(v.pos.x - p.pos.x, v.pos.z - p.pos.z);
+  const d = hyp(v.pos.x - p.pos.x, v.pos.z - p.pos.z);
   if (d < VEHICLE_ENTER_RANGE - 0.9) {
     if (t - b.vehicleActionAt > 0.6) {
       b.actions.push({ a: 'enter', id: v.id, seat });
@@ -143,7 +144,7 @@ export function vehicleTick(sys: BotSystem, b: BotState, p: PlayerState, think: 
     tx = zoneActive(sys) ? b.zoneX : b.destX;
     tz = zoneActive(sys) ? b.zoneZ : b.destZ;
   }
-  const dist = Math.hypot(tx - v.pos.x, tz - v.pos.z);
+  const dist = hyp(tx - v.pos.x, tz - v.pos.z);
   if (think) {
     const arrivedNow = dist < ARRIVE_DIST || (!leader && zoneActive(sys) && insideNext(sys, v.pos.x, v.pos.z, 20) && dist < 120);
     const threatClose = t - b.lastContactTime < 1 && Math.abs(speed) < 8;

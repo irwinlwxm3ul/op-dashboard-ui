@@ -36,13 +36,18 @@ varying vec3 vWPos;
 ${NOISE_GLSL}
 ${HEIGHT_SAMPLE_GLSL}
 
-vec2 waveSlope(vec2 p, float t) {
+// Sum of directional sine waves (slope only). Each wave fades out once a pixel covers a sizeable
+// part of its wavelength (fw = world-space pixel footprint), so grazing views never show moire.
+float waveFade(float k, float fw) {
+  return 1.0 - smoothstep(0.08, 0.3, fw * k * 0.159);
+}
+vec2 waveSlope(vec2 p, float t, float fw) {
   vec2 s = vec2(0.0);
   vec2 d;
-  d = vec2(0.80, 0.60);   s += 0.033 * d * cos(dot(d, p) * 0.55 + t * 1.05);
-  d = vec2(-0.50, 0.866); s += 0.040 * d * cos(dot(d, p) * 0.93 + t * 1.45);
-  d = vec2(0.97, -0.24);  s += 0.051 * d * cos(dot(d, p) * 1.70 + t * 2.05);
-  d = vec2(-0.31, -0.95); s += 0.056 * d * cos(dot(d, p) * 3.10 + t * 2.85);
+  d = vec2(0.80, 0.60);   s += 0.033 * waveFade(0.55, fw) * d * cos(dot(d, p) * 0.55 + t * 1.05);
+  d = vec2(-0.50, 0.866); s += 0.040 * waveFade(0.93, fw) * d * cos(dot(d, p) * 0.93 + t * 1.45);
+  d = vec2(0.97, -0.24);  s += 0.051 * waveFade(1.70, fw) * d * cos(dot(d, p) * 1.70 + t * 2.05);
+  d = vec2(-0.31, -0.95); s += 0.056 * waveFade(3.10, fw) * d * cos(dot(d, p) * 3.10 + t * 2.85);
   return s;
 }
 
@@ -50,12 +55,16 @@ void main() {
   vec3 toCam = cameraPosition - vWPos;
   float dist = max(length(toCam), 0.001);
   vec3 V = toCam / dist;
-  float detail = 1.0 / (1.0 + dist * 0.011);
-
-  vec2 slope = waveSlope(vWPos.xz, uTime) * detail;
+  vec2 fwv = fwidth(vWPos.xz);
+  float fw = max(fwv.x, fwv.y);
+  vec2 slope = waveSlope(vWPos.xz, uTime, fw);
+  float rippleFade = waveFade(2.6, fw);
   float n1 = dzNoise(vWPos.xz * 0.42 + vec2(uTime * 0.13, uTime * 0.05));
   float n2 = dzNoise(vWPos.xz * 0.42 + vec2(5.37, 2.71) - vec2(uTime * 0.07, uTime * 0.12));
-  slope += (vec2(n1, n2) - 0.5) * 0.16 * detail * detail;
+  slope += (vec2(n1, n2) - 0.5) * 0.16 * rippleFade;
+  // Large slow swell keeps the far sea from looking glassy.
+  float sw = dzNoise(vWPos.xz * 0.012 + vec2(uTime * 0.01, 0.0));
+  slope += vec2(sw - 0.5, 0.5 - sw) * 0.05;
   vec3 N = normalize(vec3(-slope.x, 1.0, -slope.y));
 
   float ndv = clamp(dot(N, V), 0.0, 1.0);

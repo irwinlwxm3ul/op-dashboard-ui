@@ -131,7 +131,9 @@ function updateBullet(sim: GameSim, pr: Projectile, dt: number): boolean {
     const L = Math.sqrt(sx * sx + sy * sy + sz * sz);
     if (L < 1e-9) continue;
     segDir.x = sx / L; segDir.y = sy / L; segDir.z = sz / L;
-    const tr = traceRay(sim, seg0, segDir, L, sim.traceScratch, hitTime, null, bulletHit);
+    // A passenger's bullet starts inside its own vehicle's hull: ignore that hull near the muzzle.
+    const ownVeh = pr.traveled < 8 ? shooter.vehicleId : null;
+    const tr = traceRay(sim, seg0, segDir, L, sim.traceScratch, hitTime, ownVeh, bulletHit);
     if (tr.kind !== 'none') {
       const dist = pr.traveled + tr.t;
       hitPt.x = seg0.x + segDir.x * tr.t;

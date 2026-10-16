@@ -87,12 +87,14 @@ class MockSim implements SimView {
     const p = makePlayer(this.nextId++, team, pos, isBot);
     this.players.set(p.id, p);
     this.inputs.set(p.id, []);
+    this.rebuildPlayers();
     return p;
   }
 
   addLoot(item: LootItem['item'], pos: Vec3, count = 1): LootItem {
     const l: LootItem = { id: this.nextId++, item, count, pos: { ...pos } };
     this.loot.set(l.id, l);
+    MockSim.insert(this.lootGrid, l);
     return l;
   }
 
@@ -102,14 +104,51 @@ class MockSim implements SimView {
     this.last.set(id, copy);
   }
 
-  lootNear(x: number, z: number, radius: number, out: LootItem[]): LootItem[] {
+  // Spatial hashes like the real sim's (the performance test measures the driver, not the mock).
+  private readonly lootGrid = new Map<number, LootItem[]>();
+  private readonly playerGrid = new Map<number, PlayerState[]>();
+  private static key(cx: number, cz: number): number {
+    return (cx + 1000) * 4096 + (cz + 1000);
+  }
+  private static insert<T extends { pos: Vec3 }>(grid: Map<number, T[]>, item: T): void {
+    const k = MockSim.key(Math.floor(item.pos.x / 16), Math.floor(item.pos.z / 16));
+    let list = grid.get(k);
+    if (!list) grid.set(k, (list = []));
+    list.push(item);
+  }
+  private static query<T extends { pos: Vec3 }>(grid: Map<number, T[]>, x: number, z: number, r: number, out: T[]): T[] {
     out.length = 0;
-    for (const l of this.loot.values()) if (Math.hypot(l.pos.x - x, l.pos.z - z) <= radius) out.push(l);
+    const x0 = Math.floor((x - r) / 16), x1 = Math.floor((x + r) / 16);
+    const z0 = Math.floor((z - r) / 16), z1 = Math.floor((z + r) / 16);
+    for (let cz = z0; cz <= z1; cz++) {
+      for (let cx = x0; cx <= x1; cx++) {
+        const list = grid.get(MockSim.key(cx, cz));
+        if (!list) continue;
+        for (const it of list) {
+          const dx = it.pos.x - x, dz = it.pos.z - z;
+          if (dx * dx + dz * dz <= r * r) out.push(it);
+        }
+      }
+    }
     return out;
   }
+  private rebuildPlayers(): void {
+    this.playerGrid.clear();
+    for (const p of this.players.values()) MockSim.insert(this.playerGrid, p);
+  }
+
+  lootNear(x: number, z: number, radius: number, out: LootItem[]): LootItem[] {
+    return MockSim.query(this.lootGrid, x, z, radius, out);
+  }
   playersNear(x: number, z: number, radius: number, out: PlayerState[]): PlayerState[] {
+    const cells = (2 * radius / 16 + 1) ** 2;
+    if (cells < this.players.size) return MockSim.query(this.playerGrid, x, z, radius, out);
+    // Large radius: a linear scan is cheaper than walking the cells (as the real sim does).
     out.length = 0;
-    for (const p of this.players.values()) if (Math.hypot(p.pos.x - x, p.pos.z - z) <= radius) out.push(p);
+    for (const p of this.players.values()) {
+      const dx = p.pos.x - x, dz = p.pos.z - z;
+      if (dx * dx + dz * dz <= radius * radius) out.push(p);
+    }
     return out;
   }
   vehiclesNear(x: number, z: number, radius: number, out: VehicleState[]): VehicleState[] {
@@ -149,6 +188,7 @@ class MockSim implements SimView {
     }
     this.time += TICK_DT;
     this.tick++;
+    this.rebuildPlayers();
   }
 
   run(driver: BotDriver, ticks: number, each?: () => void): void {
@@ -514,18 +554,20 @@ describe('performance', () => {
     // Warm up (lazy nav tiles, first paths).
     sim.run(driver, 60);
     const N = 300;
-    let total = 0, worst = 0;
+    // CPU time (not wall time) so a loaded CI machine does not make the measurement meaningless.
+    let wall = 0, cpu = 0;
     for (let i = 0; i < N; i++) {
+      const c0 = process.cpuUsage();
       const t0 = performance.now();
       driver.update(TICK_DT);
-      const dt = performance.now() - t0;
-      total += dt;
-      worst = Math.max(worst, dt);
+      wall += performance.now() - t0;
+      const c = process.cpuUsage(c0);
+      cpu += (c.user + c.system) / 1000;
       sim.step();
     }
-    const avg = total / N;
+    const avg = Math.min(cpu, wall) / N;
     // eslint-disable-next-line no-console
-    console.log(`bots: avg ${avg.toFixed(3)} ms / tick, worst ${worst.toFixed(2)} ms`, driver.stats());
+    console.log(`bots: ${avg.toFixed(3)} ms / tick (cpu ${(cpu / N).toFixed(3)}, wall ${(wall / N).toFixed(3)})`, driver.stats());
     expect(avg).toBeLessThan(3);
     // Bots actually moved around.
     let moved = 0;

@@ -3,6 +3,7 @@
 // switching by range, reloads, frags at enemies behind cover, cover seeking when hurt and
 // finishing downed enemies.
 
+import { hyp } from './util';
 import { GRAVITY } from '../constants';
 import { THROWABLES, WEAPONS } from '../items';
 import { angleDiff, clamp, wrapAngle } from '../math';
@@ -72,17 +73,17 @@ function solveAim(sys: BotSystem, b: BotState, c: Contact, q: PlayerState | null
     ty = c.y + (c.downed ? 0.3 : 1.15);
   }
   let dx = tx - eye.x, dz = tz - eye.z;
-  let horiz = Math.hypot(dx, dz);
+  let horiz = hyp(dx, dz);
   if (w && !w.hitscan && (vx !== 0 || vz !== 0)) {
     const lead = timeOfFlight(w, horiz) * sys.skill.leadAccuracy;
     dx += vx * lead;
     dz += vz * lead;
-    horiz = Math.hypot(dx, dz);
+    horiz = hyp(dx, dz);
   }
   const dy = ty - eye.y;
   aimOut.yaw = Math.atan2(-dx, -dz);
   aimOut.pitch = Math.atan2(dy, horiz) + (w ? holdOver(w, horiz) * (0.55 + 0.45 * sys.skill.leadAccuracy) : 0);
-  aimOut.dist = Math.hypot(horiz, dy);
+  aimOut.dist = hyp(horiz, dy);
 }
 
 /** Aim error dynamics while tracking a visible target. */
@@ -156,19 +157,19 @@ export function findCover(sys: BotSystem, b: BotState, p: PlayerState, tx: numbe
   const w = sys.world, g = sys.grid;
   const R = 16;
   const px = p.pos.x, pz = p.pos.z, py = p.pos.y;
-  const dThreat = Math.hypot(px - tx, pz - tz);
+  const dThreat = hyp(px - tx, pz - tz);
   let bestS = Infinity, bx = 0, bz = 0;
   const consider = (cx: number, cz: number, ext: number, penalty: number): void => {
     let ux = cx - tx, uz = cz - tz;
-    const l = Math.hypot(ux, uz);
+    const l = hyp(ux, uz);
     if (l < 1e-3) return;
     ux /= l;
     uz /= l;
     const qx = cx + ux * (ext + 0.85), qz = cz + uz * (ext + 0.85);
-    const d = Math.hypot(qx - px, qz - pz);
+    const d = hyp(qx - px, qz - pz);
     if (d > 20) return;
     if (g.flagsAt(qx, qz, false) & NF_BLOCKED) return;
-    const toThreat = Math.hypot(qx - tx, qz - tz);
+    const toThreat = hyp(qx - tx, qz - tz);
     const s = d + penalty + (toThreat < dThreat * 0.6 ? 25 : 0);
     if (s < bestS) {
       bestS = s;
@@ -185,7 +186,7 @@ export function findCover(sys: BotSystem, b: BotState, p: PlayerState, tx: numbe
     if (hx + hz < 0.5) continue;
     const cx = bb.min.x + hx, cz = bb.min.z + hz;
     let ux = cx - tx, uz = cz - tz;
-    const l = Math.hypot(ux, uz) || 1;
+    const l = hyp(ux, uz) || 1;
     ux /= l;
     uz /= l;
     consider(cx, cz, Math.abs(ux) * hx + Math.abs(uz) * hz, 0);
@@ -213,7 +214,7 @@ export function combatThink(sys: BotSystem, b: BotState, p: PlayerState): void {
   const c = findContact(b, b.targetId);
   if (!c) return;
   const sk = sys.skill, t = sys.now;
-  const d = Math.hypot(c.x - p.pos.x, c.z - p.pos.z);
+  const d = hyp(c.x - p.pos.x, c.z - p.pos.z);
   manageWeapon(sys, b, p, true, d);
   const w = activeWeapon(p);
   const armed = w !== null && slotRounds(p, p.activeSlot) > 0;
@@ -228,7 +229,7 @@ export function combatThink(sys: BotSystem, b: BotState, p: PlayerState): void {
       b.coverUntil = t + 7;
     }
   }
-  if (b.coverValid && (t > b.coverUntil || Math.hypot(b.coverX - p.pos.x, b.coverZ - p.pos.z) < 0.9)) {
+  if (b.coverValid && (t > b.coverUntil || hyp(b.coverX - p.pos.x, b.coverZ - p.pos.z) < 0.9)) {
     if (t > b.coverUntil) b.coverValid = false;
   }
 
@@ -274,7 +275,7 @@ export function combatThink(sys: BotSystem, b: BotState, p: PlayerState): void {
       break;
     case CM_RETREAT: {
       let ax = p.pos.x - c.x, az = p.pos.z - c.z;
-      const l = Math.hypot(ax, az) || 1;
+      const l = hyp(ax, az) || 1;
       ax /= l;
       az /= l;
       const fx = p.pos.x + ax * 14, fz = p.pos.z + az * 14;
@@ -300,7 +301,7 @@ export function combatAct(sys: BotSystem, b: BotState, p: PlayerState): number {
   if (t < b.fragUntil && (p.items.frag || 0) > 0) {
     const eye = sys.sim.eyePos(b.id, sys.eye);
     const dx = b.fragX - eye.x, dz = b.fragZ - eye.z;
-    const d = Math.min(FRAG_MAX_RANGE, Math.hypot(dx, dz));
+    const d = Math.min(FRAG_MAX_RANGE, hyp(dx, dz));
     const v = THROWABLES.frag.throwSpeed;
     const theta = 0.5 * Math.asin(Math.min(1, (GRAVITY * d) / (v * v)));
     const yaw = Math.atan2(-dx, -dz), pitch = theta - FRAG_UP_BIAS;
@@ -328,7 +329,7 @@ export function combatAct(sys: BotSystem, b: BotState, p: PlayerState): number {
       mx = b.moveX * 0.75 + rx * 0.65;
       mz = b.moveZ * 0.75 + rz * 0.65;
     }
-    const l = Math.hypot(mx, mz) || 1;
+    const l = hyp(mx, mz) || 1;
     // Do not strafe into walls.
     if (sys.grid.freeAt(p.pos.x + (mx / l) * 1.2, p.pos.z + (mz / l) * 1.2, false)) {
       b.moveX = mx / l;

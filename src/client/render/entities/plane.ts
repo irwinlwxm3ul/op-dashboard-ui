@@ -123,7 +123,7 @@ export class PlaneRenderer {
         varying float vZ;
         void main() {
           float shimmer = 0.75 + 0.25 * sin(vZ * 0.35 - uTime * 9.0);
-          gl_FragColor = vec4(uColor, vAlpha * 0.22 * shimmer);
+          gl_FragColor = vec4(uColor, vAlpha * 0.14 * shimmer);
         }`,
       transparent: true,
       depthWrite: false,

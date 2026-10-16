@@ -35,8 +35,12 @@ export class ResultsScreen implements ScreenView {
     this.confetti = h('div', 'dz-confetti', this.hero);
     this.confetti.setAttribute('aria-hidden', 'true');
     for (let i = 0; i < 28; i++) {
+      // Deterministic scatter (no correlation between position, delay and colour).
       const c = h('i', '', this.confetti);
-      c.style.setProperty('--i', String(i));
+      c.style.setProperty('--x', `${(i * 37) % 100}%`);
+      c.style.setProperty('--d', `${-(((i * 53) % 29) / 10).toFixed(1)}s`);
+      c.style.setProperty('--h', `${(i * 71) % 360}deg`);
+      c.style.setProperty('--s', String(0.75 + ((i * 13) % 7) / 12));
     }
     this.headline = h('h2', 'dz-results-headline', this.hero);
     const place = h('div', 'dz-results-place', this.hero);

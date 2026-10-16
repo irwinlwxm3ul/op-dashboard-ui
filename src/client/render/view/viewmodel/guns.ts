@@ -129,8 +129,8 @@ function pistol(mats: Record<MatKey, THREE.Material>): GunModel {
   m.magDrop.set(0, -0.96, 0.27).normalize();
   m.sightY = 0.059;
   m.sightZ = 0.026;
-  m.eyeRelief = 0.3;
-  m.hip.set(0.1, -0.125, -0.33);
+  m.eyeRelief = 0.34;
+  m.hip.set(0.11, -0.135, -0.37);
   m.hipRot.set(0.02, 0.06, 0);
   m.casing = 'pistol';
   m.flashScale = 0.7;
@@ -182,8 +182,8 @@ function smg(mats: Record<MatKey, THREE.Material>): GunModel {
   m.gripRot.set(-0.25, 0, 0);
   m.sightY = 0.088;
   m.sightZ = 0.02;
-  m.eyeRelief = 0.14;
-  m.hip.set(0.115, -0.135, -0.27);
+  m.eyeRelief = 0.2;
+  m.hip.set(0.13, -0.155, -0.31);
   m.casing = 'pistol';
   m.flashScale = 0.8;
   m.supportStyle = 'grip';
@@ -203,7 +203,7 @@ function ar(mats: Record<MatKey, THREE.Material>): GunModel {
   b.box('darkMetal', 0.02, 0.006, 0.2, 0, 0.068, -0.06);                    // receiver rail
   b.cylZ('darkMetal', 0.009, 0.009, 0.12, 0, 0.045, -0.48);                 // barrel
   b.cylZ('darkMetal', 0.012, 0.012, 0.055, 0, 0.045, -0.565);               // flash hider
-  b.box('darkMetal', 0.006, 0.03, 0.012, 0, 0.065, -0.44);                  // gas block / folded front sight
+  b.box('darkMetal', 0.006, 0.022, 0.012, 0, 0.062, -0.44);                 // gas block / folded front sight
   b.box('polymer', 0.028, 0.092, 0.036, 0, -0.045, 0.036, -0.3);            // grip
   trigger(b, 'metal', -0.03);
   b.box('metal', 0.034, 0.03, 0.04, 0, -0.012, -0.075);                     // mag well
@@ -212,12 +212,12 @@ function ar(mats: Record<MatKey, THREE.Material>): GunModel {
   b.box('polymer', 0.036, 0.022, 0.1, 0, -0.022, 0.205, -0.25);            // stock lower edge
   b.box('darkMetal', 0.002, 0.016, 0.04, 0.021, 0.045, -0.05);              // ejection port
   // Red dot: mount, housing tube (open), front/back rings.
-  b.box('darkMetal', 0.026, 0.016, 0.042, 0, 0.078, -0.05);
-  b.cylZ('darkMetal', 0.0175, 0.0175, 0.034, 0, 0.1, -0.05, 18, true);
-  b.ringZ('darkMetal', 0.0175, 0.0025, 0, 0.1, -0.067);
-  b.ringZ('darkMetal', 0.0175, 0.0025, 0, 0.1, -0.033);
-  b.box('darkMetal', 0.008, 0.008, 0.012, 0.019, 0.1, -0.05);               // brightness knob
-  b.discZ('glass', 0.0168, 0, 0.1, -0.06);
+  b.box('darkMetal', 0.024, 0.014, 0.04, 0, 0.077, -0.05);
+  b.cylZ('darkMetal', 0.0145, 0.0145, 0.032, 0, 0.095, -0.05, 18, true);
+  b.ringZ('darkMetal', 0.0145, 0.0022, 0, 0.095, -0.066);
+  b.ringZ('darkMetal', 0.0145, 0.0022, 0, 0.095, -0.034);
+  b.box('darkMetal', 0.007, 0.007, 0.011, 0.0165, 0.095, -0.05);              // brightness knob
+  b.discZ('glass', 0.0138, 0, 0.095, -0.06);
   root.add(b.build('ar-body'));
 
   // Reticle: tiny unlit dot on the sight axis, drawn above the glass.
@@ -225,7 +225,7 @@ function ar(mats: Record<MatKey, THREE.Material>): GunModel {
     new THREE.CircleGeometry(0.0011, 12),
     new THREE.MeshBasicMaterial({ color: 0xff2a1a, toneMapped: false, transparent: true, opacity: 0.95, depthWrite: false }),
   );
-  dot.position.set(0, 0.1, -0.0605);
+  dot.position.set(0, 0.095, -0.0605);
   dot.renderOrder = 3;
   dot.frustumCulled = false;
   root.add(dot);
@@ -250,10 +250,10 @@ function ar(mats: Record<MatKey, THREE.Material>): GunModel {
   m.magBottom.set(0, -0.176, -0.096);
   m.magDrop.set(0, -1, 0.04).normalize();
   m.gripRot.set(-0.3, 0, 0);
-  m.sightY = 0.1;
-  m.sightZ = -0.033;
-  m.eyeRelief = 0.17;
-  m.hip.set(0.12, -0.145, -0.26);
+  m.sightY = 0.095;
+  m.sightZ = -0.034;
+  m.eyeRelief = 0.24;
+  m.hip.set(0.135, -0.165, -0.3);
   m.casing = 'rifle';
   m.flashScale = 1;
   return m;
@@ -293,8 +293,8 @@ function shotgun(mats: Record<MatKey, THREE.Material>): GunModel {
   m.port.set(0, -0.004, -0.04);
   m.sightY = 0.066;
   m.sightZ = 0.05;
-  m.eyeRelief = 0.2;
-  m.hip.set(0.12, -0.15, -0.25);
+  m.eyeRelief = 0.24;
+  m.hip.set(0.135, -0.17, -0.3);
   m.casing = 'shotgun';
   m.flashScale = 1.3;
   return m;
@@ -360,8 +360,8 @@ function dmr(mats: Record<MatKey, THREE.Material>): GunModel {
   m.magDrop.set(0, -0.99, -0.15).normalize();
   m.sightY = 0.1;
   m.sightZ = 0.095;
-  m.eyeRelief = 0.075;
-  m.hip.set(0.12, -0.15, -0.25);
+  m.eyeRelief = 0.1;
+  m.hip.set(0.135, -0.175, -0.31);
   m.casing = 'rifle';
   m.flashScale = 1.15;
   m.scoped = true;
@@ -417,8 +417,8 @@ function sniper(mats: Record<MatKey, THREE.Material>): GunModel {
   m.magDrop.set(0, -1, 0);
   m.sightY = 0.106;
   m.sightZ = 0.12;
-  m.eyeRelief = 0.075;
-  m.hip.set(0.12, -0.15, -0.24);
+  m.eyeRelief = 0.1;
+  m.hip.set(0.135, -0.18, -0.31);
   m.casing = 'sniper';
   m.flashScale = 1.3;
   m.scoped = true;

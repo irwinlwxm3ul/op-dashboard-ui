@@ -21,6 +21,7 @@
 // waypoints in NEAR cells are later "relaxed" away from walls (see relaxPoint) so bots walk
 // through the middle of doorways.
 
+import { hyp } from './util';
 import { STEP_HEIGHT } from '../constants';
 import type { RockDef, TreeDef, World, WorldBox } from '../types';
 
@@ -374,7 +375,7 @@ export class NavGrid {
       z += pz * 0.5;
     }
     const mx = x - p.x, mz = z - p.z;
-    const m = Math.hypot(mx, mz);
+    const m = hyp(mx, mz);
     if (m < 1e-4) return;
     const s = m > 0.6 ? 0.6 / m : 1;
     const nx = p.x + mx * s, nz = p.z + mz * s;

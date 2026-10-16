@@ -171,8 +171,8 @@ export class MultiplayerScreen implements ScreenView {
   }
 
   private defaultLobbyName(): string {
-    const name = sanitizeName(settings.get().playerName) ?? '';
-    return sanitizeText(t('ui.mp.defaultLobbyName', { name }), MAX_LOBBY_NAME_LEN);
+    const name = sanitizeName(settings.get().playerName);
+    return name ? sanitizeText(t('ui.mp.defaultLobbyName', { name }), MAX_LOBBY_NAME_LEN) : '';
   }
 
   private connect(silent = false): void {

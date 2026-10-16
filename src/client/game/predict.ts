@@ -20,7 +20,7 @@ import type { MoveEvents, MoveIntent } from '../../shared/physics';
 import type { NetVehicle, SelfState } from '../../shared/protocol';
 import { LIFE_CODES, MODE_CODES } from '../../shared/protocol';
 import {
-  ADS_MOVE_MUL, FISTS_DRAW_TIME, MAX_RECOIL_PITCH, MAX_RECOIL_YAW, MOVE_DEADZONE, PITCH_LIMIT, PLANE_JUMP_BACK,
+  ADS_MOVE_MUL, FISTS_DRAW_TIME, MAX_RECOIL_PITCH, MAX_RECOIL_YAW, MOVE_DEADZONE, PITCH_LIMIT, PLANE_AUTO_EJECT, PLANE_JUMP_BACK,
   PLANE_JUMP_CARRY, PLANE_JUMP_SPREAD, SPRAY_RESET_INTERVALS, SPRINT_MIN_FORWARD,
 } from '../../shared/sim/tuning';
 import { BTN, STANCE_FROM_CODE } from '../../shared/types';
@@ -335,6 +335,12 @@ export function predictTick(
       p.revive.elapsed += dt;
       if (p.revive.elapsed >= REVIVE_TIME) p.revive = null;
     }
+  }
+
+  // The sim ejects whoever is still aboard near the end of the flight (after the player updates).
+  if (p.mode === 'plane' && env.plane
+    && planeTraveledAt(env.plane, env.planeTime, env.time + dt) >= env.plane.length * PLANE_AUTO_EJECT) {
+    jumpFromPlane(p, env, planePositionAt(env.plane, env.planeTime, env.time + dt, planeScratch), ev);
   }
 
   tickBoost(p, dt);

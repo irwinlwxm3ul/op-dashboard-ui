@@ -2,6 +2,7 @@
 // behaviours: loot, explore buildings, rotate with the zone (optionally by vehicle), heal and
 // boost, revive teammates, follow a human squad leader, investigate noises and wander.
 
+import { hyp } from './util';
 import { REVIVE_RANGE } from '../constants';
 import { WEAPONS, canUseConsumable, isWeaponId } from '../items';
 import { angleDiff } from '../math';
@@ -69,7 +70,7 @@ export function brainThink(sys: BotSystem, b: BotState, p: PlayerState): void {
 
   // Combat.
   if (target) {
-    const d = Math.hypot(target.x - p.pos.x, target.z - p.pos.z);
+    const d = hyp(target.x - p.pos.x, target.z - p.pos.z);
     const w = activeWeapon(p);
     const armed = hasAnyRounds(p);
     if (visible) {
@@ -87,7 +88,7 @@ export function brainThink(sys: BotSystem, b: BotState, p: PlayerState): void {
   // Heal / boost.
   const heal = chooseHeal(sys, p);
   if (p.use) {
-    offer('heal', visible && target && Math.hypot(target.x - p.pos.x, target.z - p.pos.z) < 40 ? 0 : 99);
+    offer('heal', visible && target && hyp(target.x - p.pos.x, target.z - p.pos.z) < 40 ? 0 : 99);
   } else if (heal) {
     if (p.health < 60) offer('heal', quiet ? 70 + (60 - p.health) / 2 : !visible && sinceContact > 1.5 && p.health < 35 ? 72 : 0);
     else if (sinceContact > 6 && t - b.lastDamageTime > 6) offer('heal', 30);
@@ -113,15 +114,24 @@ export function brainThink(sys: BotSystem, b: BotState, p: PlayerState): void {
   followHuman = followPick !== null;
   if (!followPick) followPick = botSquadLeader(sys, p);
   if (followPick) {
-    const d = Math.hypot(followPick.pos.x - p.pos.x, followPick.pos.z - p.pos.z);
+    const d = hyp(followPick.pos.x - p.pos.x, followPick.pos.z - p.pos.z);
     followScore = followHuman ? (d > 30 ? 66 : d > 16 ? 28 : 0) : d > 70 ? 36 : 0;
     offer('follow', followScore);
   }
 
   // Loot / explore.
-  lootPick = -1;
-  lootPickScore = 0;
-  scanLoot(sys, b, p);
+  // Loot scan at ~3 Hz (every think while actively looting).
+  if (b.goal === 'loot' || t >= b.lootScanAt) {
+    b.lootScanAt = t + 0.33;
+    lootPick = -1;
+    lootPickScore = 0;
+    scanLoot(sys, b, p);
+    b.lootPick = lootPick;
+    b.lootPickScore = lootPickScore;
+  } else {
+    lootPick = b.lootPick >= 0 && sys.sim.loot.has(b.lootPick) ? b.lootPick : -1;
+    lootPickScore = lootPick >= 0 ? b.lootPickScore : 0;
+  }
   if (lootPick >= 0) offer('loot', 25 + 50 * lootPickScore);
   if (!wellEquipped(p) && pickExplore(sys, b, p)) offer('explore', 20 + (p.weapons[0] || p.weapons[1] ? 0 : 14));
 
@@ -225,7 +235,7 @@ function findDownedTeammate(sys: BotSystem, b: BotState, p: PlayerState): Player
     const q = mates[i];
     if (q.id === p.id || q.life !== 'downed') continue;
     if (q.revivedBy !== null && q.revivedBy !== p.id) continue;
-    const d = Math.hypot(q.pos.x - p.pos.x, q.pos.z - p.pos.z);
+    const d = hyp(q.pos.x - p.pos.x, q.pos.z - p.pos.z);
     if (d > REVIVE_SEARCH) continue;
     const s = d - (q.isBot ? 0 : 40);
     if (s < bestS) {
@@ -278,7 +288,7 @@ function scanLoot(sys: BotSystem, b: BotState, p: PlayerState): void {
     if (until !== undefined && until > t) continue;
     const u = lootUtility(p, it, free);
     if (u < 0.05) continue;
-    const d = Math.hypot(it.pos.x - p.pos.x, it.pos.z - p.pos.z);
+    const d = hyp(it.pos.x - p.pos.x, it.pos.z - p.pos.z);
     let s = u / (1 + d / 14);
     if (it.id === b.lootId) s *= 1.25;
     if (s <= lootPickScore) continue;
@@ -309,7 +319,7 @@ function lootThink(sys: BotSystem, b: BotState, p: PlayerState): void {
     clearDest(sys, b);
     return;
   }
-  const d = Math.hypot(it.pos.x - p.pos.x, it.pos.z - p.pos.z);
+  const d = hyp(it.pos.x - p.pos.x, it.pos.z - p.pos.z);
   if (d < 1.9 && Math.abs(it.pos.y - p.pos.y) < 2) {
     // Replacing a primary: switch to the weapon we are willing to drop first.
     if (isWeaponId(it.item) && WEAPONS[it.item].slot === 'primary') {
@@ -337,12 +347,15 @@ function lootThink(sys: BotSystem, b: BotState, p: PlayerState): void {
 function pickExplore(sys: BotSystem, b: BotState, p: PlayerState): boolean {
   if (b.exploreBuilding >= 0 && !b.explored[b.exploreBuilding]) return true;
   b.exploreBuilding = -1;
+  // Searching every building is cheap but not free: at most every 1.5 s.
+  if (sys.now < b.exploreScanAt) return false;
+  b.exploreScanAt = sys.now + 1.5;
   const info = sys.info, w = sys.world;
   let best = -1, bestD = EXPLORE_RADIUS;
   for (let i = 0; i < w.buildings.length; i++) {
     if (b.explored[i]) continue;
     const cx = info.bCenter[i * 2], cz = info.bCenter[i * 2 + 1];
-    const d = Math.hypot(cx - p.pos.x, cz - p.pos.z);
+    const d = hyp(cx - p.pos.x, cz - p.pos.z);
     if (d >= bestD) continue;
     if (!insideNext(sys, cx, cz) || isAvoided(sys, b, cx, cz)) continue;
     best = i;
@@ -366,7 +379,7 @@ function exploreThink(sys: BotSystem, b: BotState, p: PlayerState): void {
     clearDest(sys, b);
     return;
   }
-  const d = Math.hypot(sys.xz.x - p.pos.x, sys.xz.z - p.pos.z);
+  const d = hyp(sys.xz.x - p.pos.x, sys.xz.z - p.pos.z);
   if (d < 2.5 || sys.now - b.exploreSince > 35) {
     b.explored[bi] = 1;
     b.exploreBuilding = -1;
@@ -378,7 +391,7 @@ function exploreThink(sys: BotSystem, b: BotState, p: PlayerState): void {
 
 function zoneThink(sys: BotSystem, b: BotState, p: PlayerState): void {
   const t = sys.now;
-  const d = Math.hypot(b.zoneX - p.pos.x, b.zoneZ - p.pos.z);
+  const d = hyp(b.zoneX - p.pos.x, b.zoneZ - p.pos.z);
   if (d > VEHICLE_TRIP && t - b.vehicleActionAt > 3) {
     const v = findVehicle(sys, b, p, 80, true);
     if (v) {
@@ -419,7 +432,7 @@ function reviveThink(sys: BotSystem, b: BotState, p: PlayerState): void {
   const q = revivePick;
   if (!q) return;
   b.reviveId = q.id;
-  const d = Math.hypot(q.pos.x - p.pos.x, q.pos.z - p.pos.z);
+  const d = hyp(q.pos.x - p.pos.x, q.pos.z - p.pos.z);
   if (d <= REVIVE_RANGE - 0.5) {
     clearDest(sys, b);
     if (!p.revive && sys.now - b.reviveActionAt > 0.8) {
@@ -437,7 +450,7 @@ function followThink(sys: BotSystem, b: BotState, p: PlayerState): void {
   const t = sys.now;
   if (followHuman && q.mode === 'vehicle' && q.vehicleId !== null) {
     const v = sys.sim.vehicles.get(q.vehicleId);
-    if (v && Math.hypot(v.pos.x - p.pos.x, v.pos.z - p.pos.z) < 45) {
+    if (v && hyp(v.pos.x - p.pos.x, v.pos.z - p.pos.z) < 45) {
       setGoal(sys, b, 'vehicle');
       b.vehicleId = v.id;
       b.vehicleSince = t;
@@ -452,7 +465,7 @@ function followThink(sys: BotSystem, b: BotState, p: PlayerState): void {
 
 function idleThink(sys: BotSystem, b: BotState, p: PlayerState): void {
   const t = sys.now;
-  const reached = Math.hypot(b.wanderX - p.pos.x, b.wanderZ - p.pos.z) < 5;
+  const reached = hyp(b.wanderX - p.pos.x, b.wanderZ - p.pos.z) < 5;
   if (t >= b.wanderUntil || reached) {
     const w = sys.world, info = sys.info, rng = b.rng;
     let found = false;
@@ -471,7 +484,7 @@ function idleThink(sys: BotSystem, b: BotState, p: PlayerState): void {
         x = p.pos.x + (rng.next() - 0.5) * 160;
         z = p.pos.z + (rng.next() - 0.5) * 160;
       }
-      if (Math.hypot(x - p.pos.x, z - p.pos.z) > 250 || !insideNext(sys, x, z) || !w.inBounds(x, z)) continue;
+      if (hyp(x - p.pos.x, z - p.pos.z) > 250 || !insideNext(sys, x, z) || !w.inBounds(x, z)) continue;
       if (w.heightAt(x, z) < w.waterLevel + 0.5) continue;
       // Snap to a free cell when the area is already mapped (the planner snaps otherwise).
       if (sys.grid.nearestFree(x, z, 6, sys.xz, false)) {
@@ -504,7 +517,7 @@ export function brainAct(sys: BotSystem, b: BotState, p: PlayerState, out: ActOu
   if (goal === 'revive') {
     const q = sys.sim.players.get(b.reviveId);
     if (q && q.life === 'downed') {
-      const d = Math.hypot(q.pos.x - p.pos.x, q.pos.z - p.pos.z);
+      const d = hyp(q.pos.x - p.pos.x, q.pos.z - p.pos.z);
       if (d <= REVIVE_RANGE - 0.2) {
         b.moveScale = 0;
         buttons |= BTN.INTERACT;
@@ -574,7 +587,7 @@ export function downedThink(sys: BotSystem, b: BotState, p: PlayerState): void {
   for (let i = 0; i < mates.length; i++) {
     const q = mates[i];
     if (q.id === p.id || q.life !== 'alive') continue;
-    const d = Math.hypot(q.pos.x - p.pos.x, q.pos.z - p.pos.z);
+    const d = hyp(q.pos.x - p.pos.x, q.pos.z - p.pos.z);
     if (d < bestD) {
       bestD = d;
       best = q;
@@ -587,7 +600,7 @@ export function downedThink(sys: BotSystem, b: BotState, p: PlayerState): void {
   const c = findContact(b, b.targetId);
   if (c) {
     let ax = p.pos.x - c.x, az = p.pos.z - c.z;
-    const l = Math.hypot(ax, az) || 1;
+    const l = hyp(ax, az) || 1;
     ax /= l;
     az /= l;
     const fx = p.pos.x + ax * 8, fz = p.pos.z + az * 8;

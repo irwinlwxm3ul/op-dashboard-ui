@@ -9,6 +9,7 @@
 // * Damage: getting hit gives the attacker's bearing (like the directional damage indicator).
 // Enemy health, armour and inventory are never read.
 
+import { hyp } from './util';
 import { EYE_HEIGHT } from '../constants';
 import { angleDiff, yawTo } from '../math';
 import type { PlayerState } from '../types';
@@ -87,7 +88,7 @@ function detectRange(sys: BotSystem, q: PlayerState): number {
   else if (q.mode === 'freefall' || q.mode === 'parachute') r *= 1.5;
   else if (q.stance === 'crouch') r *= 0.75;
   else if (q.stance === 'prone') r *= 0.45;
-  const sp = Math.hypot(q.vel.x, q.vel.z);
+  const sp = hyp(q.vel.x, q.vel.z);
   if (sp > 5.5) r *= 1.15;
   if (q.fireCooldown > 0) r *= 1.5; // muzzle flash / tracer
   return r;
@@ -110,7 +111,7 @@ function checkVisibility(sys: BotSystem, b: BotState, q: PlayerState, dist: numb
   }
   if (vis && dist > 22) {
     // Concealment: a still, low target inside a bush is invisible beyond close range.
-    const sp = Math.hypot(q.vel.x, q.vel.z);
+    const sp = hyp(q.vel.x, q.vel.z);
     if (sp < 1.5 && q.fireCooldown <= 0) {
       const bush = bushCoverHeight(sys.world, sys.info, q.pos.x, q.pos.z);
       if (bush > 0 && headHeight(q) < bush + 0.1) vis = false;
@@ -214,7 +215,7 @@ export function refreshTarget(sys: BotSystem, b: BotState, p: PlayerState): void
   const q = sys.sim.players.get(c.id);
   if (!q || q.life === 'dead') return;
   sys.sim.eyePos(b.id, sys.eye);
-  const d = Math.hypot(q.pos.x - p.pos.x, q.pos.z - p.pos.z);
+  const d = hyp(q.pos.x - p.pos.x, q.pos.z - p.pos.z);
   if (d > detectRange(sys, q) * 1.2) {
     c.visible = false;
     return;
@@ -232,7 +233,7 @@ export function selectTarget(sys: BotSystem, b: BotState, p: PlayerState): void 
     const c = b.contacts[i];
     if (c.id < 0 || !c.visible) continue;
     anyVisible = true;
-    let s = Math.hypot(c.x - p.pos.x, c.z - p.pos.z);
+    let s = hyp(c.x - p.pos.x, c.z - p.pos.z);
     if (c.downed) s += 70;
     if (p.lastAttacker === c.id && t - b.lastDamageTime < 3) s -= 15;
     if (c.id === b.targetId) s -= 12;

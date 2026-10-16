@@ -109,8 +109,17 @@ transformed.x += (sin(dzPh) + 0.45 * sin(dzPh * 2.3 + 1.7)) * dzS * 0.016;
 transformed.z += (cos(dzPh * 0.83 + 0.4) + 0.35 * sin(dzPh * 3.1)) * dzS * 0.011;
 transformed += normal * (sin(uTime * 5.5 + (position.x + position.z) * 37.0 + dzInst.x) * 0.004 * dzS);`,
       );
+    if (!depth) {
+      // Foliage transmits and scatters light: a constant wrap term keeps shaded canopies green
+      // instead of near-black (cheap stand-in for translucency).
+      shader.fragmentShader = patchShader(
+        shader.fragmentShader,
+        'lights_fragment_end',
+        '#include <lights_fragment_end>\nreflectedLight.indirectDiffuse += diffuseColor.rgb * 0.3;',
+      );
+    }
   };
-  mat.customProgramCacheKey = () => `dz-foliage-${trunkScale ? 1 : 0}-${depth ? 1 : 0}`;
+  mat.customProgramCacheKey = () => `dz-foliage-${trunkScale ? 1 : 0}-${depth ? 1 : 0}-v2`;
   return mat;
 }
 

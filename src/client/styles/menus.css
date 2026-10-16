@@ -104,7 +104,7 @@
   position: absolute;
   top: -60px;
   left: calc(14% + var(--i) * 17%);
-  color: rgba(242, 169, 0, 0.32);
+  color: rgba(242, 169, 0, 0.22);
   animation: dz-chute-fall calc(22s + var(--i) * 3s) linear infinite;
   animation-delay: calc(var(--i) * -5.5s);
 }
@@ -402,7 +402,7 @@
 }
 
 .dz-lobby-table {
-  --cols: minmax(0, 2fr) minmax(0, 1.3fr) 5.2em 6.2em 7em 5.6em;
+  --cols: minmax(0, 2fr) minmax(0, 1.3fr) 6em 6.2em 7em 5.6em;
 }
 
 .dz-lobby-table .dz-tbody {
@@ -423,7 +423,11 @@
 }
 
 .dz-mp-create .dz-slider,
-.dz-mp-create .dz-field-control .dz-input {
+.dz-mp-create .dz-field-control .dz-input,
+.dz-mp-create .dz-field-control .dz-select,
+.dz-lobby-edit .dz-slider,
+.dz-lobby-edit .dz-field-control .dz-input,
+.dz-lobby-edit .dz-field-control .dz-select {
   width: min(220px, 26vw);
 }
 
@@ -736,7 +740,7 @@
   display: inline-flex;
   align-items: baseline;
   direction: ltr;
-  font-size: clamp(60px, 10vw, 118px);
+  font-size: clamp(52px, min(9vw, 13vh), 112px);
   font-weight: 900;
   line-height: 1;
   font-variant-numeric: tabular-nums;
@@ -797,20 +801,19 @@
 .dz-confetti i {
   position: absolute;
   top: -16px;
-  left: calc(var(--i) * 3.55%);
-  width: 8px;
-  height: 14px;
+  left: var(--x);
+  width: calc(8px * var(--s));
+  height: calc(14px * var(--s));
   border-radius: 2px;
-  background: hsl(calc(38deg + var(--i) * 47deg) 92% 62%);
+  background: hsl(var(--h) 92% 62%);
   opacity: 0.9;
-  animation: dz-confetti calc(2.6s + (var(--i) * 0.07s)) ease-in infinite;
-  animation-delay: calc(var(--i) * -0.19s);
+  animation: dz-confetti calc(2.4s + var(--s) * 0.9s) ease-in var(--d) infinite;
 }
 
 @keyframes dz-confetti {
   to {
-    transform: translate(calc(-30px + var(--i) * 2px), 72vh) rotate(calc(220deg + var(--i) * 40deg));
-    opacity: 0.2;
+    transform: translate(-30px, 72vh) rotate(540deg);
+    opacity: 0.15;
   }
 }
 
@@ -851,7 +854,7 @@
 }
 
 .dz-results-table {
-  --cols: 4.4em minmax(0, 2.4fr) 4em 4em 5em 5.4em;
+  --cols: 5.4em minmax(0, 2.2fr) 4.6em 4.6em 6.4em 6.6em;
   max-height: 50vh;
   overflow-y: auto;
 }

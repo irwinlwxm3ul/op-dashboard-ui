@@ -241,8 +241,8 @@ export function drawMates(ctx: CanvasRenderingContext2D, v: MapView, frame: Fram
 }
 
 /** Self arrow pointing along `bearingDeg` (clockwise from north). */
-export function drawSelf(ctx: CanvasRenderingContext2D, v: MapView, x: number, z: number, bearingDeg: number, color: string): void {
-  const s = 7 * v.dpr;
+export function drawSelf(ctx: CanvasRenderingContext2D, v: MapView, x: number, z: number, bearingDeg: number, color: string, size = 7): void {
+  const s = size * v.dpr;
   ctx.save();
   ctx.translate(toX(v, x), toY(v, z));
   ctx.rotate((bearingDeg * Math.PI) / 180);
@@ -257,8 +257,8 @@ export function drawSelf(ctx: CanvasRenderingContext2D, v: MapView, x: number, z
   ctx.closePath();
   ctx.fill();
   ctx.fillStyle = color;
-  ctx.strokeStyle = 'rgba(0,0,0,0.8)';
-  ctx.lineWidth = 1.2 * v.dpr;
+  ctx.strokeStyle = 'rgba(0,0,0,0.85)';
+  ctx.lineWidth = 1.4 * v.dpr;
   ctx.beginPath();
   ctx.moveTo(0, -s * 1.2);
   ctx.lineTo(s * 0.85, s * 0.9);

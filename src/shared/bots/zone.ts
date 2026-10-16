@@ -1,5 +1,6 @@
 // Zone awareness: where to rotate to and how urgent it is.
 
+import { hyp } from './util';
 import type { PlayerState } from '../types';
 import type { BotState } from './state';
 import type { BotSystem } from './system';
@@ -29,7 +30,7 @@ export function updateZoneTarget(sys: BotSystem, b: BotState, p: PlayerState): v
   const safe = Math.max(0, nr - zoneMargin(nr));
   // Somewhere on the bot's side of the circle, randomised so bots do not converge on one spot.
   let ax = p.pos.x - z.nx, az = p.pos.z - z.nz;
-  const l = Math.hypot(ax, az);
+  const l = hyp(ax, az);
   let ang = l > 1 ? Math.atan2(az, ax) : b.rng.next() * Math.PI * 2;
   ang += b.rng.gauss() * 0.6;
   const rad = safe * (0.2 + 0.55 * b.rng.next());
@@ -58,14 +59,14 @@ export function insideNext(sys: BotSystem, x: number, z: number, extraMargin = 0
   const zn = sys.sim.zone;
   if (!zoneActive(sys)) return true;
   const safe = Math.max(0, zn.nr - zoneMargin(zn.nr) - extraMargin);
-  return Math.hypot(x - zn.nx, z - zn.nz) <= Math.max(safe, 3);
+  return hyp(x - zn.nx, z - zn.nz) <= Math.max(safe, 3);
 }
 
 /** Taking zone damage now (or about to)? */
 export function outsideCurrent(sys: BotSystem, x: number, z: number): boolean {
   const zn = sys.sim.zone;
   if (!zoneActive(sys)) return false;
-  return Math.hypot(x - zn.cx, z - zn.cz) > zn.r - 3;
+  return hyp(x - zn.cx, z - zn.cz) > zn.r - 3;
 }
 
 /**
@@ -76,7 +77,7 @@ export function zoneUrgency(sys: BotSystem, p: PlayerState, inVehicle: boolean):
   if (!zoneActive(sys)) return 0;
   const z = sys.sim.zone;
   const safe = Math.max(0, z.nr - zoneMargin(z.nr));
-  const dNext = Math.hypot(p.pos.x - z.nx, p.pos.z - z.nz);
+  const dNext = hyp(p.pos.x - z.nx, p.pos.z - z.nz);
   const outside = dNext - safe;
   if (outside <= 0) return 0;
   const travel = outside / (inVehicle ? VEHICLE_SPEED : FOOT_SPEED);
@@ -84,7 +85,7 @@ export function zoneUrgency(sys: BotSystem, p: PlayerState, inVehicle: boolean):
   if (z.stage === 'waiting') {
     avail = z.timer + z.timer * 0.6;
   } else if (z.stage === 'shrinking') {
-    const dCur = Math.hypot(p.pos.x - z.cx, p.pos.z - z.cz);
+    const dCur = hyp(p.pos.x - z.cx, p.pos.z - z.cz);
     const closing = z.r - z.nr;
     avail = closing > 1 ? z.timer * Math.max(0, (z.r - dCur) / closing) : z.timer;
   } else {

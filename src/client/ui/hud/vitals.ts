@@ -166,10 +166,11 @@ export class Vitals implements Widget {
     if (isDowned) {
       this.downedFill.set(self.downedHp / DOWNED_HEALTH);
       const reviver = self.revivedBy !== null ? frame.roster.get(self.revivedBy)?.name ?? '' : '';
-      const key = reviver ? `r:${reviver}` : 'd';
+      // While being revived the centre progress bar says who is helping; keep this label short.
+      const key = reviver ? 'r' : 'd';
       if (key !== this.lastDownedKey) {
         this.lastDownedKey = key;
-        this.downedLabel.set(reviver ? t('hud.beingRevived', { name: reviver }) : t('hud.downed'));
+        this.downedLabel.set(reviver ? t('hud.stateDown') : t('hud.downed'));
         this.downedLabel.el.classList.toggle('dz-downed-reviving', !!reviver);
       }
     }

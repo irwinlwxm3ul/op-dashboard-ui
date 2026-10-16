@@ -23,6 +23,7 @@ import { angleDiff, clamp, damp, lerp } from '../../../../shared/math';
 import type { ConsumableId, Vec3, WeaponId, World } from '../../../../shared/types';
 import type { ClientEventBus, LocalPlayerView } from '../../../game/types';
 import type { FeelState, RenderCore } from '../../contracts';
+import { ENV } from '../../core';
 import { CasingPool } from '../../fx/casings';
 import { localMuzzle } from '../../fx/muzzle';
 import { releaseAtlases, retainAtlases } from '../../fx/textures';
@@ -36,8 +37,8 @@ import { MuzzleFlash } from './muzzleFlash';
 import { releaseMaterials, retainMaterials, type MatKey } from './parts';
 
 /** Viewmodel vertical FOV at hip / fully aimed (deg). */
-const VM_FOV_HIP = 54;
-const VM_FOV_ADS = 42;
+const VM_FOV_HIP = 60;
+const VM_FOV_ADS = 46;
 const HOLSTER_TIME = 0.14;
 const SLIDE_TIME = 0.07;
 const DRY_TIME = 0.18;
@@ -177,8 +178,9 @@ export class Viewmodel {
     this.pivot.add(this.holder);
     this.scene.add(this.pivot);
 
-    this.hemi = new THREE.HemisphereLight(0xdfe9ff, 0x4d4436, 1.25);
-    this.sun = new THREE.DirectionalLight(0xfff1dc, 2.1);
+    // Same light rig as the world (render core ENV) so the gun matches its surroundings.
+    this.hemi = new THREE.HemisphereLight(ENV.hemiSky, ENV.hemiGround, ENV.hemiIntensity);
+    this.sun = new THREE.DirectionalLight(ENV.sunColor, ENV.sunIntensity);
     this.scene.add(this.hemi, this.sun);
 
     this.rightArm = new Arm(this.pivot, this.mats, false, new THREE.Vector3(0.24, -0.34, 0.16), new THREE.Vector3(0.75, -1, 0.15));
@@ -549,13 +551,15 @@ export class Viewmodel {
   }
 
   private updateLights(inp: VmInput, dt: number): void {
-    // Sun direction in camera space so the gun is lit like the world.
+    // Sun and sky directions in camera space so the gun is lit like the world.
     this.q.copy(inp.mainCamera.quaternion).invert();
     this.v.copy(inp.sunDir).applyQuaternion(this.q).normalize();
     this.sun.position.copy(this.v).multiplyScalar(5);
-    const target = 2.1 * (1 - 0.75 * clamp(inp.indoor, 0, 1));
+    this.hemi.position.set(0, 1, 0).applyQuaternion(this.q);
+    const indoor = clamp(inp.indoor, 0, 1);
+    const target = ENV.sunIntensity * (1 - 0.8 * indoor);
     this.sun.intensity += (target - this.sun.intensity) * damp(4, dt);
-    this.hemi.intensity = 1.25 * (1 - 0.35 * clamp(inp.indoor, 0, 1));
+    this.hemi.intensity = ENV.hemiIntensity * (1 - 0.4 * indoor);
     // Share the world's environment map (if any) for consistent reflections.
     const env = this.core.scene.environment;
     if (this.scene.environment !== env) this.scene.environment = env;

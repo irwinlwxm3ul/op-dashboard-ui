@@ -78,7 +78,6 @@ export class MatchRunner {
   private readonly tickTimes = new Float64Array(TIMING_WINDOW);
   private tickTimeCount = 0;
   private tickTimeIdx = 0;
-  private tickMax = 0;
   // Per-snapshot caches (shared between clients).
   private readonly npPublic = new Map<EntityId, NetPlayer>();
   private readonly npTeam = new Map<EntityId, NetPlayer>();
@@ -222,18 +221,23 @@ export class MatchRunner {
     return this.sim.isOver();
   }
 
+  /** Tick timing over the last TIMING_WINDOW ticks (~10 s), player and bot counts. */
   stats(): { tickMsAvg: number; tickMsMax: number; players: number; bots: number } {
     let sum = 0;
-    for (let i = 0; i < this.tickTimeCount; i++) sum += this.tickTimes[i];
+    let max = 0;
+    for (let i = 0; i < this.tickTimeCount; i++) {
+      const t = this.tickTimes[i];
+      sum += t;
+      if (t > max) max = t;
+    }
     let bots = 0;
     for (const p of this.sim.playerList) if (p.isBot) bots++;
     const r = {
       tickMsAvg: this.tickTimeCount > 0 ? sum / this.tickTimeCount : 0,
-      tickMsMax: this.tickMax,
+      tickMsMax: max,
       players: this.sim.players.size,
       bots,
     };
-    this.tickMax = 0;
     return r;
   }
 
@@ -243,7 +247,6 @@ export class MatchRunner {
     this.tickTimes[this.tickTimeIdx] = ms;
     this.tickTimeIdx = (this.tickTimeIdx + 1) % TIMING_WINDOW;
     if (this.tickTimeCount < TIMING_WINDOW) this.tickTimeCount++;
-    if (ms > this.tickMax) this.tickMax = ms;
   }
 
   private collectLoot(): void {
