@@ -31,6 +31,8 @@ export const MAX_VOICES = 40;
 const MIN_GAIN = 0.0015;
 /** Filters above this cutoff are skipped (inaudible difference, saves a node). */
 const FILTER_SKIP_HZ = 16500;
+/** Pre-compressor trim leaving headroom for overlapping sounds. */
+const MIX_HEADROOM = 0.8;
 
 const GUN_REF = 10;
 const GUN_ROLLOFF = 0.5;
@@ -148,19 +150,22 @@ export class AudioEngine {
   }
 
   private buildGraph(ctx: AudioContext): void {
+    // Gentle glue compression (keeps the near/far and local/remote dynamics readable), then a
+    // fast limiter so dozens of overlapping shots and blasts never clip.
     const mix = ctx.createGain();
+    mix.gain.value = MIX_HEADROOM;
     const comp = ctx.createDynamicsCompressor();
-    comp.threshold.value = -16;
-    comp.knee.value = 10;
-    comp.ratio.value = 4;
-    comp.attack.value = 0.004;
-    comp.release.value = 0.22;
+    comp.threshold.value = -10;
+    comp.knee.value = 6;
+    comp.ratio.value = 2.5;
+    comp.attack.value = 0.003;
+    comp.release.value = 0.25;
     const limiter = ctx.createDynamicsCompressor();
-    limiter.threshold.value = -2.5;
+    limiter.threshold.value = -1;
     limiter.knee.value = 0;
     limiter.ratio.value = 20;
     limiter.attack.value = 0.001;
-    limiter.release.value = 0.08;
+    limiter.release.value = 0.06;
     const master = ctx.createGain();
     mix.connect(comp);
     comp.connect(limiter);
@@ -299,11 +304,17 @@ export class AudioEngine {
     out.gain.value = gain;
     v.out = out;
     if (Number.isFinite(pan) && Math.abs(pan) > 0.01) {
+      const pv = Math.max(-1, Math.min(1, pan));
       const p = ctx.createStereoPanner();
-      p.pan.value = Math.max(-1, Math.min(1, pan));
+      p.pan.value = pv;
       out.connect(p);
       p.connect(bus);
       v.panner = p;
+      // A StereoPanner balances stereo input by folding one channel into the other (+6 dB on the
+      // near side at full pan); keep stereo layers at constant power like mono ones.
+      let stereo = false;
+      for (let i = 0; i < n; i++) if (this.layerBuf[i]!.numberOfChannels > 1) stereo = true;
+      if (stereo) out.gain.value = gain / Math.sqrt(1 + Math.sin(Math.abs(pv) * Math.PI * 0.5));
     } else {
       out.connect(bus);
     }

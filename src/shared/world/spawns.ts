@@ -198,10 +198,22 @@ export function placeVehicles(world: GeneratedWorld, rng: Rng, roads: Road[], to
     segs.push({ a, b, w: r.width, len: Math.hypot(b.x - a.x, b.z - a.z) });
   }
   if (segs.length === 0) return;
-  const weights = segs.map((s) => s.len);
+  // Cumulative lengths for length-weighted sampling.
+  const cum: number[] = [];
+  let acc = 0;
+  for (const s of segs) cum.push((acc += s.len));
+  const pickSeg = (): (typeof segs)[number] => {
+    const r = rng.next() * acc;
+    let lo = 0, hi = cum.length - 1;
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1;
+      if (cum[mid] < r) lo = mid + 1; else hi = mid;
+    }
+    return segs[lo];
+  };
   for (let spacing = 60; world.vehicleSpawns.length < count && spacing >= 15; spacing -= 15) {
     for (let tries = 0; world.vehicleSpawns.length < count && tries < 3000; tries++) {
-      const s = rng.weighted(segs, weights);
+      const s = pickSeg();
       if (s.len < 1) continue;
       const t = rng.range(0.1, 0.9);
       const dx = (s.b.x - s.a.x) / s.len, dz = (s.b.z - s.a.z) / s.len;

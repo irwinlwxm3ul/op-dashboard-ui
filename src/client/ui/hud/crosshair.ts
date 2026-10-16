@@ -27,6 +27,11 @@ const RETICLE_X8 = `<svg viewBox="-100 -100 200 200" xmlns="http://www.w3.org/20
 <g fill="#0c0c0c"><circle cx="-8" cy="0" r="1.1"/><circle cx="-15" cy="0" r="1.1"/><circle cx="8" cy="0" r="1.1"/><circle cx="15" cy="0" r="1.1"/>
 <circle cx="0" cy="8" r="1.1"/><circle cx="0" cy="15" r="1.1"/><circle cx="0" cy="-8" r="1.1"/><circle cx="0" cy="-15" r="1.1"/></g></svg>`;
 
+const RETICLE_REDDOT = '<i class="dz-reddot"></i>';
+
+/** Reticle markup per scope kind (iron sights draw nothing: the viewmodel shows them). */
+const RETICLES: Record<ScopeKind, string> = { iron: '', reddot: RETICLE_REDDOT, x4: RETICLE_X4, x8: RETICLE_X8 };
+
 export class Crosshair implements Widget {
   readonly el: HTMLDivElement;
   private readonly vis: Vis;
@@ -98,7 +103,7 @@ export class ScopeOverlay implements Widget {
     this.kind = kind;
     if (!kind) return;
     this.el.dataset.kind = kind;
-    this.reticle.innerHTML = kind === 'x4' ? RETICLE_X4 : kind === 'x8' ? RETICLE_X8 : '<i class="dz-reddot"></i>';
+    this.reticle.innerHTML = RETICLES[kind];
   }
 
   relabel(): void {}

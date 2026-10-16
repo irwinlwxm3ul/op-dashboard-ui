@@ -1,7 +1,8 @@
 // Trees (clustered into forests by noise), rocks (favouring slopes, peaks and coasts) and bushes.
 
 import type { TreeKind } from '../types';
-import { fbm2, Rng } from '../rng';
+import { Rng } from '../rng';
+import { Noise2 } from './noise';
 import { M_APRON, M_BUILDING, M_NOVEG, M_PROP, M_ROAD, M_ROCK, M_TOWN, M_TREE, OccupancyMask } from './mask';
 import type { GeneratedWorld } from './worldImpl';
 
@@ -29,21 +30,53 @@ const TREE_BLOCK = M_ROAD | M_BUILDING | M_APRON | M_PROP | M_TOWN | M_TREE | M_
 const ROCK_BLOCK = M_ROAD | M_BUILDING | M_APRON | M_PROP | M_TOWN | M_TREE | M_ROCK | M_NOVEG;
 const BUSH_BLOCK = M_ROAD | M_BUILDING | M_APRON | M_PROP | M_ROCK | M_NOVEG;
 
-/** Forest density field in [0, 1]. */
-export function forestDensity(seed: number, x: number, z: number, bias = 0): number {
-  const n = fbm2(seed, x / 170 + 3.7, z / 170 - 8.1, 4) + bias;
-  return smooth(-0.02, 0.28, n);
+/** Forest noise sampled on an 8 m lattice and bilinearly interpolated (cheap per-candidate lookups). */
+export class ForestField {
+  private readonly n: number;
+  private readonly half: number;
+  private readonly step = 8;
+  private readonly v: Float32Array;
+
+  constructor(seed: number, size: number) {
+    const noise = new Noise2(seed);
+    this.half = size / 2;
+    this.n = Math.ceil(size / this.step) + 1;
+    this.v = new Float32Array(this.n * this.n);
+    for (let j = 0; j < this.n; j++) {
+      for (let i = 0; i < this.n; i++) {
+        const x = -this.half + i * this.step, z = -this.half + j * this.step;
+        this.v[j * this.n + i] = noise.fbm(x / 170 + 3.7, z / 170 - 8.1, 4);
+      }
+    }
+  }
+
+  raw(x: number, z: number): number {
+    const n = this.n;
+    let fx = (x + this.half) / this.step, fz = (z + this.half) / this.step;
+    fx = Math.min(n - 1.001, Math.max(0, fx));
+    fz = Math.min(n - 1.001, Math.max(0, fz));
+    const i = Math.floor(fx), j = Math.floor(fz), tx = fx - i, tz = fz - j;
+    const v = this.v, k = j * n + i;
+    const a = v[k] + (v[k + 1] - v[k]) * tx, b = v[k + n] + (v[k + n + 1] - v[k + n]) * tx;
+    return a + (b - a) * tz;
+  }
+
+  /** Forest density in [0, 1]. */
+  density(x: number, z: number, bias = 0): number {
+    return smooth(-0.02, 0.28, this.raw(x, z) + bias);
+  }
 }
 
 export function placeVegetation(world: GeneratedWorld, mask: OccupancyMask, rng: Rng, p: VegetationParams): void {
   const hf = world.hf;
   const lim = world.half - 6;
   const bias = p.forestBias ?? 0;
+  const forest = new ForestField(p.noiseSeed, world.size);
 
   // ---- Trees -----------------------------------------------------------------------------------
   for (let attempts = 0, max = p.trees * 80; world.trees.length < p.trees && attempts < max; attempts++) {
     const x = r2(rng.range(-lim, lim)), z = r2(rng.range(-lim, lim));
-    const dens = 0.025 + 0.975 * forestDensity(p.noiseSeed, x, z, bias);
+    const dens = 0.025 + 0.975 * forest.density(x, z, bias);
     if (rng.next() > dens) continue;
     if (mask.get(x, z) & TREE_BLOCK) continue;
     const h = hf.heightAt(x, z);
@@ -84,7 +117,7 @@ export function placeVegetation(world: GeneratedWorld, mask: OccupancyMask, rng:
   // ---- Bushes (no collision) -------------------------------------------------------------------
   for (let attempts = 0, max = p.bushes * 60; world.bushes.length < p.bushes && attempts < max; attempts++) {
     const x = r2(rng.range(-lim, lim)), z = r2(rng.range(-lim, lim));
-    const dens = 0.2 + 0.8 * forestDensity(p.noiseSeed, x, z, bias + 0.15);
+    const dens = 0.2 + 0.8 * forest.density(x, z, bias + 0.15);
     if (rng.next() > dens) continue;
     if (mask.get(x, z) & BUSH_BLOCK) continue;
     const h = hf.heightAt(x, z);

@@ -87,6 +87,11 @@ interface ReloadState {
   lastCycle: number;
 }
 
+function activeWeapon(self: LocalPlayerView): { mag: number } | null {
+  const slot = self.activeSlot;
+  return slot === 0 || slot === 1 || slot === 2 ? self.weapons[slot] : null;
+}
+
 export class Viewmodel {
   readonly scene = new THREE.Scene();
   readonly camera = new THREE.PerspectiveCamera(VM_FOV_HIP, 16 / 9, 0.01, 20);
@@ -122,8 +127,10 @@ export class Viewmodel {
   private reviveW = 0;
   private slideT = 0;
   private slideLocked = false;
-  private boltT = -1;
-  private pumpT = -1;
+  private boltActive = false;
+  private boltT = 0;
+  private pumpActive = false;
+  private pumpT = 0;
   private boltEjected = false;
   private pumpEjected = false;
   private dryT = 0;
@@ -188,7 +195,7 @@ export class Viewmodel {
     this.prevAfterRender = core.scene.onAfterRender;
     const self = this;
     core.scene.onAfterRender = function (renderer, scene, camera, geometry, material, group) {
-      self.prevAfterRender.call(this, renderer, scene, camera, geometry, material, group);
+      self.prevAfterRender.call(core.scene, renderer, scene, camera, geometry, material, group);
       if (camera !== core.camera || !self.renderPending || self.disposed) return;
       self.renderPending = false;
       const autoClear = renderer.autoClear;
@@ -238,7 +245,7 @@ export class Viewmodel {
     }
     this.updateLights(inp, dt);
 
-    this.pose(inp, adsE, dt);
+    this.pose(inp, adsE);
     this.poseParts(self);
     this.poseHands(inp, adsE);
     this.flash.update(dt);
@@ -289,9 +296,11 @@ export class Viewmodel {
     if (this.visible) this.flash.fire(gun.flashScale);
     const def = WEAPONS[weapon];
     if (def.fireMode === 'bolt') {
+      this.boltActive = true;
       this.boltT = -BOLT_DELAY;
       this.boltEjected = false;
     } else if (def.fireMode === 'pump') {
+      this.pumpActive = true;
       this.pumpT = -PUMP_DELAY;
       this.pumpEjected = false;
     } else {
@@ -318,7 +327,7 @@ export class Viewmodel {
     r.lastCycle = -1;
     this.shellStage = r.perShell > 0 ? 'enter' : 'none';
     // A bolt cycle in progress is folded into the reload.
-    if (this.boltT >= 0) this.boltT = -1;
+    this.boltActive = false;
   }
 
   // ------------------------------------------------------------------------------------------
@@ -349,8 +358,8 @@ export class Viewmodel {
     }
     // Reset per-gun mechanical state.
     this.slideT = 0;
-    this.boltT = -1;
-    this.pumpT = -1;
+    this.boltActive = false;
+    this.pumpActive = false;
     this.slideLocked = false;
     this.lastMag = -1;
   }
@@ -394,31 +403,30 @@ export class Viewmodel {
     }
     // Pistol slide locks back on the last round and releases on reload.
     if (gun && gun.slide && self.activeSlot >= 0) {
-      const inst = self.weapons[self.activeSlot];
+      const inst = activeWeapon(self);
       const mag = inst ? inst.mag : 0;
       if (this.lastMag > 0 && mag === 0 && this.slideT > 0) this.slideLocked = true;
       if (mag > 0 && !this.reload.active) this.slideLocked = false;
       this.lastMag = mag;
     }
-    // Bolt (sniper) cycle
-    if (this.boltT > -1 + 1e-6 || this.boltT >= -BOLT_DELAY - 1e-6) {
-      if (this.boltT !== -1) {
-        this.boltT += dt;
-        const dur = this.boltDuration();
-        if (!this.boltEjected && this.boltT / dur >= 0.45) {
-          this.boltEjected = true;
-          if (this.visible) this.ejectCasing(0);
-        }
-        if (this.boltT >= dur) this.boltT = -1;
+    // Bolt (sniper) cycle: starts after a short delay so the recoil settles first.
+    if (this.boltActive) {
+      this.boltT += dt;
+      const dur = this.boltDuration();
+      if (!this.boltEjected && this.boltT / dur >= 0.45) {
+        this.boltEjected = true;
+        if (this.visible) this.ejectCasing(0);
       }
+      if (this.boltT >= dur) this.boltActive = false;
     }
-    if (this.pumpT !== -1) {
+    // Shotgun pump cycle
+    if (this.pumpActive) {
       this.pumpT += dt;
       if (!this.pumpEjected && this.pumpT / PUMP_TIME >= 0.42) {
         this.pumpEjected = true;
         if (this.visible) this.ejectCasing(0);
       }
-      if (this.pumpT >= PUMP_TIME) this.pumpT = -1;
+      if (this.pumpT >= PUMP_TIME) this.pumpActive = false;
     }
     // Healing / reviving / throwing lower the gun.
     const using = self.use !== null;
@@ -471,7 +479,7 @@ export class Viewmodel {
   private updateShellReload(self: LocalPlayerView, dt: number): void {
     const r = this.reload;
     const def = WEAPONS.shotgun;
-    const inst = self.activeSlot >= 0 ? self.weapons[self.activeSlot] : null;
+    const inst = activeWeapon(self);
     const full = inst ? inst.mag >= def.magSize : false;
     const finished = r.done || full || (r.seenProgress && self.reloadProgress < 0);
     switch (this.shellStage) {
@@ -505,13 +513,10 @@ export class Viewmodel {
 
   private endReload(): void {
     const r = this.reload;
-    // An empty bolt-action reload chambers a round with the bolt.
-    const chamber = r.active && r.empty && r.weapon === 'sniper' && r.u >= 0.95;
     r.active = false;
     r.done = false;
     this.shellStage = 'none';
     this.shellInHand = false;
-    if (chamber) this.slideLocked = false;
   }
 
   private updateLook(inp: VmInput, dt: number): void {
@@ -553,7 +558,7 @@ export class Viewmodel {
   // Posing
   // ------------------------------------------------------------------------------------------
 
-  private pose(inp: VmInput, adsE: number, dt: number): void {
+  private pose(inp: VmInput, adsE: number): void {
     const gun = this.gun;
     const feel = inp.feel;
     const t = this.time;
@@ -603,14 +608,14 @@ export class Viewmodel {
       rx += tilt * 0.22; ry += tilt * -0.12; rz += tilt * 0.55;
     }
     // Bolt cycle: tilt toward the bolt, shotgun pump: small rock.
-    if (this.boltT >= 0 && gun) {
+    if (this.boltActive && this.boltT >= 0 && gun) {
       const b = this.boltT / this.boltDuration();
       const w = window4(b, 0, 0.15, 0.8, 1);
       rz += w * -0.12 * (1 - adsE * 0.7);
       rx += w * 0.05;
       px += w * -0.01;
     }
-    if (this.pumpT >= 0) {
+    if (this.pumpActive && this.pumpT >= 0) {
       const p = pulse(this.pumpT / PUMP_TIME, 0, 1);
       rx += p * 0.05; pz += p * 0.01;
     }
@@ -622,12 +627,14 @@ export class Viewmodel {
     rx += sineNoise(t * 0.45, 3) * 0.004 * idleK;
     ry += sineNoise(t * 0.4, 4) * 0.005 * idleK;
 
-    // Stride bob (feel provides phase + amount)
+    // Stride bob from feel: phase advances PI per footstep, footfalls at k*PI. Lateral sway
+    // follows sin(phase) (one cycle per left+right step), vertical follows cos(2*phase) and
+    // dips on each footfall.
     const A = feel.bob.amount * (1 - adsE * 0.82) * (1 + sp * 0.9);
     if (A > 1e-4) {
       const ph = feel.bob.phase;
       px += Math.sin(ph) * 0.011 * A;
-      py += (Math.abs(Math.cos(ph)) - 0.6) * -0.013 * A;
+      py += Math.cos(2 * ph) * -0.007 * A;
       rz += Math.sin(ph) * 0.022 * A;
       ry += Math.sin(ph) * 0.01 * A;
     }
@@ -663,7 +670,6 @@ export class Viewmodel {
     if (gun) gun.root.visible = true;
     // Hide when lowered completely out of view and nothing else is shown.
     if (low > 0.97 && this.itemRise < 0.02 && this.throwT < 0 && this.reviveW < 0.02) this.visible = false;
-    void dt;
   }
 
   private reloadTilt(): number {
@@ -706,7 +712,6 @@ export class Viewmodel {
       const ms = this.magState(reloading ? u : 0);
       gun.mag.position.copy(gun.magDrop).multiplyScalar(ms.off);
       gun.mag.visible = ms.visible;
-      if (reloading && u >= 0.66 && u - 0.02 < 0.66 && this.jolt.v === 0) this.jolt.v += 0.1;
     }
     // Insert jolt (edge-detected on progress)
     if (reloading) {
@@ -739,14 +744,14 @@ export class Viewmodel {
     // Shotgun pump: after each shot and when racking after an empty reload
     if (gun.pump) {
       let back = 0;
-      if (this.pumpT >= 0) back = window4(this.pumpT / PUMP_TIME, 0, 0.4, 0.48, 0.92);
+      if (this.pumpActive && this.pumpT >= 0) back = window4(this.pumpT / PUMP_TIME, 0, 0.4, 0.48, 0.92);
       if (r.active && this.shellStage === 'pump') back = window4(r.exitT / SHELL_PUMP, 0, 0.42, 0.5, 0.95);
       gun.pump.position.z = back * 0.075;
     }
     // Sniper bolt: after each shot, and at the end of an empty reload
     if (gun.bolt) {
       let b = -1;
-      if (this.boltT >= 0) b = this.boltT / this.boltDuration();
+      if (this.boltActive && this.boltT >= 0) b = this.boltT / this.boltDuration();
       else if (reloading && r.empty && u >= 0.72) b = Math.min(1, (u - 0.72) / 0.24);
       let lift = 0, back = 0;
       if (b >= 0) {
@@ -787,7 +792,7 @@ export class Viewmodel {
       // Bolt cycle: hand goes to the knob.
       let bw = 0;
       let b = -1;
-      if (this.boltT >= 0 && gun.bolt) b = this.boltT / this.boltDuration();
+      if (this.boltActive && this.boltT >= 0 && gun.bolt) b = this.boltT / this.boltDuration();
       else if (r.active && r.empty && gun.bolt && r.u >= 0.7) b = Math.min(1, (r.u - 0.72) / 0.24);
       if (b >= 0 && gun.bolt) {
         bw = window4(b, -0.02, 0.12, 0.85, 1);
@@ -843,39 +848,41 @@ export class Viewmodel {
     void adsE;
   }
 
+  /** Smoothly interpolate the reload hand target between two gun-local points. */
+  private mixTarget(ax: number, ay: number, az: number, bx: number, by: number, bz: number, f: number): void {
+    const e = smooth01(f);
+    this.tgt.set(ax + (bx - ax) * e, ay + (by - ay) * e, az + (bz - az) * e);
+  }
+  private readonly tgt = new THREE.Vector3();
+
   /** Left hand path during a magazine reload (writes leftT / leftR in gun-local space). */
   private magLeftHand(gun: GunModel): void {
     const r = this.reload;
     const u = r.u;
-    const w = this.reloadW;
-    const S = this.leftT; // currently support
-    // Magazine bottom (follows the current mag offset)
+    const S = this.leftT; // currently the support anchor
+    const T = this.tgt;
+    // Magazine bottom (follows the current mag offset), a point down out of view, charging handle.
     const ms = this.magState(u);
     const mbx = gun.magBottom.x + gun.magDrop.x * ms.off - 0.012;
     const mby = gun.magBottom.y + gun.magDrop.y * ms.off - 0.02;
     const mbz = gun.magBottom.z + gun.magDrop.z * ms.off + 0.01;
     const dx = gun.magBottom.x - 0.08, dy = gun.magBottom.y - 0.3, dz = gun.magBottom.z + 0.08;
     const cx = gun.chargeAnchor.x, cy = gun.chargeAnchor.y, cz = gun.chargeAnchor.z + (gun.charge ? gun.charge.position.z : 0);
-    let tx = S.x, ty = S.y, tz = S.z, k = 0;
-    const set = (x: number, y: number, z: number) => { tx = x; ty = y; tz = z; };
-    const mix = (ax: number, ay: number, az: number, bx: number, by: number, bz: number, f: number) => {
-      const e = smooth01(f);
-      tx = ax + (bx - ax) * e; ty = ay + (by - ay) * e; tz = az + (bz - az) * e;
-    };
-    if (u < 0.1) { mix(S.x, S.y, S.z, mbx, mby, mbz, u / 0.1); k = 1; }
-    else if (u < 0.3) { set(mbx, mby, mbz); k = 1; }
-    else if (u < 0.42) { mix(mbx, mby, mbz, dx, dy, dz, (u - 0.3) / 0.12); k = 1; }
-    else if (u < 0.5) { set(dx, dy, dz); k = 1; }
-    else if (u < 0.66) { mix(dx, dy, dz, mbx, mby, mbz, (u - 0.5) / 0.1); k = 1; }
+    let k = 1;
+    if (u < 0.1) this.mixTarget(S.x, S.y, S.z, mbx, mby, mbz, u / 0.1);
+    else if (u < 0.3) T.set(mbx, mby, mbz);
+    else if (u < 0.42) this.mixTarget(mbx, mby, mbz, dx, dy, dz, (u - 0.3) / 0.12);
+    else if (u < 0.5) T.set(dx, dy, dz);
+    else if (u < 0.66) this.mixTarget(dx, dy, dz, mbx, mby, mbz, (u - 0.5) / 0.1);
     else if (!r.empty || !gun.charge) {
-      if (u < 0.8) { mix(mbx, mby, mbz, S.x, S.y, S.z, (u - 0.66) / 0.14); k = 1; }
-    } else {
-      if (u < 0.74) { mix(mbx, mby, mbz, cx, cy, cz, (u - 0.66) / 0.08); k = 1; }
-      else if (u < 0.86) { set(cx, cy, cz); k = 1; }
-      else if (u < 0.96) { mix(cx, cy, cz, S.x, S.y, S.z, (u - 0.86) / 0.1); k = 1; }
-    }
-    k *= w;
-    S.set(S.x + (tx - S.x) * k, S.y + (ty - S.y) * k, S.z + (tz - S.z) * k);
+      if (u < 0.8) this.mixTarget(mbx, mby, mbz, S.x, S.y, S.z, (u - 0.66) / 0.14);
+      else k = 0;
+    } else if (u < 0.74) this.mixTarget(mbx, mby, mbz, cx, cy, cz, (u - 0.66) / 0.08);
+    else if (u < 0.86) T.set(cx, cy, cz);
+    else if (u < 0.96) this.mixTarget(cx, cy, cz, S.x, S.y, S.z, (u - 0.86) / 0.1);
+    else k = 0;
+    k *= this.reloadW;
+    if (k > 0) S.lerp(T, k);
     // Hand turns palm-in while handling the magazine.
     const handling = k * window4(u, 0.04, 0.12, 0.7, 0.8);
     this.leftR.set(this.leftR.x - handling * 0.4, this.leftR.y + handling * 0.5, this.leftR.z - handling * 0.9);
@@ -887,36 +894,33 @@ export class Viewmodel {
     const S = this.leftT;
     const px = gun.port.x - 0.01, py = gun.port.y - 0.035, pz = gun.port.z + 0.02;
     const pouchX = 0.02, pouchY = -0.3, pouchZ = 0.1;
-    let tx = S.x, ty = S.y, tz = S.z, k = 1;
+    let k = 1;
     this.shellInHand = false;
-    const mix = (ax: number, ay: number, az: number, bx: number, by: number, bz: number, f: number) => {
-      const e = smooth01(f);
-      tx = ax + (bx - ax) * e; ty = ay + (by - ay) * e; tz = az + (bz - az) * e;
-    };
     switch (this.shellStage) {
       case 'enter':
-        mix(S.x, S.y, S.z, px, py - 0.02, pz + 0.04, r.t / SHELL_ENTER);
+        this.mixTarget(S.x, S.y, S.z, px, py - 0.02, pz + 0.04, r.t / SHELL_ENTER);
         break;
       case 'loop': {
         const c = ((r.t - SHELL_ENTER) / r.perShell) % 1;
-        if (c < 0.35) mix(px, py - 0.02, pz + 0.04, pouchX, pouchY, pouchZ, c / 0.35);
-        else if (c < 0.7) { mix(pouchX, pouchY, pouchZ, px, py - 0.04, pz + 0.05, (c - 0.35) / 0.35); this.shellInHand = c > 0.42; }
-        else if (c < 0.88) { mix(px, py - 0.04, pz + 0.05, px, py, pz, (c - 0.7) / 0.18); this.shellInHand = c < 0.85; }
-        else mix(px, py, pz, px, py - 0.02, pz + 0.04, (c - 0.88) / 0.12);
+        if (c < 0.35) this.mixTarget(px, py - 0.02, pz + 0.04, pouchX, pouchY, pouchZ, c / 0.35);
+        else if (c < 0.7) {
+          this.mixTarget(pouchX, pouchY, pouchZ, px, py - 0.04, pz + 0.05, (c - 0.35) / 0.35);
+          this.shellInHand = c > 0.42;
+        } else if (c < 0.88) {
+          this.mixTarget(px, py - 0.04, pz + 0.05, px, py, pz, (c - 0.7) / 0.18);
+          this.shellInHand = c < 0.85;
+        } else this.mixTarget(px, py, pz, px, py - 0.02, pz + 0.04, (c - 0.88) / 0.12);
         break;
       }
       case 'pump':
-        mix(px, py - 0.02, pz + 0.04, S.x, S.y, S.z, r.exitT / 0.12);
-        break;
-      case 'exit':
-        k = 0;
+        this.mixTarget(px, py - 0.02, pz + 0.04, S.x, S.y, S.z, r.exitT / 0.12);
         break;
       default:
         k = 0;
         break;
     }
     k *= this.reloadW;
-    S.set(S.x + (tx - S.x) * k, S.y + (ty - S.y) * k, S.z + (tz - S.z) * k);
+    if (k > 0) S.lerp(this.tgt, k);
     this.leftR.set(this.leftR.x - k * 0.5, this.leftR.y, this.leftR.z + k * 0.6);
   }
 

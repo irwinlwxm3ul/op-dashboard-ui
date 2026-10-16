@@ -143,15 +143,15 @@ describe('spatial math', () => {
 
   it('pans with the listener yaw (yaw 0 faces -Z, +X is right, positive yaw turns left)', () => {
     const s = createSpatial();
-    expect(spatialize(L, { x: 20, y: 0, z: 0 }, F, s).pan).toBeGreaterThan(0.8);
-    expect(spatialize(L, { x: -20, y: 0, z: 0 }, F, s).pan).toBeLessThan(-0.8);
+    expect(spatialize(L, { x: 20, y: 0, z: 0 }, F, s).pan).toBeGreaterThan(0.6);
+    expect(spatialize(L, { x: -20, y: 0, z: 0 }, F, s).pan).toBeLessThan(-0.6);
     const ahead = spatialize(L, { x: 0, y: 0, z: -20 }, F, s);
     expect(Math.abs(ahead.pan)).toBeLessThan(1e-9);
     expect(ahead.front).toBeCloseTo(1, 9);
     // Turned 90° left we face -X: a source at -X is straight ahead, one at -Z is on the right.
     const left = { ...L, yaw: Math.PI / 2 };
     expect(spatialize(left, { x: -20, y: 0, z: 0 }, F, s).front).toBeCloseTo(1, 9);
-    expect(spatialize(left, { x: 0, y: 0, z: -20 }, F, s).pan).toBeGreaterThan(0.8);
+    expect(spatialize(left, { x: 0, y: 0, z: -20 }, F, s).pan).toBeGreaterThan(0.6);
     // Behind: slightly quieter and darker than the same source in front.
     const front = spatialize(L, { x: 0, y: 0, z: -50 }, F, createSpatial());
     const back = spatialize(L, { x: 0, y: 0, z: 50 }, F, createSpatial());

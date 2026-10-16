@@ -38,7 +38,8 @@ const NEAR_CUTOFF = 18000;
 const FAR_CUTOFF = 700;
 const FAR_CUTOFF_DIST = 800;
 const MIN_CUTOFF = 380;
-const PAN_WIDTH = 0.9;
+/** Max pan: the far ear still hears a 90° source ~12 dB down (natural on headphones). */
+const PAN_WIDTH = 0.7;
 
 /**
  * Inverse-distance law (WebAudio "inverse" model) with a smooth fade to silence over the last

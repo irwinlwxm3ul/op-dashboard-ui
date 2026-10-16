@@ -906,3 +906,137 @@ describe('event bus', () => {
     expect(seen).toEqual(['localJump', 'localSnapshot', 'localLand']);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Parity with the real authoritative simulation
+// ---------------------------------------------------------------------------
+
+import { MatchRunner } from '../src/shared/sim';
+import { generateWorld } from '../src/shared/world';
+import { validateClientMessage } from '../src/shared/validate';
+
+/** ClientGame <-> real MatchRunner over a JSON loopback with symmetric latency. */
+class Loopback {
+  now = 1000;
+  game: ClientGame | null = null;
+  readonly transport = new StubTransport('ws');
+  readonly runner: MatchRunner;
+  private readonly wire: { at: number; fn: () => void }[] = [];
+  private nextRunner = this.now;
+
+  constructor(readonly config: MatchConfig, readonly latencyMs: number) {
+    this.runner = new MatchRunner({
+      config,
+      clients: [{
+        id: 'c1', name: 'Tester', team: null,
+        send: (msg) => {
+          const wireMsg = JSON.parse(JSON.stringify(msg)) as ServerMessage;
+          this.later(() => {
+            if (wireMsg.t === 'matchInit') {
+              this.game = new ClientGame(this.transport, wireMsg.init, memorySettings(), {
+                world: generateWorld(config.seed, config.mode === 'training' ? 'training' : 'island'),
+                now: () => this.now,
+              });
+            } else {
+              this.transport.deliver(wireMsg);
+            }
+          });
+        },
+      }],
+    });
+    this.runner.start(this.now);
+  }
+
+  private later(fn: () => void): void {
+    this.wire.push({ at: this.now + this.latencyMs, fn });
+  }
+
+  frame(): void {
+    const target = this.now + 1000 / 60;
+    while (true) {
+      const next = Math.min(this.nextRunner, ...this.wire.map((w) => w.at));
+      if (next > target) break;
+      this.now = next;
+      for (let i = 0; i < this.wire.length; i++) {
+        if (this.wire[i].at <= this.now) {
+          this.wire.splice(i, 1)[0].fn();
+          i--;
+        }
+      }
+      if (this.nextRunner <= this.now) {
+        this.runner.update(this.now);
+        this.nextRunner += 4;
+      }
+    }
+    this.now = target;
+    if (!this.game) return;
+    this.game.update(1 / 60);
+    for (const m of this.transport.sent.splice(0)) {
+      const raw = JSON.parse(JSON.stringify(m));
+      this.later(() => {
+        const v = validateClientMessage(raw);
+        if (v) this.runner.handleMessage('c1', v);
+      });
+    }
+  }
+
+  run(frames: number, each?: (i: number) => void): void {
+    for (let i = 0; i < frames; i++) {
+      each?.(i);
+      this.frame();
+    }
+  }
+}
+
+describe('parity with the real GameSim', () => {
+  it('predicts movement, stance, ADS and spraying without corrections (training ground, 60 ms latency)', () => {
+    const lb = new Loopback({ ...CONFIG, mode: 'training', maxPlayers: 4, teamSize: 1, infiniteAmmo: true }, 60);
+    lb.run(30);
+    const game = lb.game!;
+    expect(game).not.toBeNull();
+    game.queueAction({ a: 'give', item: 'ar' });
+    lb.run(20);
+    const input = game.input;
+    input.keyDown('Digit1');
+    lb.run(60);
+    expect(game.getFrame().self!.weapon).toBe('ar');
+
+    const corrections: number[] = [];
+    let shots = 0;
+    game.events.on('localShot', () => shots++);
+    lb.run(900, (i) => {
+      if (i === 0) input.keyDown('KeyW');
+      if (i === 60) input.keyDown('ShiftLeft');
+      if (i === 120) input.keyDown('Space');
+      if (i === 121) input.keyUp('Space');
+      if (i === 180) { input.keyUp('ShiftLeft'); input.keyDown('KeyA'); }
+      if (i === 240) input.mouseButton(0, true);
+      if (i === 300) input.mouseButton(0, false);
+      if (i === 330) input.keyDown('KeyC');
+      if (i === 400) { input.keyUp('KeyA'); input.keyDown('KeyD'); }
+      if (i === 460) input.keyDown('KeyC');
+      if (i === 500) input.mouseButton(2, true);
+      if (i === 520) input.mouseButton(0, true);
+      if (i === 560) input.mouseButton(0, false);
+      if (i === 600) input.mouseButton(2, false);
+      if (i === 640) input.keyDown('KeyR');
+      if (i === 641) input.keyUp('KeyR');
+      if (i > 0 && i < 750) input.mouseMove(i % 60 < 30 ? 4 : -3, i % 90 < 45 ? 1 : -1);
+      if (i === 750) { input.keyUp('KeyW'); input.keyUp('KeyD'); }
+      corrections.push(game.correction);
+    });
+    const maxCorrection = Math.max(...corrections);
+    if (process.env.DZ_DEBUG) console.log('PARITY', { maxCorrection, shots, pending: game.pendingInputs, pos: game.predictedState!.pos, mag: game.predictedState!.weapons[0], nonzero: corrections.filter((c) => c > 1e-9).length, spawn: lb.runner.sim.world.training!.spawn });
+    expect(shots).toBeGreaterThan(10);
+    // Prediction runs the same rules as the server: corrections stay at numerical noise.
+    expect(maxCorrection).toBeLessThan(0.02);
+    const sim = lb.runner.sim;
+    const me = [...sim.players.values()].find((p) => !p.isBot)!;
+    const pred = game.predictedState!;
+    expect(pred.pos.x).toBeCloseTo(me.pos.x, 4);
+    expect(pred.pos.z).toBeCloseTo(me.pos.z, 4);
+    expect(pred.shotCounter).toBe(me.shotCounter);
+    expect(pred.recoilPitch).toBeCloseTo(me.recoilPitch, 6);
+    expect(pred.weapons[0]?.mag).toBe(me.weapons[0]?.mag);
+  });
+});

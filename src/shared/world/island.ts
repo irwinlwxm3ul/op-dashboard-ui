@@ -4,7 +4,7 @@
 
 import { MAP_SIZE, TERRAIN_RES } from '../constants';
 import type { BuildingStyle, TownDef } from '../types';
-import { fbm2, hash32, Rng } from '../rng';
+import { hash32, Rng } from '../rng';
 import {
   type BuildingPlan, type Rect, type RoomInfo, type Rot, doorApron, footprintHalf, generateBuilding, planBuilding,
   planDoorsWorld,
@@ -12,6 +12,7 @@ import {
 import { Heightfield, smooth01 } from './heightfield';
 import { M_APRON, M_BUILDING, M_NOVEG, M_PROP, M_ROAD, M_TOWN, OccupancyMask } from './mask';
 import { MILITARY_NAMES, TOWN_NAMES } from './names';
+import { Noise2 } from './noise';
 import { type PropCtx, type PropInfo, placeBarrier, placeContainer, placeCrates, placeFence, placeSandbags } from './props';
 import {
   type Road, chaikin, distToSegment, flattenRoads, rasterizeRoads, resample, roadProfile, roadSegments, routeRoad,
@@ -83,7 +84,8 @@ interface IslandShape {
 
 function makeShape(seed: number): IslandShape {
   const rng = new Rng(hash32(seed, S_SHAPE));
-  const sCoast = hash32(seed, 1), sHill = hash32(seed, 2), sDetail = hash32(seed, 3), sMount = hash32(seed, 4);
+  const nCoast = new Noise2(hash32(seed, 1)), nCoast2 = new Noise2(hash32(seed, 5)), nHill = new Noise2(hash32(seed, 2));
+  const nDetail = new Noise2(hash32(seed, 3)), nMount = new Noise2(hash32(seed, 4));
   // Mountain ridge: a segment roughly tangential to a circle of radius ~180 m.
   let dx = rng.range(-1, 1), dz = rng.range(-1, 1);
   let l = Math.sqrt(dx * dx + dz * dz);
@@ -101,8 +103,8 @@ function makeShape(seed: number): IslandShape {
   const coastDist = (x: number, z: number): number => {
     const r = Math.sqrt(x * x + z * z);
     const ux = x / (r + 1), uz = z / (r + 1);
-    const n1 = fbm2(sCoast, ux * 1.7 + 5.3, uz * 1.7 + 2.1, 3);
-    const n2 = fbm2(sCoast + 7, x / 150, z / 150, 3);
+    const n1 = nCoast.fbm(ux * 1.7 + 5.3, uz * 1.7 + 2.1, 3);
+    const n2 = nCoast2.fbm(x / 150, z / 150, 3);
     return 437 + 32 * n1 + 12 * n2 - r;
   };
   const mountain = (x: number, z: number): number => {
@@ -118,13 +120,13 @@ function makeShape(seed: number): IslandShape {
     const shore = d >= 0 ? -0.8 + (3.3 * d) / (d + 14) : Math.max(-12, -0.8 + 0.236 * d);
     if (d <= 8) return shore;
     const inland = smooth01((d - 8) / 102);
-    const h01 = fbm2(sHill, x / 260 + 11.3, z / 260 - 4.7, 4) * 0.5 + 0.5;
+    const h01 = nHill.fbm(x / 260 + 11.3, z / 260 - 4.7, 4) * 0.5 + 0.5;
     const t = Math.min(1, Math.max(0, (h01 - 0.22) / 0.62));
     const hills = 40 * t * t;
     const m = mountain(x, z);
-    const ridged = 1 - Math.abs(fbm2(sMount, x / 60, z / 60, 3));
+    const ridged = 1 - Math.abs(nMount.fbm(x / 60, z / 60, 3));
     const mount = m * (72 + 14 * ridged);
-    const detail = 2.2 * fbm2(sDetail, x / 40, z / 40, 3);
+    const detail = 2.2 * nDetail.fbm(x / 40, z / 40, 3);
     const land = hills * (1 - 0.6 * Math.min(1, m * 1.5)) + mount + detail;
     return shore + inland * Math.max(0, land);
   };
@@ -522,7 +524,7 @@ function placeYardFences(ctx: PropCtx, plans: BuildingPlan[]): void {
 
 function computeSurfaces(world: GeneratedWorld, onRoad: Uint8Array, towns: TownPlan[], seed: number): void {
   const hf = world.hf, res = hf.res, h = hf.h, cell = hf.cell;
-  const sDirt = hash32(seed, S_SURF), sRock = hash32(seed, S_SURF + 1);
+  const nDirt = new Noise2(hash32(seed, S_SURF)), nRock = new Noise2(hash32(seed, S_SURF + 1));
   for (let j = 0; j < res; j++) {
     const z = hf.coord(j);
     for (let i = 0; i < res; i++) {
@@ -534,8 +536,8 @@ function computeSurfaces(world: GeneratedWorld, onRoad: Uint8Array, towns: TownP
         const gx = (h[j * res + Math.min(res - 1, i + 1)] - h[j * res + Math.max(0, i - 1)]) / (2 * cell);
         const gz = (h[Math.min(res - 1, j + 1) * res + i] - h[Math.max(0, j - 1) * res + i]) / (2 * cell);
         const ny = 1 / Math.sqrt(gx * gx + gz * gz + 1);
-        const dirt = fbm2(sDirt, x / 55, z / 55, 3);
-        if (ny < 0.8 || hv > 64 + 10 * fbm2(sRock, x / 40, z / 40, 2)) s = SURF.rock;
+        const dirt = nDirt.fbm(x / 55, z / 55, 3);
+        if (ny < 0.8 || hv > 64 + 10 * nRock.fbm(x / 40, z / 40, 2)) s = SURF.rock;
         else if (hv < 2.4) s = dirt > 0.1 ? SURF.sand : SURF.grass;
         else {
           let townDirt = false;

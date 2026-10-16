@@ -4,7 +4,7 @@
 
 import { TERRAIN_RES, TRAINING_MAP_SIZE } from '../constants';
 import type { ItemId, TrainingTarget, Vec2, VehicleType } from '../types';
-import { fbm2, hash32, Rng } from '../rng';
+import { hash32, Rng } from '../rng';
 import {
   type BuildingPlan, type Rect, type RoomInfo, type Rot, doorApron, footprintHalf, generateBuilding, planBuilding,
   planDoorsWorld,
@@ -12,6 +12,7 @@ import {
 import { Heightfield, smooth01 } from './heightfield';
 import { M_APRON, M_BUILDING, M_NOVEG, M_TOWN, OccupancyMask } from './mask';
 import { TRAINING_TOWN_NAME } from './names';
+import { Noise2 } from './noise';
 import { PAL } from './palette';
 import { type PropCtx, type PropInfo, placeBarrier, placeContainer, placeCrates } from './props';
 import { type Road, flattenRoads, rasterizeRoads, resample, roadProfile, roadSegments } from './roads';
@@ -93,7 +94,7 @@ export function generateTraining(seed: number): GeneratedWorld {
   const hf = new Heightfield(size, TERRAIN_RES);
   const world = new GeneratedWorld(seed, 'training', hf);
   const half = hf.half;
-  const sCoast = hash32(seed, 0x7c1), sHill = hash32(seed, 0x7c2);
+  const nCoast = new Noise2(hash32(seed, 0x7c1)), nHill = new Noise2(hash32(seed, 0x7c2));
 
   // ---- Terrain: flat plain, gentle hills near the edges, a backstop berm, sea beyond ---------------
   for (let j = 0; j < hf.res; j++) {
@@ -101,14 +102,14 @@ export function generateTraining(seed: number): GeneratedWorld {
     for (let i = 0; i < hf.res; i++) {
       const x = hf.coord(i);
       const e = half - Math.max(Math.abs(x), Math.abs(z));
-      const ce = 26 + 6 * fbm2(sCoast, x / 90, z / 90, 2);
+      const ce = 26 + 6 * nCoast.fbm(x / 90, z / 90, 2);
       const d = e - ce;
       let h: number;
       if (d < 0) h = Math.max(-10, -0.8 + 0.236 * d);
       else {
         h = -0.8 + (PLAIN + 0.8) * smooth01(d / 40);
         const band = smooth01((d - 8) / 25) * (1 - smooth01((e - 75) / 45));
-        const n = Math.max(0, (fbm2(sHill, x / 80, z / 80, 3) * 0.5 + 0.5 - 0.3) / 0.7);
+        const n = Math.max(0, (nHill.fbm(x / 80, z / 80, 3) * 0.5 + 0.5 - 0.3) / 0.7);
         const keep = smooth01((areaDist(x, z) - 4) / 30);
         h += band * keep * 11 * n;
         // Earth backstop behind the long-range targets.
