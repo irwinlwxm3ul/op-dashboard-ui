@@ -68,6 +68,8 @@ export type LobbyErrorCode =
   | 'lobby.notReady'
   | 'lobby.badSettings'
   | 'lobby.nameInvalid'
+  /** Server-wide or per-address limit reached (lobbies, matches, connections). */
+  | 'lobby.serverLimit'
   | 'net.rateLimited'
   | 'net.badMessage'
   | 'net.versionMismatch'

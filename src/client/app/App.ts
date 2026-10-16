@@ -5,7 +5,9 @@
 //              ├─ Single player setup ──┤→ loading → game → results → menu / play again
 //              └─ Multiplayer → lobby browser → lobby room → loading → game → results → lobby room
 
+import { botName } from '../../shared/bots';
 import { PROTOCOL_VERSION } from '../../shared/constants';
+import { Rng } from '../../shared/rng';
 import type { LobbySettings, LobbyState, MatchInit, ServerMessage } from '../../shared/protocol';
 import type { MatchConfig, MatchResults } from '../../shared/types';
 import { audio } from '../audio';
@@ -110,7 +112,7 @@ export class App implements AppActions {
       const hub = new MessageHub(transport);
       this.localHub = hub;
       const initP = hub.waitFor(isMatchInit, MATCH_INIT_TIMEOUT_MS);
-      transport.start(config, settings.get().playerName || 'Player');
+      transport.start(config, this.playerName());
       this.ui.setLoading(0.15, 'flow.loading.waiting');
       const { init } = await initP;
       await this.beginMatch(hub, init, context);
@@ -122,6 +124,18 @@ export class App implements AppActions {
     } finally {
       this.starting = false;
     }
+  }
+
+  /**
+   * The player's display name. If none was entered, generate a language-neutral gamer tag once
+   * (same generator as the bots) and remember it, instead of a hardcoded English word.
+   */
+  private playerName(): string {
+    const current = settings.get().playerName.trim();
+    if (current) return current;
+    const tag = botName(new Rng(randomSeed()));
+    settings.set({ playerName: tag });
+    return tag;
   }
 
   private closeLocal(): void {
