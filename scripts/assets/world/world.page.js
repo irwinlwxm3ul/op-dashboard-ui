@@ -228,9 +228,10 @@ export async function simplify(g, target, { uvWeight = 1, normalWeight = 0.5, ma
 
 /**
  * Foliage LOD: keeps a deterministic `keep` fraction of the connected components ("cards") of
- * `g` and scales each survivor by `grow` around its centroid so the canopy keeps its coverage.
+ * `g` (never more than `maxTris` triangles) and scales each survivor by `grow` around its
+ * centroid so the canopy keeps its coverage.
  */
-export function thinCards(g, keep, grow = 1, seed = 1) {
+export function thinCards(g, keep, grow = 1, seed = 1, maxTris = Infinity) {
   const pos = g.getAttribute('position').array;
   const n = pos.length / 3;
   // Union-find over vertices welded by quantised position (cards split at UV seams stay whole).
@@ -261,7 +262,13 @@ export function thinCards(g, keep, grow = 1, seed = 1) {
   const keyed = list.map((c) => ({ c, k: rnd() }));
   keyed.sort((a, b) => a.k - b.k);
   const count = Math.max(1, Math.round(list.length * keep));
-  const kept = keyed.slice(0, count).map((x) => x.c);
+  const kept = [];
+  let keptTris = 0;
+  for (const { c } of keyed) {
+    if (kept.length >= count || keptTris + c.tris.length > maxTris) break;
+    kept.push(c);
+    keptTris += c.tris.length;
+  }
   const out = g.clone();
   const p = out.getAttribute('position').array;
   const newIdx = [];
@@ -276,7 +283,7 @@ export function thinCards(g, keep, grow = 1, seed = 1) {
     }
     for (const t of c.tris) newIdx.push(idx[t], idx[t + 1], idx[t + 2]);
   }
-  return { geometry: compact(out, Uint32Array.from(newIdx)), cards: list.length, kept: count };
+  return { geometry: compact(out, Uint32Array.from(newIdx)), cards: list.length, kept: kept.length };
 }
 
 /** Adds a float attribute computed per vertex: fn(x, y, z, i) -> number. */
@@ -455,7 +462,7 @@ export function toBase64(buf) {
 /** Exports `object` as GLB to `absPath` (Node side) and returns the byte size. */
 export async function exportGlb(object, absPath) {
   const exporter = new GLTFExporter();
-  const buf = await exporter.parseAsync(object, { binary: true, maxTextureSize: 1024, onlyVisible: true });
+  const buf = await exporter.parseAsync(object, { binary: true, trs: true, maxTextureSize: 1024, onlyVisible: true });
   await window.__writeFile(absPath, toBase64(buf));
   return buf.byteLength;
 }

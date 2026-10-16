@@ -110,7 +110,7 @@ async function reduceLeaves(g, target, seed) {
   if (probe.cards >= 60) {
     const keep = target / tris(g);
     const grow = Math.min(1.9, Math.pow(1 / keep, 0.42));
-    return thinCards(g, keep, grow, seed).geometry;
+    return thinCards(g, keep, grow, seed, target).geometry;
   }
   return simplify(g, target, { uvWeight: 2, normalWeight: 0.2 });
 }

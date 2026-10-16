@@ -105,11 +105,14 @@ export function approachVehicle(sys: BotSystem, b: BotState, p: PlayerState): bo
 // buggy. Each probe is a ray against obstacles inflated by the vehicle's half width plus a
 // margin. Terrain samples along the ray catch water and slopes too steep to drive.
 
-/** Candidate heading offsets from the desired heading (rad), nearest first. */
-const HEADINGS: readonly number[] = [0, 0.2, -0.2, 0.4, -0.4, 0.6, -0.6, 0.8, -0.8, 1.05, -1.05, 1.35, -1.35, 1.7, -1.7, 2.1, -2.1];
+/** Candidate heading offsets (both sides) from the desired heading (rad), nearest first. */
+const HEADINGS: readonly number[] = [0, 0.2, 0.4, 0.6, 0.8, 1.05, 1.35, 1.7, 2.1];
 /** Clearance kept beside the body (m), plus this much per m/s of speed. */
 const SIDE_MARGIN = 0.5;
 const SIDE_MARGIN_PER_MS = 0.035;
+/** Below this speed (m/s) the driver threads gaps with a small margin. */
+const LOW_SPEED = 6;
+const SIDE_MARGIN_LOW = 0.35;
 /** Lateral acceleration assumed for turns (m/s^2). */
 const TURN_ACCEL = 5.5;
 /** Speeds (fractions of the current one, the first is the current) tried for the turn arc. */
@@ -117,8 +120,12 @@ const ROLLOUT_SPEEDS: readonly number[] = [1, 0.7, 0.45];
 const ROLLOUT_STEP = 1.5;
 /** Tightest turn a vehicle makes (1 / minimum turning radius, 1/m). */
 const MAX_CURVATURE = 0.18;
+/** Dead ends this far apart (m) do not add up toward giving up on the vehicle. */
+const STUCK_RADIUS = 20;
 /** How long a driver backs up to get out of a dead end (s). */
 const REVERSE_TIME = 2;
+/** Crawl speed kept while the way ahead is open at all (m/s; contacts at this speed are harmless). */
+const MIN_CREEP = 2.5;
 /** Braking deceleration assumed for planning, as a fraction of the vehicle's service brake. */
 const BRAKE_USE = 0.5;
 /** Planning reaction time (s): one think interval plus throttle response. */
@@ -130,6 +137,8 @@ const TOWN_SPEED = 12;
 /** Off-road cruise cap (m/s): bumps throw the wheels off the ground, which ruins braking. */
 const OFFROAD_SPEED = 16;
 const TOWN_MARGIN = 25;
+/** Drivers pass around towns at this distance beyond their radius (m). */
+const TOWN_DETOUR_MARGIN = 15;
 /** Terrain sample spacing (m), water depth and grade (rise / run) a driver avoids. */
 const TERRAIN_STEP = 2.5;
 const MAX_WATER_DEPTH = 0.35;
@@ -367,6 +376,41 @@ function crestSpeed(sys: BotSystem, x: number, z: number, h: number, L: number, 
   return Math.sqrt(vmax2);
 }
 
+/**
+ * Heading toward (tx, tz), passing around towns in between: their street mazes defeat reactive
+ * steering, so the driver aims along a tangent of a circle around a town the straight line would
+ * cross (unless the trip starts or ends inside it).
+ */
+function detourHeading(sys: BotSystem, x: number, z: number, tx: number, tz: number): number {
+  const dx = tx - x, dz = tz - z;
+  const len = Math.sqrt(dx * dx + dz * dz);
+  const direct = Math.atan2(-dx, -dz);
+  if (len < 1) return direct;
+  const ux = dx / len, uz = dz / len;
+  const towns = sys.world.towns;
+  let bestT = Infinity, heading = direct;
+  for (let i = 0; i < towns.length; i++) {
+    const tw = towns[i];
+    const R = tw.r + TOWN_DETOUR_MARGIN;
+    const cx = tw.x - x, cz = tw.z - z;
+    const dc = Math.sqrt(cx * cx + cz * cz);
+    if (dc <= R + 2) continue; // already in (or at the edge of) the town
+    const ex = tw.x - tx, ez = tw.z - tz;
+    if (ex * ex + ez * ez <= R * R) continue; // destination inside it
+    const along = cx * ux + cz * uz;
+    if (along <= 0 || along >= len) continue;
+    const perp = Math.abs(cx * uz - cz * ux);
+    if (perp >= R || along >= bestT) continue;
+    // Tangent on the side the straight line passes nearer to.
+    const base = Math.atan2(-cx, -cz);
+    const off = Math.asin(Math.min(1, R / dc));
+    const h1 = base + off, h2 = base - off;
+    heading = Math.abs(angleDiff(direct, h1)) < Math.abs(angleDiff(direct, h2)) ? h1 : h2;
+    bestT = along;
+  }
+  return heading;
+}
+
 function nearTown(sys: BotSystem, x: number, z: number): boolean {
   const towns = sys.world.towns;
   for (let i = 0; i < towns.length; i++) {
@@ -376,6 +420,17 @@ function nearTown(sys: BotSystem, x: number, z: number): boolean {
     if (dx * dx + dz * dz < r * r) return true;
   }
   return false;
+}
+
+/**
+ * Count a dead end (backing up / wheels spinning). Repeated ones in the same spot make the driver
+ * give up on the vehicle; one far from the previous counts as a fresh start.
+ */
+function noteStuck(b: BotState, v: VehicleState): void {
+  if (hyp(v.pos.x - b.driveStuckX, v.pos.z - b.driveStuckZ) > STUCK_RADIUS) b.driveStuckCount = 0;
+  b.driveStuckCount++;
+  b.driveStuckX = v.pos.x;
+  b.driveStuckZ = v.pos.z;
 }
 
 /** Nearest downed teammate (not p) within r, or null. */
@@ -486,30 +541,46 @@ export function vehicleTick(sys: BotSystem, b: BotState, p: PlayerState, think: 
     const sp = Math.abs(speed);
     const stopDist = (sp * sp) / (2 * decel) + sp * REACTION;
     const L = clamp(stopDist + he.z + 12, 16, 48);
-    const w = he.x + SIDE_MARGIN + SIDE_MARGIN_PER_MS * sp;
+    // Slow through clutter (forests) the margin shrinks so gaps between trees stay usable.
+    const w = he.x + (sp < LOW_SPEED ? SIDE_MARGIN_LOW : SIDE_MARGIN + SIDE_MARGIN_PER_MS * sp);
     gatherObstacles(sys, v, L + w + 1);
-    const desired = Math.atan2(-(tx - v.pos.x), -(tz - v.pos.z));
-    const need = Math.min(L, Math.max(stopDist + he.z + STOP_MARGIN + 4, 12), dist + he.z);
+    const desired = detourHeading(sys, v.pos.x, v.pos.z, tx, tz);
+    const need = Math.min(L, Math.max(stopDist + he.z + STOP_MARGIN + 2, 8), dist + he.z);
+    const fwd = speed >= -0.5 ? v.yaw : v.yaw + Math.PI;
     let chosen = NaN, chosenF = 0;
     let fallback = NaN, fallbackF = 0, fallbackS = -Infinity;
-    for (let k = 0; k < HEADINGS.length; k++) {
-      const h = desired + HEADINGS[k];
-      const F = freeDist(sys, v.pos.x, v.pos.z, h, L, w);
-      if (F >= need) {
-        chosen = h;
-        chosenF = F;
-        break;
-      }
-      const s = F - 4 * Math.abs(HEADINGS[k]);
-      if (s > fallbackS) {
-        fallbackS = s;
-        fallback = h;
-        fallbackF = F;
+    for (let k = 0; k < HEADINGS.length && Number.isNaN(chosen); k++) {
+      const m = HEADINGS[k];
+      // Of the two sides, try the one needing less turning first.
+      const first = m === 0 || Math.abs(angleDiff(fwd, desired + m)) <= Math.abs(angleDiff(fwd, desired - m)) ? m : -m;
+      for (let side = 0; side < (m === 0 ? 1 : 2); side++) {
+        const h = desired + (side === 0 ? first : -first);
+        const F = freeDist(sys, v.pos.x, v.pos.z, h, L, w);
+        if (F >= need) {
+          chosen = h;
+          chosenF = F;
+          break;
+        }
+        const sc = F - 3 * m - 1.5 * Math.abs(angleDiff(fwd, h));
+        if (sc > fallbackS) {
+          fallbackS = sc;
+          fallback = h;
+          fallbackF = F;
+        }
       }
     }
     if (Number.isNaN(chosen)) {
       chosen = fallback;
       chosenF = fallbackF;
+      // No clear corridor: stick with the previous heading while it is about as open.
+      const prev = b.driveHeading;
+      if (chosen !== prev && Math.abs(angleDiff(desired, prev)) < 2.2) {
+        const F = freeDist(sys, v.pos.x, v.pos.z, prev, L, w);
+        if (F >= fallbackF - 2) {
+          chosen = prev;
+          chosenF = F;
+        }
+      }
     } else if (chosen !== b.driveHeading) {
       // Hysteresis: keep the previous heading while it is still clear and about as good.
       const prev = b.driveHeading;
@@ -532,7 +603,7 @@ export function vehicleTick(sys: BotSystem, b: BotState, p: PlayerState, think: 
       // (nose against a tree with a sharp turn to make): back up, swinging the nose around.
       if (chosenF < he.z + 1.5 || (sp < 6 && rollout(v.pos.x, v.pos.z, speed >= -0.5 ? v.yaw : v.yaw + Math.PI, chosen, 3, 6, nose, he.x + 0.2) < 1.5)) {
         b.reverseUntil = t + REVERSE_TIME;
-        b.driveStuckCount++;
+        noteStuck(b, v);
       }
     } else if (speed < -0.5 && freeDist(sys, v.pos.x, v.pos.z, v.yaw + Math.PI, 6, he.x + 0.3) < he.z + 0.4) {
       // Backing into something: stop reversing.
@@ -563,13 +634,13 @@ export function vehicleTick(sys: BotSystem, b: BotState, p: PlayerState, think: 
         if (ok > best) best = ok;
         if (a >= u) break;
       }
-      vt = Math.min(vt, Math.max(3, best));
+      vt = Math.min(vt, Math.max(MIN_CREEP, best));
     }
     if (nearTown(sys, v.pos.x, v.pos.z)) vt = Math.min(vt, def.isBike ? TOWN_SPEED - 1 : TOWN_SPEED);
     vt = Math.min(vt, crestSpeed(sys, v.pos.x, v.pos.z, chosen, Math.min(L, 32), dEff));
     if (dist < 80) vt = Math.min(vt, Math.max(6, Math.sqrt(2 * dEff * Math.max(0, dist - ARRIVE_DIST * 0.7))));
     // Never crawl below walking pace when the way is open (obstacle contacts that slow are harmless).
-    if (avail > 0) vt = Math.max(vt, 3);
+    if (avail > 0) vt = Math.max(vt, MIN_CREEP);
     b.driveTargetSpeed = vt;
     const dbg = (globalThis as any).__vdbg; if (dbg) dbg({ t, x: v.pos.x, z: v.pos.z, sp, desired, chosen, chosenF, need, L, w, aheadF, turn, vt, obsN, dist, stuck: b.driveStuckCount, rev: b.reverseUntil > t ? 1 : 0, yaw: v.yaw });
 
@@ -588,7 +659,7 @@ export function vehicleTick(sys: BotSystem, b: BotState, p: PlayerState, think: 
       if (b.driveStuckSince < 0) b.driveStuckSince = t;
       else if (t - b.driveStuckSince > 1.5) {
         b.reverseUntil = t + REVERSE_TIME;
-        b.driveStuckCount++;
+        noteStuck(b, v);
         b.driveStuckSince = -1;
       }
     } else {

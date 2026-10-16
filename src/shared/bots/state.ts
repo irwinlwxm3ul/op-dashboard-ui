@@ -175,6 +175,9 @@ export interface BotState {
   driveGoodSince: number;
   reverseUntil: number;
   driveStuckCount: number;
+  /** Where the last dead end was (m). */
+  driveStuckX: number;
+  driveStuckZ: number;
   driveWaitUntil: number;
   driveThrottle: number;
   /** Speed the driver aims for (m/s), from the obstacle / turn / terrain probes at think time. */
@@ -311,6 +314,8 @@ export function createBotState(p: PlayerState, seed: number, thinkSlot: number, 
     driveGoodSince: -1,
     reverseUntil: 0,
     driveStuckCount: 0,
+    driveStuckX: 0,
+    driveStuckZ: 0,
     driveWaitUntil: 0,
     driveThrottle: 0,
     driveTargetSpeed: 0,

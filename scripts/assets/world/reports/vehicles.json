@@ -1,7 +1,7 @@
 [
   {
     "file": "/home/user/op-dashboard-ui/public/assets/models/vehicles/uaz.glb",
-    "bytes": 383896,
+    "bytes": 383812,
     "tris": 4108,
     "scale": 1.1683,
     "wheels": {
@@ -63,7 +63,7 @@
   },
   {
     "file": "/home/user/op-dashboard-ui/public/assets/models/vehicles/bike.glb",
-    "bytes": 287876,
+    "bytes": 287800,
     "tris": 4442,
     "scale": 1.013,
     "parts": {

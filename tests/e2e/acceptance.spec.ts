@@ -409,9 +409,12 @@ test('AT5 two windows: lobby -> match -> each window sees the other human -> lea
     await A.page.screenshot({ path: 'test-results/acceptance-mp-a.png' });
     await B.page.screenshot({ path: 'test-results/acceptance-mp-b.png' });
 
-    // Leave through the pause menu: both windows return to the same lobby room.
+    // Leave through the pause menu: both windows return to the same lobby room. (A real browser
+    // releases pointer lock on Esc, which opens the pause menu; headless Chromium keeps the lock on
+    // a synthetic Esc, so the release is done explicitly.)
     for (const w of [A, B]) {
       await w.page.keyboard.press('Escape');
+      await w.page.evaluate(() => document.exitPointerLock());
       await expect(w.page.locator(tid('pause-menu'))).toBeVisible({ timeout: 20_000 });
       await w.page.locator(tid('pause-leave')).click();
       await expect(w.page.locator('[data-screen="lobby"]')).toBeVisible({ timeout: 30_000 });

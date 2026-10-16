@@ -61,13 +61,13 @@
       {
         "kind": "oak",
         "file": "/home/user/op-dashboard-ui/public/assets/models/nature/tree_oak.glb",
-        "bytes": 1180908,
+        "bytes": 1179980,
         "variants": [
           {
             "id": "oak_1",
             "source": "CommonTree_1.gltf",
             "sourceHeight": 7.022,
-            "tris": 2001,
+            "tris": 1999,
             "lod1Tris": 640,
             "trunkRadius": 0.071,
             "crownWidth": 0.668,
@@ -77,8 +77,8 @@
             "id": "oak_2",
             "source": "CommonTree_2.gltf",
             "sourceHeight": 7.4,
-            "tris": 2001,
-            "lod1Tris": 641,
+            "tris": 1999,
+            "lod1Tris": 639,
             "trunkRadius": 0.067,
             "crownWidth": 0.624,
             "rootDepth": 0.033
@@ -87,7 +87,7 @@
             "id": "oak_3",
             "source": "CommonTree_3.gltf",
             "sourceHeight": 9.182,
-            "tris": 2001,
+            "tris": 1999,
             "lod1Tris": 640,
             "trunkRadius": 0.054,
             "crownWidth": 0.494,
@@ -108,7 +108,7 @@
             "source": "CommonTree_5.gltf",
             "sourceHeight": 6.763,
             "tris": 2000,
-            "lod1Tris": 641,
+            "lod1Tris": 639,
             "trunkRadius": 0.075,
             "crownWidth": 0.641,
             "rootDepth": 0.036
@@ -118,14 +118,14 @@
       {
         "kind": "birch",
         "file": "/home/user/op-dashboard-ui/public/assets/models/nature/tree_birch.glb",
-        "bytes": 1084844,
+        "bytes": 1083924,
         "variants": [
           {
             "id": "birch_1",
             "source": "BirchTree_1.gltf",
             "sourceHeight": 5.435,
             "tris": 1994,
-            "lod1Tris": 641,
+            "lod1Tris": 639,
             "trunkRadius": 0.03,
             "crownWidth": 0.52,
             "rootDepth": 0.003
@@ -134,7 +134,7 @@
             "id": "birch_2",
             "source": "BirchTree_2.gltf",
             "sourceHeight": 7.54,
-            "tris": 2005,
+            "tris": 1999,
             "lod1Tris": 638,
             "trunkRadius": 0.018,
             "crownWidth": 0.475,
@@ -155,7 +155,7 @@
             "source": "BirchTree_4.gltf",
             "sourceHeight": 4.202,
             "tris": 2000,
-            "lod1Tris": 641,
+            "lod1Tris": 639,
             "trunkRadius": 0.029,
             "crownWidth": 0.661,
             "rootDepth": 0.003
