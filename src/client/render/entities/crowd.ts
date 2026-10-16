@@ -131,8 +131,15 @@ export class NearPool implements NearBodyProvider {
 
   constructor(private readonly parent: THREE.Object3D, private capacity: number) {}
 
+  /** Bodies handed out never exceed the capacity; idle soldiers above it are disposed. */
   setCapacity(n: number): void {
-    this.capacity = n;
+    this.capacity = Math.max(0, n);
+    while (this.all.length > this.capacity && this.free.length > 0) {
+      const s = this.free.pop()!;
+      this.all.splice(this.all.indexOf(s), 1);
+      this.parent.remove(s.mesh);
+      s.dispose();
+    }
   }
 
   geometryFor(weapon: WeaponId | null): THREE.BufferGeometry {
@@ -159,6 +166,7 @@ export class NearPool implements NearBodyProvider {
 
   /** Acquire a soldier (lazily created up to capacity). Null when the pool is exhausted. */
   acquire(ownerId: number): NearSoldier | null {
+    if (this.inUse >= this.capacity) return null;
     let s = this.free.pop();
     if (!s) {
       if (this.all.length >= this.capacity) return null;

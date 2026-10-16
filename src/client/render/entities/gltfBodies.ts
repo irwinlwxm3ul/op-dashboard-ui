@@ -1027,6 +1027,8 @@ export class GltfNearProvider implements NearBodyProvider {
   readonly name = 'gltf';
   private readonly all: GltfNearBody[] = [];
   private readonly free = new Map<CharacterVariantId, GltfNearBody[]>();
+  /** Bodies currently handed out (never more than the capacity). */
+  private inUse = 0;
 
   constructor(private readonly parent: THREE.Object3D, private readonly lib: CharacterLibrary, private capacity: number) {}
 
@@ -1055,6 +1057,7 @@ export class GltfNearProvider implements NearBodyProvider {
   }
 
   acquire(ownerId: number): NearBody | null {
+    if (this.inUse >= this.capacity) return null;
     const v = this.lib.variantFor(ownerId);
     let body = this.free.get(v.id)?.pop() ?? null;
     if (!body) {
@@ -1070,11 +1073,13 @@ export class GltfNearProvider implements NearBodyProvider {
     }
     body.ownerId = ownerId;
     body.resetForNewOwner();
+    this.inUse++;
     return body;
   }
 
   release(body: NearBody): void {
     const b = body as GltfNearBody;
+    if (b.ownerId !== -1) this.inUse--;
     b.ownerId = -1;
     b.hide();
     let list = this.free.get(b.variant.id);
@@ -1096,5 +1101,6 @@ export class GltfNearProvider implements NearBodyProvider {
     for (const b of this.all) b.dispose();
     this.all.length = 0;
     this.free.clear();
+    this.inUse = 0;
   }
 }

@@ -33,6 +33,12 @@ const STALE_MS = 4000;
 const REF_FOV = 65;
 /** Minimum on-screen height (device px) of far silhouettes. */
 const MIN_FAR_PX = 2.5;
+/** Minimum on-screen width (px) of a far silhouette. */
+const MIN_FAR_W_PX = 1.75;
+/** Far impostor extents (soldierModel buildFarImpostor): height, capsule width, chest height. */
+const FAR_HEIGHT = 1.8;
+const FAR_WIDTH = 0.46;
+const FAR_CHEST = 1.25;
 /** Rank penalty for players outside the view frustum (they give up near bodies first). */
 const OFFSCREEN_RANK = 1e4;
 /** A player takes a near body only from a holder ranking at least this much lower (no thrash). */
@@ -567,14 +573,26 @@ export class PlayersRenderer {
   private drawFar(e: PlayerEntry, v: PlayerView, code: number, ctx: PlayersUpdateContext, dt: number): void {
     this.trackFarShape(e, v, dt);
     const lie = smooth(e.farLie);
+    const crouchY = 1 - 0.3 * e.farCrouch;
     // Lie down around the hips: T(0, 0.2) * Rx(-90deg) * T(0, -0.95), blended by `lie`.
     _m.makeTranslation(0, 0.2 * lie, 0);
     _m2.makeRotationX(-Math.PI / 2 * lie);
     _m.multiply(_m2);
     _m2.makeTranslation(0, -0.95 * lie, 0);
     _m.multiply(_m2);
-    const k = minScreenScale(1.8, e.dist, ctx.focalPx, MIN_FAR_PX);
-    _m2.makeScale(k, k * (1 - 0.3 * e.farCrouch), k);
+    // Minimum on-screen size, from the shaped extents: the body length (standing height, or the
+    // horizontal length when lying) and the thickness (standing width, or the screen height when
+    // lying) each get a minimum in pixels, so thin / lying silhouettes never drop below a pixel.
+    // Enlarged about the chest so a scaled-up silhouette does not grow up out of cover.
+    const len = FAR_HEIGHT * crouchY;
+    const kLen = minScreenScale(len, e.dist, ctx.focalPx, MIN_FAR_PX);
+    const kThick = minScreenScale(FAR_WIDTH, e.dist, ctx.focalPx, MIN_FAR_W_PX + (MIN_FAR_PX - MIN_FAR_W_PX) * lie);
+    const pivot = FAR_CHEST * crouchY;
+    _m2.makeTranslation(0, pivot, 0);
+    _m.multiply(_m2);
+    _m2.makeScale(kThick, kLen * crouchY, kThick);
+    _m.multiply(_m2);
+    _m2.makeTranslation(0, -FAR_CHEST, 0);
     _m.multiply(_m2);
     _m.premultiply(e.root);
     this.far.add(_m, e.look.accent, code);

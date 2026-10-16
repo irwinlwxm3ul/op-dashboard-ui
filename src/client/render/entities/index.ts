@@ -162,7 +162,9 @@ class EntityRendererImpl implements EntityRendererInternals {
       this.ctx.shadows = this.quality !== 'low';
     }
     this.camPos.set(cam.pos.x, cam.pos.y, cam.pos.z);
-    const h = Math.max(1, this.core.canvas.height);
+    // Scene pixels: drawing buffer x dynamic resolution scale (the scene target the far
+    // silhouettes and particles are rasterised into).
+    const h = Math.max(1, this.core.canvas.height * (this.core.stats().resolutionScale ?? 1));
     const focal = h / 2 / Math.tan((Math.max(1, cam.fov) * Math.PI) / 360);
     this.ctx.cam = cam;
     this.ctx.focalPx = focal;
