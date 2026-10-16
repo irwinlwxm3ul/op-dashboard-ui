@@ -197,7 +197,7 @@ export async function visibleTexts(page: Page): Promise<string[]> {
       if (text.length < 2) continue;
       const el = n.parentElement;
       if (!el || el.closest('select, option, script, style, [aria-hidden="true"]')) continue;
-      const vis = (el as Element & { checkVisibility?: (o?: object) => boolean }).checkVisibility?.({ checkOpacity: true, checkVisibilityCSS: true })
+      const vis = (el as Element & { checkVisibility?: (o?: object) => boolean }).checkVisibility?.({ checkVisibilityCSS: true })
         ?? el.getClientRects().length > 0;
       if (!vis) continue;
       out.add(text);

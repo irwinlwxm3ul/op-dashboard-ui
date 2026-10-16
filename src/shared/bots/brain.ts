@@ -31,6 +31,8 @@ const REVIVE_SEARCH = 120;
 /** Revive action distance (3D, inside the sim's REVIVE_RANGE + slack) and where the bot stops. */
 const REVIVE_START_DIST = REVIVE_RANGE - 0.1;
 const REVIVE_STOP_DIST = 1.3;
+/** A visible enemy closer than this postpones reviving. */
+const REVIVE_THREAT_DIST = 70;
 /** Items more than this above the terrain lie on an upper floor. */
 const UPPER_FLOOR = 2.4;
 /** A bot this far above the nav floor under it is on a roof / upper floor. */
@@ -110,7 +112,10 @@ export function brainThink(sys: BotSystem, b: BotState, p: PlayerState): void {
   if (revivePick) {
     // A downed human squad leader comes first; otherwise wait until the fight has paused.
     const human = !revivePick.isBot;
-    offer('revive', p.revive ? 95 : sinceContact > 2.5 ? (human ? 92 : 88) : visible ? 0 : human ? 75 : 60);
+    // Only a close, visible threat (or being shot) postpones it.
+    const threatClose = visible && hyp(target!.x - p.pos.x, target!.z - p.pos.z) < REVIVE_THREAT_DIST;
+    const underFire = t - b.lastDamageTime < 2;
+    offer('revive', p.revive ? 95 : threatClose || underFire ? 0 : sinceContact > 2.5 || visible ? (human ? 92 : 88) : human ? 75 : 60);
   }
 
   // Heal / boost.

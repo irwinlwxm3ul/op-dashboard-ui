@@ -54,6 +54,14 @@ class Harness {
     p.yaw = yaw;
     this.idle.set(id, { ...(this.idle.get(id) ?? {}), yaw, pitch: 0 });
   }
+  /** Let a player's input queue drain (no inputs sent for it until empty). */
+  drain(id: number): void {
+    const idle = this.idle.get(id);
+    this.idle.delete(id);
+    const rt = this.sim.rtById.get(id)!;
+    for (let i = 0; i < 64 && rt.qLen > 0; i++) this.step(1);
+    if (idle) this.idle.set(id, idle);
+  }
   setIdle(id: number, o: Partial<PlayerInput>): void {
     this.idle.set(id, { ...(this.idle.get(id) ?? {}), ...o });
   }
@@ -218,6 +226,8 @@ describe('GameSim combat', () => {
     const b = h.add('Runner');
     const o = findOpen(h.world, 26, 4, 40);
     startOnGround(h, { [a]: [o.x, o.z, Math.PI], [b]: [o.x, o.z - 20, 0] });
+    // The shooter's connection: 150 ms round trip (as measured by the transport).
+    h.sim.setPlayerLatency(a, 150);
     h.arm(a, 'ar');
     h.setIdle(a, { buttons: BTN.ADS });
     // Target strafes right (+X) at walking speed.
@@ -336,7 +346,8 @@ describe('GameSim combat', () => {
     expect(ar).toBeLessThanOrEqual(maxAr);
     expect(ar).toBeGreaterThanOrEqual(maxAr - 3);
 
-    // Semi-auto pistol with the trigger toggled every tick.
+    // Semi-auto pistol with the trigger toggled every tick (after the flooded queue drained).
+    h.drain(a);
     h.arm(a, 'pistol', 2);
     const s2 = p.stats.shotsFired;
     h.step(90, (i) => ({ [a]: { pitch: 0.6, buttons: i % 2 === 0 ? BTN.FIRE : 0 } }));

@@ -49,24 +49,28 @@ async function backToMain(page: Page): Promise<void> {
   await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
   await page.keyboard.press('Escape');
   await expect(page.locator('[data-screen="main"]')).toBeVisible();
+  await page.waitForTimeout(500);
 }
 
 /** Collect the visible text of each menu screen / modal (back to the main menu afterwards). */
 async function sampleScreens(page: Page): Promise<Record<string, string[]>> {
   const out: Record<string, string[]> = {};
   await expect(page.locator(tid('main-sp'))).toBeVisible();
+  await page.waitForTimeout(800);
   out.main = await visibleTexts(page);
   await page.locator(tid('main-sp')).click();
   await expect(page.locator('[data-screen="singleplayer"]')).toBeVisible();
+  await page.waitForTimeout(800); // screen transition
   out.singleplayer = await visibleTexts(page);
   await backToMain(page);
   await page.locator(tid('main-mp')).click();
   await expect(page.locator('[data-screen="multiplayer"]')).toBeVisible();
+  await page.waitForTimeout(800);
   out.multiplayer = await visibleTexts(page);
   await backToMain(page);
   for (const modal of ['main-settings', 'main-controls']) {
     await page.locator(tid(modal)).click();
-    await page.waitForTimeout(400);
+    await page.waitForTimeout(800);
     out[modal] = (await visibleTexts(page)).filter((t) => !out.main.includes(t));
     await page.keyboard.press('Escape');
     await page.waitForTimeout(300);
@@ -97,6 +101,7 @@ test('AT1 languages: Arabic translates every menu screen and mirrors RTL, persis
       if (LATIN_WORD.test(t) && englishAll.has(t) && !NEUTRAL.has(t)) leaks.push(`${screen}: ${t}`);
     }
   }
+  test.info().annotations.push({ type: 'sampled', description: JSON.stringify({ english, arabic }) });
   expect(leaks, 'English strings left on Arabic screens').toEqual([]);
   // Layout mirrors: the main navigation sits on the right half in RTL.
   const box = await page.locator(tid('main-sp')).boundingBox();

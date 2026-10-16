@@ -1,6 +1,7 @@
 // Public API of the simulation module (see ARCHITECTURE.md "src/shared/sim").
 
 export { GameSim } from './GameSim';
+export type { CheatFlag } from './GameSim';
 export { LOAD_HOLD_MAX_MS, MatchRunner } from './MatchRunner';
 export type { MatchRunnerOptions, RunnerClient } from './MatchRunner';
 export { trainingTargetPosition, TRAINING_TARGET_CENTER_HEIGHT } from './training';

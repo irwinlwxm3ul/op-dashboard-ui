@@ -304,7 +304,7 @@ export function stepVehicles(sim: GameSim, dt: number): void {
     const v = vrt.v;
     if (v.destroyed) {
       if (sim.config.mode === 'training' && sim.time - vrt.destroyedAt >= VEHICLE_RESPAWN_TIME) respawnVehicle(sim, vrt);
-    } else if (v.health <= 0) {
+    } else if (v.health <= 0 && sim.phase !== 'ended') {
       v.burnTimer -= dt;
       if (v.burnTimer <= 0) explodeVehicle(sim, vrt);
     }

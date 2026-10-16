@@ -132,7 +132,7 @@ function fireWeapon(sim: GameSim, rt: PlayerRt, w: WeaponDef, inst: WeaponInstan
   p.bloom = Math.min(w.bloomMax, p.bloom + w.bloomPerShot);
   rt.lastShotTime = sim.time;
   const origin = { x: Math.round(eye.x * 100) / 100, y: Math.round(eye.y * 100) / 100, z: Math.round(eye.z * 100) / 100 };
-  const rewind = rewindFor(sim, input.rt);
+  const rewind = rewindFor(sim, rt, input.rt);
   const ends: Vec3[] = [];
   let projectiles: number[] | undefined;
   if (w.hitscan) {

@@ -31,7 +31,7 @@ const JOBS = {
       ['buildLuaz', { src: LUAZ, out: out('vehicles/uaz.glb'), length: VEHICLES.uaz.halfExtents.z * 2, rideHeight: rideHeight('uaz') }],
       ['buildBike', {
         src: DIRTBIKE, out: out('vehicles/bike.glb'), length: VEHICLES.bike.halfExtents.z * 2, rideHeight: rideHeight('bike'),
-        targets: { body: 2300, fork: 600, wheel: 700 },
+        targets: { body: 2100, fork: 560, wheel: 900 },
       }],
     ],
   },

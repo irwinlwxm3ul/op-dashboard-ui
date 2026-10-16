@@ -3,7 +3,7 @@
 // input rate limiting, event routing by audience and interest-managed snapshots.
 
 import {
-  INPUT_BURST, INPUT_RATE_SLACK, RELEVANCE_BANDS, SNAPSHOT_RATE, TICK_DT, TICK_MS, TICK_RATE,
+  INPUT_RATE_SLACK, RELEVANCE_BANDS, SNAPSHOT_RATE, TICK_DT, TICK_MS, TICK_RATE,
 } from '../constants';
 import type {
   ClientMessage, MatchInit, NetPlayer, NetProjectile, NetVehicle, RosterEntry, ServerMessage, Snapshot,
@@ -12,9 +12,10 @@ import type { EntityId, GameEvent, LootItem, MatchConfig, MatchResults, PlayerSt
 import { sanitizeInput } from '../validate';
 import { teamsInGame } from './combat';
 import { GameSim } from './GameSim';
+import type { CheatFlag } from './GameSim';
 import { netPlayer, netProjectile, netVehicle, selfState } from './snapshot';
 import {
-  COMBAT_RELEVANCE_TIME, DEAD_VISIBLE_TIME, MAX_CATCHUP_TICKS, PROJECTILE_RELEVANCE,
+  COMBAT_RELEVANCE_TIME, DEAD_VISIBLE_TIME, INPUT_TOKEN_BURST, MAX_CATCHUP_TICKS, PROJECTILE_RELEVANCE,
 } from './tuning';
 import type { BotDriver, SimEvent, SimView } from './view';
 
@@ -23,6 +24,11 @@ export interface RunnerClient {
   name: string;
   team: TeamId | null;
   send(msg: ServerMessage): void;
+  /**
+   * Optional transport-measured round trip time (ms, including any artificial latency). Bounds
+   * the lag-compensation rewind this client may claim; polled about once per second.
+   */
+  rttMs?: () => number;
 }
 
 export interface MatchRunnerOptions {
@@ -51,6 +57,10 @@ interface ClientEntry {
 }
 
 const SNAP_INTERVAL_MS = 1000 / SNAPSHOT_RATE;
+/** Transport RTT getters are polled this often (ms). */
+const RTT_POLL_MS = 1000;
+/** Flags kept until the next stats() call. */
+const MAX_PENDING_FLAGS = 200;
 /** Parked (sleeping) vehicles never change: refresh them every 2 s only (clients keep them 10 s). */
 const SLEEPING_VEHICLE_EVERY = 40;
 const TIMING_WINDOW = 300;
@@ -88,15 +98,20 @@ export class MatchRunner {
   private readonly npTeam = new Map<EntityId, NetPlayer>();
   private readonly nvCache = new Map<EntityId, NetVehicle>();
   private readonly projCache: NetProjectile[] = [];
+  private flags: CheatFlag[] = [];
+  private nextRttPoll = 0;
 
   constructor(opts: MatchRunnerOptions) {
     this.sim = new GameSim(opts.config);
+    this.sim.onFlag = (f) => {
+      if (this.flags.length < MAX_PENDING_FLAGS) this.flags.push(f);
+    };
     this.botDriverFactory = opts.botDriverFactory;
     this.onEnd = opts.onEnd;
     for (const c of opts.clients) {
       if (this.entries.has(c.id)) continue;
       const e: ClientEntry = {
-        c, playerId: null, tokens: INPUT_BURST, lastSeq: -1, outbox: [], combat: new Map(), gone: new Set(),
+        c, playerId: null, tokens: INPUT_TOKEN_BURST, lastSeq: -1, outbox: [], combat: new Map(), gone: new Set(),
         view: { x: 0, y: 0, z: 0 }, hasView: false, sent: 0,
       };
       this.entries.set(c.id, e);
@@ -156,6 +171,10 @@ export class MatchRunner {
   update(nowMs: number): void {
     if (!this.started) return;
     this.checkHold(nowMs);
+    if (nowMs >= this.nextRttPoll) {
+      this.nextRttPoll = nowMs + RTT_POLL_MS;
+      this.pollRtt();
+    }
     let elapsed = nowMs - this.lastNow;
     this.lastNow = nowMs;
     if (!(elapsed > 0)) elapsed = 0;
@@ -174,7 +193,7 @@ export class MatchRunner {
       this.routeEvents(sim.drainEvents());
       this.collectLoot();
       for (const e of this.entryList) {
-        e.tokens = Math.min(INPUT_BURST, e.tokens + INPUT_RATE_SLACK);
+        e.tokens = Math.min(INPUT_TOKEN_BURST, e.tokens + INPUT_RATE_SLACK);
       }
       this.snapAcc += TICK_MS;
       if (this.snapAcc >= SNAP_INTERVAL_MS - 1e-6) {
@@ -187,8 +206,13 @@ export class MatchRunner {
         snapDue = true;
       }
     }
-    // Too far behind (stalled host): drop the backlog instead of spiralling.
-    if (this.acc >= TICK_MS) this.acc %= TICK_MS;
+    // Too far behind (stalled host): drop the backlog instead of spiralling. The inputs clients sent
+    // for the skipped time stay queued; the players get credit to catch up on them.
+    if (this.acc >= TICK_MS) {
+      const skipped = Math.floor(this.acc / TICK_MS);
+      this.acc -= skipped * TICK_MS;
+      sim.grantInputCredit(skipped);
+    }
     if (snapDue) this.sendSnapshots();
     if (endedNow && this.onEnd) this.onEnd(sim.results());
   }
@@ -202,10 +226,14 @@ export class MatchRunner {
         for (const raw of msg.inputs) {
           const inp = sanitizeInput(raw);
           if (!inp || inp.seq <= e.lastSeq) continue;
-          if (e.tokens < 1) break;
-          e.tokens -= 1;
           e.lastSeq = inp.seq;
-          this.sim.queueInput(e.playerId, inp);
+          if (e.tokens >= 1) {
+            e.tokens -= 1;
+            this.sim.queueInput(e.playerId, inp);
+          } else {
+            // Over the rate budget: drop the movement, keep the actions / button presses.
+            this.sim.mergeInput(e.playerId, inp);
+          }
         }
         break;
       }
@@ -222,6 +250,20 @@ export class MatchRunner {
         break;
       default:
         break;
+    }
+  }
+
+  /** Transport-measured round trip time of a client (ms); null = unknown. */
+  setClientLatency(clientId: string, rttMs: number | null): void {
+    const e = this.entries.get(clientId);
+    if (e && e.playerId !== null) this.sim.setPlayerLatency(e.playerId, rttMs);
+  }
+
+  private pollRtt(): void {
+    for (const e of this.entryList) {
+      if (!e.c.rttMs || e.playerId === null) continue;
+      const v = e.c.rttMs();
+      if (Number.isFinite(v) && v >= 0) this.sim.setPlayerLatency(e.playerId, v);
     }
   }
 
@@ -242,8 +284,11 @@ export class MatchRunner {
     return this.sim.isOver();
   }
 
-  /** Tick timing over the last TIMING_WINDOW ticks (~10 s), player and bot counts. */
-  stats(): { tickMsAvg: number; tickMsMax: number; players: number; bots: number } {
+  /**
+   * Tick timing over the last TIMING_WINDOW ticks (~10 s), player and bot counts, and the
+   * suspicious-aim flags raised since the previous stats() call (for the server log).
+   */
+  stats(): { tickMsAvg: number; tickMsMax: number; players: number; bots: number; flags: CheatFlag[] } {
     let sum = 0;
     let max = 0;
     for (let i = 0; i < this.tickTimeCount; i++) {
@@ -258,7 +303,9 @@ export class MatchRunner {
       tickMsMax: max,
       players: this.sim.players.size,
       bots,
+      flags: this.flags,
     };
+    this.flags = [];
     return r;
   }
 

@@ -5,7 +5,7 @@
 // steering axis (steer = rotation.y with the loaded rotation.x rake kept).
 import {
   THREE, load, dl, parts, merge, simplify, bboxOf, bbox, tris, applyMatrix, retex, standard, mesh,
-  paintTex, setUv, only, exportGlb, sceneTris,
+  paintTex, setUv, only, exportGlb, sceneTris, compact,
 } from './world.page.js';
 
 function horizontalYaw(dir) {
@@ -128,6 +128,37 @@ function paletteMaterial(name, entries) {
   return { material: m, cellUv };
 }
 
+/** Splits `g` by a per-triangle predicate on the triangle centroid -> [matching, rest]. */
+function splitBy(g, pred) {
+  const idx = g.index.array, pos = g.getAttribute('position').array;
+  const a = [], b = [];
+  const c = new THREE.Vector3();
+  for (let i = 0; i < idx.length; i += 3) {
+    c.set(0, 0, 0);
+    for (let k = 0; k < 3; k++) { const v = idx[i + k]; c.x += pos[v * 3]; c.y += pos[v * 3 + 1]; c.z += pos[v * 3 + 2]; }
+    c.divideScalar(3);
+    (pred(c) ? a : b).push(idx[i], idx[i + 1], idx[i + 2]);
+  }
+  return [a.length ? compact(g, Uint32Array.from(a)) : null, b.length ? compact(g, Uint32Array.from(b)) : null];
+}
+
+/**
+ * Steering assembly of the dirt bike in its SOURCE frame (Sketchfab root: +Y up, front +Z, metres):
+ * the triple clamps sit around HEAD and the fork tubes run along AXIS. Everything in front of the
+ * head tube (fork lowers, front fender, number plate), the handlebar block and a slim cylinder
+ * around the steering axis (fork tubes, clamps, stem) steers; the rest is the static body.
+ */
+const BIKE_HEAD = new THREE.Vector3(0, 0.42, 0.81);
+const BIKE_AXIS = new THREE.Vector3(0, 0.58, -0.31).normalize();
+function bikeSteers(c) {
+  if (c.z > 0.88) return true;
+  if (c.y > 0.365 && c.z > 0.6) return true;
+  const d = c.clone().sub(BIKE_HEAD);
+  const along = d.dot(BIKE_AXIS);
+  const radial = d.addScaledVector(BIKE_AXIS, -along).length();
+  return radial < 0.15 && along > -0.75 && along < 0.25;
+}
+
 export async function buildBike({ src, out, length, rideHeight, targets }) {
   const g = await load(dl(src));
   const nodes = {};
@@ -136,53 +167,54 @@ export async function buildBike({ src, out, length, rideHeight, targets }) {
     if (!nodes[name]) throw new Error(`no node ${name}`);
     return parts(g.scene, { under: nodes[name] });
   };
-  // GLTFLoader sanitises node names ('Cylinder.001' -> 'Cylinder001').
-  const body = sub('Cube');
-  const fork = sub('Cylinder001');
-  const wA = sub('Cylinder005'), wB = sub('Cylinder003');
+  // GLTFLoader sanitises node names ('Cylinder.001' -> 'Cylinder001'). Cube = frame, engine,
+  // plastics, fork and handlebar; Cylinder001 = swing arm; Cylinder003 / 005 = front / rear wheel.
+  const body = [...sub('Cube'), ...sub('Cylinder001')];
+  const wF = sub('Cylinder003'), wR = sub('Cylinder005');
   const geos = (ps) => ps.map((p) => p.geometry);
-  // The wheel closest to the fork is the front wheel.
-  const forkC = centerOf(geos(fork));
-  const dA = centerOf(geos(wA)).distanceTo(forkC), dB = centerOf(geos(wB)).distanceTo(forkC);
-  const [wF, wR] = dA < dB ? [wA, wB] : [wB, wA];
-  const allParts = [...body, ...fork, ...wF, ...wR];
-  const { matrix, scale } = placement(geos(allParts), geos(wF), geos(wR), [...geos(wF), ...geos(wR)], length, rideHeight);
-  for (const p of allParts) applyMatrix(p.geometry, matrix);
+  if (centerOf(geos(wF)).z < centerOf(geos(wR)).z) throw new Error('bike source orientation changed (front wheel must be at +Z)');
 
-  // Palette (one material for the whole bike).
+  // Palette (one material for the whole bike), assigned before any merging.
+  const allParts = [...body, ...wF, ...wR];
   const mats = [...new Set(allParts.map((p) => p.material))];
-  const entries = mats.map((m) => ({ color: m.color.clone(), roughness: Math.max(0.25, m.roughness), metalness: m.metalness }));
+  // Pure black (tyres) reads as a hole under the game's lighting: floor colours at rubber albedo.
+  const entries = mats.map((m) => {
+    const c = m.color.clone();
+    const dark = Math.max(c.r, c.g, c.b) < 0.03;
+    if (dark) c.setRGB(Math.max(c.r, 0.028), Math.max(c.g, 0.028), Math.max(c.b, 0.03));
+    return { color: c, roughness: dark ? Math.max(0.8, m.roughness) : Math.max(0.25, m.roughness), metalness: m.metalness };
+  });
   const pal = paletteMaterial('bike', entries);
   for (const p of allParts) {
     const [u, v] = pal.cellUv(mats.indexOf(p.material));
     only(p.geometry, ['position', 'normal']);
     setUv(p.geometry, u, v);
   }
-  const bodyGeo = await simplify(merge(geos(body)), targets.body, { uvWeight: 10, weld: true, crease: 35 });
-  const forkGeo = await simplify(merge(geos(fork)), targets.fork, { uvWeight: 10, weld: true, crease: 35 });
-  const wheelF = await simplify(merge(geos(wF)), targets.wheel, { uvWeight: 10, weld: true, crease: 35 });
-  const wheelR = await simplify(merge(geos(wR)), targets.wheel, { uvWeight: 10, weld: true, crease: 35 });
+  // Split the steering assembly off in the source frame, then place everything.
+  const [forkSrc, bodySrc] = splitBy(merge(geos(body)), bikeSteers);
+  const wheelFSrc = merge(geos(wF)), wheelRSrc = merge(geos(wR));
+  const { matrix, scale } = placement([forkSrc, bodySrc, wheelFSrc, wheelRSrc], [wheelFSrc], [wheelRSrc], [wheelFSrc, wheelRSrc], length, rideHeight);
+  for (const x of [forkSrc, bodySrc, wheelFSrc, wheelRSrc]) applyMatrix(x, matrix);
+  const head = BIKE_HEAD.clone().applyMatrix4(matrix);
+  const axis = BIKE_AXIS.clone().transformDirection(matrix);
+
+  const opts = { uvWeight: 10, weld: true, crease: 35 };
+  const bodyGeo = await simplify(bodySrc, targets.body, opts);
+  const forkGeo = await simplify(forkSrc, targets.fork, opts);
+  const wheelF = await simplify(wheelFSrc, targets.wheel, opts);
+  const wheelR = await simplify(wheelRSrc, targets.wheel, opts);
 
   const root = new THREE.Group();
   root.name = 'bike';
   root.add(mesh('Body', bodyGeo, pal.material));
-  // Steering axis: front axle -> centre of the handlebar (top 8 % of the fork geometry).
+  // Fork node: origin on the steering axis level with the front axle, local +Y along the axis.
   const axle = recenter(wheelF);
-  const fp = forkGeo.getAttribute('position');
-  const fb = bbox(forkGeo);
-  const top = new THREE.Vector3();
-  let n = 0;
-  for (let i = 0; i < fp.count; i++) {
-    if (fp.getY(i) < fb.max.y - (fb.max.y - fb.min.y) * 0.08) continue;
-    top.x += fp.getX(i); top.y += fp.getY(i); top.z += fp.getZ(i); n++;
-  }
-  top.divideScalar(n);
-  top.x = 0;
-  const axis = top.clone().sub(axle).normalize();
+  const t = (axle.y - head.y) / axis.y;
+  const pivot = head.clone().addScaledVector(axis, t);
   const rake = Math.atan2(axis.z, axis.y);
   const forkNode = new THREE.Group();
   forkNode.name = 'Fork';
-  forkNode.position.copy(axle);
+  forkNode.position.copy(pivot);
   forkNode.rotation.set(rake, 0, 0);
   forkNode.updateMatrix();
   const inv = forkNode.matrix.clone().invert();
@@ -190,7 +222,8 @@ export async function buildBike({ src, out, length, rideHeight, targets }) {
   forkNode.add(mesh('Fork_mesh', forkGeo, pal.material));
   const wf = new THREE.Group();
   wf.name = 'Wheel_F';
-  // Wheel geometry is already centred on the axle (= fork origin); express it in the fork frame.
+  wf.position.copy(axle).applyMatrix4(inv);
+  // Wheel geometry is centred on the axle; express its orientation in the (raked) fork frame.
   applyMatrix(wheelF, new THREE.Matrix4().makeRotationX(-rake));
   wf.add(mesh('Wheel_F_mesh', wheelF, pal.material));
   forkNode.add(wf);
@@ -205,8 +238,8 @@ export async function buildBike({ src, out, length, rideHeight, targets }) {
   return {
     file: out, bytes, tris: sceneTris(root), scale: +scale.toFixed(4),
     parts: { body: tris(bodyGeo), fork: tris(forkGeo), wheelF: tris(wheelF), wheelR: tris(wheelR) },
-    wheels: { Wheel_F: { center: r3(axle), ...wheelInfo(wheelF) }, Wheel_R: { center: r3(rearC), ...wheelInfo(wheelR) } },
-    fork: { pivot: r3(axle), axis: r3(axis), rake: +rake.toFixed(4) },
+    wheels: { Wheel_F: { center: r3(axle), local: r3(wf.position), ...wheelInfo(wheelF) }, Wheel_R: { center: r3(rearC), ...wheelInfo(wheelR) } },
+    fork: { pivot: r3(pivot), axis: r3(axis), rake: +rake.toFixed(4) },
     bbox: bboxReport(root),
   };
 }

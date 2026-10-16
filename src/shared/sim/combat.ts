@@ -1,7 +1,7 @@
 // Damage pipeline (health / downed / death, kill credit, team elimination, placement, win),
 // inventory spill, spectating and the hitscan tracer with lag-compensated hitboxes.
 
-import { DOWNED_HEALTH, MAX_REWIND_MS, PLAYER_RADIUS } from '../constants';
+import { DOWNED_HEALTH, INTERP_DELAY_MS, MAX_REWIND_MS, PLAYER_RADIUS } from '../constants';
 import {
   AMMO_IDS, CONSUMABLE_IDS, THROWABLE_IDS, applyArmorDamage, computeDamage, gearIdFor,
 } from '../items';
@@ -15,12 +15,14 @@ import type {
   VehicleState, WeaponDef,
 } from '../types';
 import type { GameSim, TeamInfo } from './GameSim';
-import { createPose } from './lagcomp';
+import { createGhostVehicle, createPose } from './lagcomp';
+import type { PlayerRt } from './players';
 import { damageVehicle, ejectFromVehicle } from './vehiclesSim';
 import { targetBoxHit, testTargetDummies } from './training';
 import {
-  EVENT_RANGE, NOISE_IMPACT_RADIUS, RAY_BROADPHASE, SPILL_RADIUS, TRAINING_RESPAWN_DELAY,
-  VEHICLE_BULLET_MUL,
+  EVENT_RANGE, FLAG_COOLDOWN, FLAG_HS_MIN_HITS, FLAG_HS_RATIO, FLAG_SNAP_COUNT, FLAG_SNAP_MIN_DIST,
+  FLAG_SNAP_PERIOD, FLAG_SNAP_RAD, NOISE_IMPACT_RADIUS, RAY_BROADPHASE, REWIND_SLACK_MS, SPILL_RADIUS,
+  TRAINING_RESPAWN_DELAY, VEHICLE_BULLET_MUL,
 } from './tuning';
 
 export type HitResult = 'none' | 'damage' | 'knock' | 'kill';
@@ -163,7 +165,8 @@ export function killPlayer(
   sim: GameSim, v: PlayerState, credit: EntityId | null, source: DamageSource, headshot: boolean,
   distance: number, finished: boolean,
 ): void {
-  if (v.life === 'dead') return;
+  // Nothing changes life state after the result (bleeding winners stay downed).
+  if (v.life === 'dead' || sim.phase === 'ended') return;
   const rt = sim.rtById.get(v.id)!;
   if (v.vehicleId !== null) ejectFromVehicle(sim, v, false);
   v.life = 'dead';
@@ -395,11 +398,12 @@ function segDistSq(o: Vec3, d: Vec3, maxT: number, cx: number, cy: number, cz: n
 
 /**
  * Nearest hit along a ray against the world, the gathered candidates (rewound hitboxes),
- * training dummies (at `dummyTime`) and vehicles (current pose, excluding `ownVehicle`).
+ * training dummies and vehicle hulls (both at `hitTime`, the shooter's rewound time), excluding
+ * `ownVehicle`.
  * Occupants of a vehicle are hit through that vehicle's hull (open seats / windows).
  */
 export function traceRay(
-  sim: GameSim, origin: Vec3, dir: Vec3, maxDist: number, sc: TraceScratch, dummyTime: number,
+  sim: GameSim, origin: Vec3, dir: Vec3, maxDist: number, sc: TraceScratch, hitTime: number,
   ownVehicle: EntityId | null, out: TraceHit,
 ): TraceHit {
   out.kind = 'none';
@@ -436,7 +440,7 @@ export function traceRay(
   }
   // Training dummies (moving / popup targets).
   if (sim.training) {
-    const d = testTargetDummies(sim, origin, dir, Math.min(pBest, best), dummyTime, sc);
+    const d = testTargetDummies(sim, origin, dir, Math.min(pBest, best), hitTime, sc);
     if (d.target >= 0 && d.t < Math.min(pBest, best)) {
       out.kind = 'dummy';
       out.t = d.t;
@@ -446,15 +450,18 @@ export function traceRay(
       if (pBest > best) { pHit = null; pBest = best; }
     }
   }
-  // Vehicles (current pose).
+  // Vehicles (hulls rewound like the players). Coarse reject on the current pose first: a hull
+  // moves at most ~10 m within the rewind window.
   let vBest = Math.min(best, pBest);
   let vHit: VehicleState | null = null;
   const vl = sim.vehicleList;
   for (let i = 0; i < vl.length; i++) {
     const v = vl[i];
     if (v.id === ownVehicle) continue;
-    if (segDistSq(origin, dir, vBest, v.pos.x, v.pos.y, v.pos.z) > 25) continue;
-    const t = raycastVehicle(v, origin, dir, vBest);
+    if (segDistSq(origin, dir, vBest, v.pos.x, v.pos.y, v.pos.z) > 225) continue;
+    const g = sim.vehHistory.poseAt(v, hitTime, ghost);
+    if (segDistSq(origin, dir, vBest, g.pos.x, g.pos.y, g.pos.z) > 25) continue;
+    const t = raycastVehicle(g, origin, dir, vBest);
     if (t >= 0 && t < vBest) {
       // Occupants of this vehicle remain hittable through the hull.
       if (pHit && pHit.vehicleId === v.id) continue;
@@ -517,6 +524,7 @@ class ShotAgg {
   }
 }
 const agg = new ShotAgg();
+const ghost = createGhostVehicle();
 const traceOut = createTraceHit();
 const hitPoint: Vec3 = { x: 0, y: 0, z: 0 };
 const info = damageInfo(null, 'ar');
@@ -547,10 +555,26 @@ export function emitImpact(sim: GameSim, pos: Vec3, normal: Vec3, material: RayH
 }
 
 /** Lag-compensated rewind (s) for an input render time `rtMs`. */
-export function rewindFor(sim: GameSim, rtMs: number): number {
+/**
+ * Lag-compensated rewind (s) for the input being processed (render time `rtMs`). The client's
+ * claim is bounded by what its connection can explain: latency (transport RTT + nominal
+ * interpolation delay, or else its own recent minimum view lag measured by the server) plus the
+ * server-measured queue wait of this input plus tick slack, and never more than MAX_REWIND_MS.
+ */
+export function rewindFor(sim: GameSim, rt: PlayerRt, rtMs: number): number {
   const now = sim.time * 1000;
-  const r = now - rtMs;
-  return (r > 0 ? (r < MAX_REWIND_MS ? r : MAX_REWIND_MS) : 0) / 1000;
+  const raw = now - rtMs;
+  if (!(raw > 0)) return 0;
+  const wait = Math.max(0, now - rt.curArrived * 1000);
+  let base: number;
+  if (rt.rttMs >= 0) base = rt.rttMs + INTERP_DELAY_MS;
+  else {
+    base = Infinity;
+    for (let i = 0; i < rt.lagBuckets.length; i++) if (rt.lagBuckets[i] < base) base = rt.lagBuckets[i];
+    if (base === Infinity) base = MAX_REWIND_MS;
+  }
+  const allowed = Math.min(MAX_REWIND_MS, base + wait + REWIND_SLACK_MS);
+  return (raw < allowed ? raw : allowed) / 1000;
 }
 
 /**
@@ -605,6 +629,7 @@ export function applyShotDamage(sim: GameSim, shooter: PlayerState, weapon: Weap
   for (let i = 0; i < agg.n; i++) {
     const v = agg.victims[i];
     if (agg.part[i] === 'head') shooter.stats.headshots++;
+    if (!shooter.isBot) aimHeuristics(sim, shooter, agg.part[i] === 'head', agg.dist[i]);
     emitImpact(sim, agg.pos[i], UP, agg.armorHit[i] ? 'armor' : 'flesh', weapon, shooter.id);
     info.attacker = shooter;
     info.source = weapon;
@@ -642,3 +667,40 @@ export function bodyCenter(p: PlayerState, out: Vec3): Vec3 {
 }
 
 export { PLAYER_RADIUS };
+
+/**
+ * Server-side aim heuristics (PLAN §4): rolling headshot ratio over the last FLAG_HS_WINDOW hits,
+ * and snap-hits (a hit right after a base-aim change of more than FLAG_SNAP_RAD in one input).
+ * Raises rate-limited flags for the server log; never affects gameplay.
+ */
+function aimHeuristics(sim: GameSim, p: PlayerState, head: boolean, distance: number): void {
+  const rt = sim.rtById.get(p.id);
+  if (!rt) return;
+  const now = sim.time;
+  const n = rt.hsRing.length;
+  rt.hsRing[rt.hsIdx] = head ? 1 : 0;
+  rt.hsIdx = (rt.hsIdx + 1) % n;
+  if (rt.hsCount < n) rt.hsCount++;
+  if (rt.hsCount >= FLAG_HS_MIN_HITS && now - rt.lastHsFlag >= FLAG_COOLDOWN) {
+    let heads = 0;
+    for (let i = 0; i < rt.hsCount; i++) heads += rt.hsRing[i];
+    const ratio = heads / rt.hsCount;
+    if (ratio >= FLAG_HS_RATIO) {
+      rt.lastHsFlag = now;
+      sim.raiseFlag({ player: p.id, name: p.name, kind: 'headshotRatio', value: Math.round(ratio * 100) / 100, time: now });
+    }
+  }
+  let snap = 0;
+  for (let i = 0; i < rt.aimDeltas.length; i++) if (rt.aimDeltas[i] > snap) snap = rt.aimDeltas[i];
+  if (snap >= FLAG_SNAP_RAD && distance >= FLAG_SNAP_MIN_DIST) {
+    rt.aimDeltas.fill(0); // one snap counts once
+    rt.snapTimes[rt.snapIdx] = now;
+    rt.snapIdx = (rt.snapIdx + 1) % rt.snapTimes.length;
+    let recent = 0;
+    for (let i = 0; i < rt.snapTimes.length; i++) if (now - rt.snapTimes[i] <= FLAG_SNAP_PERIOD) recent++;
+    if (recent >= FLAG_SNAP_COUNT && now - rt.lastSnapFlag >= FLAG_COOLDOWN) {
+      rt.lastSnapFlag = now;
+      sim.raiseFlag({ player: p.id, name: p.name, kind: 'aimSnap', value: recent, time: now });
+    }
+  }
+}

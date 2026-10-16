@@ -194,7 +194,7 @@ class Harness {
       } else {
         if (wireMsg.t === 'snap' && wireMsg.s.self) {
           const st = wireMsg.s.self;
-          const w = st.activeSlot >= 0 ? st.weapons[st.activeSlot] : null;
+          const w = st.activeSlot === -1 ? null : st.weapons[st.activeSlot];
           c.acked.set(st.ack, { shotCounter: st.shotCounter, recoilPitch: st.recoilPitch, mag: w ? w.mag : -1 });
         }
         c.transport.deliver(wireMsg);
@@ -242,7 +242,7 @@ class Harness {
       for (const m of c.transport.outbox.splice(0)) {
         const p = c.game.predictedState;
         if (m.t === 'input' && p) {
-          const w = p.activeSlot >= 0 ? p.weapons[p.activeSlot] : null;
+          const w = p.activeSlot === -1 ? null : p.weapons[p.activeSlot];
           const tr: WeaponTrace = { shotCounter: p.shotCounter, recoilPitch: p.recoilPitch, mag: w ? w.mag : -1 };
           // One input per tick at 60 fps; the predicted state is the one after the newest input.
           for (const inp of m.inputs) c.predicted.set(inp.seq, tr);

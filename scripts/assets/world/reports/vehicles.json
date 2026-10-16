@@ -57,52 +57,57 @@
   },
   {
     "file": "/home/user/op-dashboard-ui/public/assets/models/vehicles/bike.glb",
-    "bytes": 263452,
-    "tris": 4279,
+    "bytes": 287876,
+    "tris": 4442,
     "scale": 1.013,
     "parts": {
-      "body": 2288,
-      "fork": 600,
-      "wheelF": 699,
-      "wheelR": 692
+      "body": 2099,
+      "fork": 546,
+      "wheelF": 898,
+      "wheelR": 899
     },
     "wheels": {
       "Wheel_F": {
         "center": [
-          -0.008,
-          -0.409,
+          -0.023,
+          -0.401,
           -0.711
         ],
+        "local": [
+          -0.017,
+          0.028,
+          0.053
+        ],
         "radius": 0.341,
-        "width": 0.131
+        "width": 0.122
       },
       "Wheel_R": {
         "center": [
-          0.005,
-          -0.403,
-          0.716
+          0.012,
+          -0.411,
+          0.711
         ],
-        "radius": 0.334,
-        "width": 0.085
+        "radius": 0.339,
+        "width": 0.141
       }
     },
     "fork": {
       "pivot": [
-        -0.008,
-        -0.409,
-        -0.711
+        -0.006,
+        -0.401,
+        -0.77
       ],
       "axis": [
-        0.012,
-        0.314,
-        0.949
+        0.006,
+        0.882,
+        0.471
       ],
-      "rake": 1.2513
+      "rake": 0.4908
     },
     "bbox": {
       "min": [
         -0.447,
-        -0.74,
+        -0.743,
         -1.05
       ],
       "max": [
