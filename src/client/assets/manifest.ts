@@ -324,6 +324,12 @@ export const WEAPON_MODELS: Record<WeaponId, WeaponModel> = {
   // </generated:weapons>
 };
 
+// The generated sight points of the two scoped rifles sit ~1 cm off the scope tube's optical axis
+// (measured from the meshes by the viewmodel). Override them here — outside the generated region —
+// so every consumer (viewmodel ADS, third-person aim, bots) agrees with the real optical axis.
+WEAPON_MODELS.dmr = { ...WEAPON_MODELS.dmr, sight: [-0.0092, 0.0981, 0.01] };
+WEAPON_MODELS.sniper = { ...WEAPON_MODELS.sniper, sight: [-0.0135, 0.1055, -0.015] };
+
 // ================================================================================================
 // Items (loot + wearable gear)
 // ================================================================================================
