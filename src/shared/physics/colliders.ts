@@ -1,11 +1,12 @@
 // Low-level collision queries against the static world: a vertical cylinder (circle in XZ plus a
 // vertical span) versus axis-aligned boxes, tree trunks and rocks.
 //
-// The character controller and drop movement call `gatherNear` once per sub-step and then run
-// several queries against the gathered candidate lists. The candidate lists and result scratch
-// objects are module-level so the per-tick hot path does not allocate. Nothing here is re-entrant
-// across a `gatherNear` call, which is fine because JavaScript is single threaded and none of
-// these functions call back into user code (other than the World query methods).
+// The character controller and drop movement call `gatherNear` once per step (with a margin that
+// covers everything the step can reach) and then run many queries against the gathered candidate
+// lists. The candidate lists and result scratch objects are module-level so the per-tick hot path
+// does not allocate. Nothing here is re-entrant across a `gatherNear` call, which is fine because
+// JavaScript is single threaded and none of these functions call back into user code (other than
+// the World query methods).
 
 import { PLAYER_RADIUS, STANCE_HEIGHT, STEP_HEIGHT } from '../constants';
 import type { RockDef, Stance, TreeDef, Vec3, World, WorldBox } from '../types';

@@ -32,7 +32,7 @@ export function enterSwim(body: CharacterBody, out: MoveEvents, fromAir: boolean
   body.airTime = 0;
   body.jumpBuffer = 0;
   body.fallSpeed = 0;
-  // Keep a little of the entry speed; the float controller eases to swim height from here.
+  // Vertical motion is taken over by the swim float controller (eases to swim height).
   body.vel.y = 0;
   out.enteredWater = true;
   if (fromAir) {

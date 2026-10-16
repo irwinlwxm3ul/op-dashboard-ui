@@ -10,6 +10,8 @@ import { CHAR_GRAVITY_MUL, GRAVITY, MAX_SLOPE_DEG, PLAYER_RADIUS, STEP_HEIGHT } 
 export const SUBSTEP_MAX_MOVE = 0.25;
 /** Hard cap on sub-steps per call (66 m/s dive at 30 Hz needs 9). */
 export const MAX_SUBSTEPS = 32;
+/** Longest dt a single step call integrates (s); longer requests are clamped (anti-hitch). */
+export const MAX_STEP_DT = 0.1;
 
 // ---- Character ----
 /** Effective character gravity (m/s^2). */
@@ -27,6 +29,9 @@ export const SUPPORT_RADIUS_FRAC = 0.8;
 export const STOP_SPEED = 1.5;
 /** cos(MAX_SLOPE_DEG): terrain with normal.y below this is too steep to stand on. */
 export const COS_MAX_SLOPE = Math.cos((MAX_SLOPE_DEG * Math.PI) / 180);
+/** Velocity damping (1/s) while sliding down terrain too steep to stand on: bounds slide speed
+ *  (~8 m/s on a 60 degree slope) so sliding off a cliff side is not a death sentence. */
+export const SLIDE_FRICTION = 2;
 /** Crouch walking (walk key held) speed relative to normal crouch speed. */
 export const CROUCH_WALK_MUL = 0.6;
 /** Upper bound for intent.speedMul (defensive; the sim combines weapon/ADS/boost multipliers). */
@@ -73,6 +78,8 @@ export const PARACHUTE_DRIFT = 0.45;
 export const PARACHUTE_BRAKE_FWD = 0.1;
 export const PARACHUTE_STRAFE = 0.7;
 export const PARACHUTE_VERTICAL_RATE = 2.0;
+/** Stronger vertical easing right after the canopy opens (descending much faster than a dive). */
+export const PARACHUTE_OPEN_RATE = 3.5;
 export const PARACHUTE_HORIZONTAL_RATE = 1.4;
 
 // ---- World colliders ----

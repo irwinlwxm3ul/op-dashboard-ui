@@ -4,11 +4,11 @@
 // transformed by the pose yaw. Lean shears the upper body sideways around a pivot at the pelvis so
 // that the head ends up exactly where `eyePosition` puts the eye: whoever peeks also exposes the head.
 
+import { EYE_HEIGHT } from '../constants';
 import { forward, right } from '../math';
 import type { HitPart, Hitbox, Vec3 } from '../types';
 import type { HitboxPose } from './types';
 import { LEAN_DROP, LEAN_OFFSET, PRONE_EYE_FORWARD, SEATED_EYE_HEIGHT } from './tuning';
-import { EYE_HEIGHT } from '../constants';
 
 // ---------------------------------------------------------------------------
 // Layouts

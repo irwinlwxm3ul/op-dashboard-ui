@@ -357,7 +357,6 @@ function stepSwim(body: CharacterBody, intent: MoveIntent, dt: number, world: Wo
   body.airTime = 0;
   body.jumpBuffer = 0;
   body.fallSpeed = 0;
-  if (intent.wantStance !== 'stand' && !intent.downed) out.stanceBlocked = true;
 
   const yaw = fin(intent.yaw);
   const sy = Math.sin(yaw), cy = Math.cos(yaw);
@@ -365,7 +364,7 @@ function stepSwim(body: CharacterBody, intent: MoveIntent, dt: number, world: Wo
   const wz = -cy * inp.mz - sy * inp.mx;
   const wishLen = Math.sqrt(wx * wx + wz * wz);
   if (wishLen > 1e-3) {
-    const s = MOVE_SPEED.swim * inp.speedMul;
+    const s = (intent.downed ? MOVE_SPEED.downedCrawl : MOVE_SPEED.swim) * inp.speedMul;
     accelerateXZ(vel, wx * s, wz * s, SWIM_ACCEL * dt);
   } else {
     const k = Math.exp(-SWIM_FRICTION * dt);

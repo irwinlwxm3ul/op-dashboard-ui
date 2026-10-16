@@ -44,6 +44,8 @@ interface RayGrid {
   boxStamp: Uint32Array;
   treeStamp: Uint32Array;
   rockStamp: Uint32Array;
+  /** Current ray stamp (incremented per cast; marks colliders already tested by this ray). */
+  stamp: number;
   /** Max terrain height per cell (+ margin). */
   cellMaxH: Float32Array;
   boxCount: number;
@@ -53,7 +55,6 @@ interface RayGrid {
 }
 
 const grids = new WeakMap<World, RayGrid>();
-let rayStamp = 0;
 
 function cellRange(v: number, half: number, inv: number, n: number): number {
   const i = Math.floor((v + half) * inv);
@@ -146,6 +147,7 @@ function buildGrid(world: World): RayGrid {
     boxStamp: new Uint32Array(boxes.length),
     treeStamp: new Uint32Array(trees.length),
     rockStamp: new Uint32Array(rocks.length),
+    stamp: 0,
     cellMaxH,
     boxCount: boxes.length, treeCount: trees.length, rockCount: rocks.length,
     heights: hs,
@@ -171,15 +173,15 @@ export function prepareRaycastWorld(world: World): void {
 }
 
 function nextStamp(g: RayGrid): number {
-  rayStamp = (rayStamp + 1) >>> 0;
-  if (rayStamp === 0) {
-    // Wrapped around: clear every stamp array we know of (this one; others rebuild lazily).
+  g.stamp = (g.stamp + 1) >>> 0;
+  if (g.stamp === 0) {
+    // Wrapped around after 2^32 casts: clear the stamps.
     g.boxStamp.fill(0);
     g.treeStamp.fill(0);
     g.rockStamp.fill(0);
-    rayStamp = 1;
+    g.stamp = 1;
   }
-  return rayStamp;
+  return g.stamp;
 }
 
 // ---------------------------------------------------------------------------
@@ -198,21 +200,21 @@ function rayBox(b: WorldBox, maxT: number): number {
     if (t1 > t2) { const tt = t1; t1 = t2; t2 = tt; s = 1; }
     if (t1 > tmin) { tmin = t1; axis = 0; sign = s; }
     if (t2 < tmax) tmax = t2;
-  } else if (ox < b.min.x || ox > b.max.x) return -1;
+  } else if (ox <= b.min.x || ox >= b.max.x) return -1; // parallel: grazing a face is a miss
   if (dy !== 0) {
     const inv = 1 / dy;
     let t1 = (b.min.y - oy) * inv, t2 = (b.max.y - oy) * inv, s = -1;
     if (t1 > t2) { const tt = t1; t1 = t2; t2 = tt; s = 1; }
     if (t1 > tmin) { tmin = t1; axis = 1; sign = s; }
     if (t2 < tmax) tmax = t2;
-  } else if (oy < b.min.y || oy > b.max.y) return -1;
+  } else if (oy <= b.min.y || oy >= b.max.y) return -1; // parallel: grazing a face is a miss
   if (dz !== 0) {
     const inv = 1 / dz;
     let t1 = (b.min.z - oz) * inv, t2 = (b.max.z - oz) * inv, s = -1;
     if (t1 > t2) { const tt = t1; t1 = t2; t2 = tt; s = 1; }
     if (t1 > tmin) { tmin = t1; axis = 2; sign = s; }
     if (t2 < tmax) tmax = t2;
-  } else if (oz < b.min.z || oz > b.max.z) return -1;
+  } else if (oz <= b.min.z || oz >= b.max.z) return -1; // parallel: grazing a face is a miss
   if (tmax < tmin || tmax < 0 || tmin > maxT) return -1;
   if (tmin >= 0) {
     hnx = axis === 0 ? sign : 0;
