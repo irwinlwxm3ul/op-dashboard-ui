@@ -20,7 +20,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { PROTOCOL_VERSION } from '../../src/shared/constants';
 import type { ClientMessage, LobbyState, MatchInit, ServerMessage } from '../../src/shared/protocol';
 import type {
-  ClientAction, EntityId, GameEvent, ItemId, LootItem, MatchConfig, PlayerState, Vec3, VehicleState, WeaponId,
+  ClientAction, EntityId, GameEvent, ItemId, LootItem, MatchConfig, PlayerState, Vec3, WeaponId,
 } from '../../src/shared/types';
 import { WEAPONS, fireInterval, sightDrop, simulateTrajectory } from '../../src/shared/items';
 import { MatchRunner, TRAINING_TARGET_CENTER_HEIGHT } from '../../src/shared/sim';
@@ -376,9 +376,17 @@ interface ShotResult {
   impacts: Rec<Extract<GameEvent, { type: 'impact' }>>[];
 }
 
-/** Aim at `point`, fire one shot and collect what happened within `windowMs`. */
+/**
+ * Aim at `point`, fire one shot and collect what happened within `windowMs`. Through a magnified
+ * scope the player holds breath (Shift) first, which damps the breathing sway (PLAN.md §3).
+ */
 function shootAt(h: Harness, c: SimClient, point: Vec3, targetId: number, windowMs = 2000): ShotResult {
   waitReady(h, c);
+  const scoped = c.self.weapon !== null && ['x4', 'x8'].includes(WEAPONS[c.self.weapon].scope) && c.self.ads > 0.99;
+  if (scoped) {
+    c.key('ShiftLeft', true);
+    h.run(800);
+  }
   aimAt(c, point);
   h.run(100);
   aimAt(c, point);
@@ -386,6 +394,7 @@ function shootAt(h: Harness, c: SimClient, point: Vec3, targetId: number, window
   const simT0 = h.sim.time;
   const shotsBefore = c.evs('localShot').length;
   pull(h, c);
+  if (scoped) c.key('ShiftLeft', false);
   h.run(windowMs);
   const local = c.evs('localShot', t0);
   expect(local.length, 'one predicted shot').toBe(1);
@@ -455,7 +464,6 @@ describe('AT2 training ground ballistics', () => {
     const hold = sightDrop(sniper, distXZ(c.self.eye, t500.pos));
     expect(hold).toBeGreaterThan(1);
     const r500b = shootAt(h, c, up(t500.pos, hold), t500.id);
-    if (!r500b.hit) console.log('DBG500', JSON.stringify({ t500, hold, eye: c.self.eye, impacts: r500b.impacts, shot: r500b.shot, ads: c.self.ads, local: c.evs('localShot').at(-1) }));
     expect(r500b.hit, 'holdover hits at 500 m').not.toBeNull();
     const tof500 = simulateTrajectory(sniper, distXZ(c.self.eye, t500.pos)).time;
     expect(r500b.hit!.t - r500b.shotAt).toBeGreaterThan(tof500 - 0.04);
@@ -1009,7 +1017,8 @@ describe('AT7 lag compensation (150 ms one-way latency)', () => {
     const sniper = WEAPONS.sniper;
     const since = h.sim.time;
     let next = h.now + 500;
-    h.until(() => shotsBy(h, S, since) >= sniper.magSize, 20_000, () => {
+    let holdSince = -1;
+    h.until(() => shotsBy(h, S, since) >= sniper.magSize, 30_000, () => {
       strafe();
       const v = S.frame.players.get(T.id);
       if (v) {
@@ -1018,15 +1027,26 @@ describe('AT7 lag compensation (150 ms one-way latency)', () => {
         const p = { x: v.pos.x + v.vel.x * tof, y: v.pos.y + 1.25 + sightDrop(sniper, d), z: v.pos.z + v.vel.z * tof };
         aimAt(S, p);
       }
-      // Fire mid-strafe (not around a reversal) once the bolt has cycled.
+      // Hold breath (Shift) to steady the scope, then fire mid-strafe (not around a reversal)
+      // once the bolt has cycled.
       const s = S.self;
       const ready = s.fireCooldown <= 1e-6 && s.reloadProgress < 0 && Math.abs(s.recoilPitch) < 1e-3
         && (s.weapons.find((w) => w?.id === 'sniper')?.mag ?? 0) > 0;
-      if (h.now >= next && ready && v && Math.hypot(v.vel.x, v.vel.z) > 3) {
-        S.g.input.mouseButton(0, true);
-        next = h.now + 1700;
-      } else {
-        S.g.input.mouseButton(0, false);
+      S.g.input.mouseButton(0, false);
+      if (h.now >= next && ready) {
+        if (holdSince < 0) {
+          holdSince = h.now;
+          S.key('ShiftLeft', true);
+        } else if (h.now - holdSince > 800 && v && Math.hypot(v.vel.x, v.vel.z) > 3) {
+          S.g.input.mouseButton(0, true);
+          S.key('ShiftLeft', false);
+          holdSince = -1;
+          next = h.now + 1700;
+        } else if (h.now - holdSince > 3000) {
+          S.key('ShiftLeft', false); // out of breath before a good moment: breathe and retry
+          holdSince = -1;
+          next = h.now + 1500;
+        }
       }
     });
     S.g.input.mouseButton(0, false);

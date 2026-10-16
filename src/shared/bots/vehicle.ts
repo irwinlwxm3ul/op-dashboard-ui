@@ -132,11 +132,11 @@ const BRAKE_USE = 0.5;
 const REACTION = 0.3;
 /** Distance kept to an obstacle when stopping in front of it (m, beyond the bumper). */
 const STOP_MARGIN = 2.5;
-/** Speed caps (m/s) near towns and for large heading errors. */
+/** Speed cap (m/s) within TOWN_MARGIN (m) of a town's radius. */
 const TOWN_SPEED = 12;
+const TOWN_MARGIN = 25;
 /** Off-road cruise cap (m/s): bumps throw the wheels off the ground, which ruins braking. */
 const OFFROAD_SPEED = 16;
-const TOWN_MARGIN = 25;
 /** Drivers pass around towns at this distance beyond their radius (m). */
 const TOWN_DETOUR_MARGIN = 15;
 /** Terrain sample spacing (m), water depth and grade (rise / run) a driver avoids. */

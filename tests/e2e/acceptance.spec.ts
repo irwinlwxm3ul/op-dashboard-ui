@@ -204,17 +204,20 @@ test.describe.serial('training ground', () => {
    * when a software-rendered frame stalls for more than ~0.6 s the server stops repeating the held
    * buttons (ADS included) of the starved input stream, which can spoil an individual shot.
    */
-  async function shootTarget(point: Vec3, targetId: number, holdMs: number) {
+  async function shootTarget(point: Vec3, targetId: number, holdMs: number, holdBreath: boolean) {
     for (let attempt = 0; attempt < 5; attempt++) {
+      await waitForFrame(page, (x) => x.self!.fireCooldown <= 1e-6 && x.self!.reloadProgress < 0 && x.self!.ads >= 0.99, 30_000, 'ready to fire');
+      // Through the 8x scope: hold breath (Shift) so the breathing sway settles before the shot.
+      if (holdBreath) await page.keyboard.down('ShiftLeft');
       const f = (await frame(page))!;
       const a = anglesTo(f.self!.eye, point);
       await setAim(page, a.yaw, a.pitch);
-      await waitForFrame(page, (x) => x.self!.fireCooldown <= 1e-6 && x.self!.reloadProgress < 0 && x.self!.ads >= 0.99, 30_000, 'ready to fire');
-      await page.waitForTimeout(1200);
+      await page.waitForTimeout(1500);
       const since = await pageNow(page);
       await mouse(page, 0, true);
       await page.waitForTimeout(holdMs);
       await mouse(page, 0, false);
+      if (holdBreath) await page.keyboard.up('ShiftLeft');
       const end = Date.now() + 15_000;
       while (Date.now() < end) {
         const hit = (await events(page, ['targetHit'], since)).find((e) => e.ev.target === targetId);
@@ -249,7 +252,7 @@ test.describe.serial('training ground', () => {
     const t300 = f0.trainingTargets.find((t) => t.kind === 'static' && t.range === 300)!;
     // Hold over by the drop at this distance (sights are zeroed at 100 m).
     const d = distXZ(f0.self!.eye, t300.center);
-    const r = await shootTarget({ ...t300.center, y: t300.center.y + sightDrop(WEAPONS.sniper, d) }, t300.id, 500);
+    const r = await shootTarget({ ...t300.center, y: t300.center.y + sightDrop(WEAPONS.sniper, d) }, t300.id, 500, true);
     const local = r.local.filter((e) => e.ev.weapon === 'sniper');
     expect(local.length).toBeGreaterThanOrEqual(1);
     expect(local.every((e) => e.ev.ballistic), 'predicted as a ballistic shot').toBe(true);
@@ -264,7 +267,7 @@ test.describe.serial('training ground', () => {
     await equipAndScope('ar');
     const f1 = (await frame(page))!;
     const t100 = f1.trainingTargets.find((t) => t.kind === 'static' && t.range === 100)!;
-    const r2 = await shootTarget(t100.center, t100.id, 150);
+    const r2 = await shootTarget(t100.center, t100.id, 150, false);
     expect(r2.shot?.ev.weapon).toBe('ar');
     expect(r2.shot?.ev.projectiles).toBeUndefined();
     expect(r2.hit.snap).toBe(r2.shot!.snap);
