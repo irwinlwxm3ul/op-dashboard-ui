@@ -7,6 +7,7 @@
 // relaxed toward the middle of doorways, and results are cached by (goal cell, coarse start) so
 // squadmates heading for the same spot reuse one search.
 
+import { GROUND, type FloorLoc, type FloorNav } from './floors';
 import { NavGrid, NF_BLOCKED, NF_NEAR, DIR_DX, DIR_DZ } from './nav';
 import { hyp } from './util';
 
@@ -45,6 +46,9 @@ export interface PathRequest {
   sz: number;
   gx: number;
   gz: number;
+  /** Feet heights of start / goal (NaN = ground level); upper floors route via stairs. */
+  sy: number;
+  gy: number;
   /** Waypoints as x,z pairs (start position excluded, final point = destination). */
   pts: Float32Array;
   count: number;
@@ -53,7 +57,10 @@ export interface PathRequest {
 }
 
 export function newPathRequest(): PathRequest {
-  return { status: PATH_IDLE, sx: 0, sz: 0, gx: 0, gz: 0, pts: new Float32Array(MAX_PATH_POINTS * 2), count: 0, partial: false };
+  return {
+    status: PATH_IDLE, sx: 0, sz: 0, gx: 0, gz: 0, sy: NaN, gy: NaN,
+    pts: new Float32Array(MAX_PATH_POINTS * 2), count: 0, partial: false,
+  };
 }
 
 interface CacheEntry {
@@ -93,6 +100,15 @@ export class PathPlanner {
   private startH = 0;
   private expansions = 0;
   private cacheKey = 0;
+  private readonly floors: FloorNav | null;
+  /** Indoor prefix / suffix of a composite (multi-floor) route. */
+  private readonly pre = new Float32Array(MAX_PATH_POINTS * 2);
+  private readonly suf = new Float32Array(MAX_PATH_POINTS * 2);
+  private preCount = 0;
+  private sufCount = 0;
+  private composite = false;
+  private readonly locS: FloorLoc = { building: -1, level: -1, cell: -1 };
+  private readonly locG: FloorLoc = { building: -1, level: -1, cell: -1 };
   private readonly cellBuf = new Int32Array(WIN_CELLS);
   private readonly cache = new Map<number, CacheEntry>();
   private tick = 0;
@@ -100,17 +116,23 @@ export class PathPlanner {
   searches = 0;
   cacheHits = 0;
 
-  constructor(grid: NavGrid) {
+  constructor(grid: NavGrid, floors: FloorNav | null = null) {
     this.grid = grid;
+    this.floors = floors;
   }
 
-  /** (Re)queue a request for a path from (sx, sz) to (gx, gz). */
-  request(req: PathRequest, sx: number, sz: number, gx: number, gz: number): void {
+  /**
+   * (Re)queue a request for a path from (sx, sz) to (gx, gz). Heights (sy / gy, NaN = ground)
+   * select upper building floors: such paths go through the stairs.
+   */
+  request(req: PathRequest, sx: number, sz: number, gx: number, gz: number, sy = NaN, gy = NaN): void {
     this.cancel(req);
     req.sx = sx;
     req.sz = sz;
     req.gx = gx;
     req.gz = gz;
+    req.sy = sy;
+    req.gy = gy;
     req.count = 0;
     req.partial = false;
     req.status = PATH_QUEUED;
@@ -157,12 +179,14 @@ export class PathPlanner {
    * Synchronous path search (tests / tools): runs to completion ignoring tick budgets.
    * Returns the request status (PATH_DONE or PATH_FAILED).
    */
-  findPathNow(req: PathRequest, sx: number, sz: number, gx: number, gz: number): number {
+  findPathNow(req: PathRequest, sx: number, sz: number, gx: number, gz: number, sy = NaN, gy = NaN): number {
     this.cancel(req);
     req.sx = sx;
     req.sz = sz;
     req.gx = gx;
     req.gz = gz;
+    req.sy = sy;
+    req.gy = gy;
     req.count = 0;
     req.partial = false;
     const saved = this.active;
@@ -184,22 +208,60 @@ export class PathPlanner {
   private begin(req: PathRequest): boolean {
     const grid = this.grid;
     req.status = PATH_RUNNING;
-    // Start: nearest free cell if standing in a blocked one (e.g. hugging a wall).
+    // Upper floors: indoor routes down to / up from the ground-floor stairs around the ground part.
     let sx = req.sx, sz = req.sz;
+    let gx = req.gx, gz = req.gz;
+    this.preCount = 0;
+    this.sufCount = 0;
+    this.composite = false;
+    const fl = this.floors;
+    if (fl) {
+      const sNav = fl.locate(req.sx, req.sy, req.sz, this.locS, true);
+      const gNav = fl.locate(req.gx, req.gy, req.gz, this.locG, true);
+      if (sNav || gNav) {
+        this.composite = true;
+        if (sNav && gNav && sNav === gNav && (sNav.reachable(this.locS) || !gNav.reachable(this.locG))) {
+          // Same building, both upstairs: indoor route only.
+          const n = sNav.route(this.locS.level, this.locS.cell, this.locG.level, this.locG.cell, req.sx, req.sz, req.gx, req.gz, req.pts, 0, MAX_PATH_POINTS);
+          if (n <= 0) return this.fail(req);
+          req.count = n;
+          req.status = PATH_DONE;
+          return false;
+        }
+        if (sNav) {
+          if (!sNav.reachable(this.locS)) return this.fail(req);
+          const n = sNav.route(this.locS.level, this.locS.cell, GROUND, -1, req.sx, req.sz, 0, 0, this.pre, 0, MAX_PATH_POINTS);
+          if (n <= 0) return this.fail(req);
+          this.preCount = n;
+          sx = this.pre[(n - 1) * 2];
+          sz = this.pre[(n - 1) * 2 + 1];
+        }
+        if (gNav) {
+          if (!gNav.reachable(this.locG)) return this.fail(req);
+          const n = gNav.route(GROUND, -1, this.locG.level, this.locG.cell, gNav.groundX, gNav.groundZ, req.gx, req.gz, this.suf, 0, MAX_PATH_POINTS);
+          if (n <= 0) return this.fail(req);
+          this.sufCount = n;
+          gx = gNav.groundX;
+          gz = gNav.groundZ;
+        }
+      }
+    }
+    // Start: nearest free cell if standing in a blocked one (e.g. hugging a wall).
     const sf = grid.flagsAt(sx, sz);
     if (sf & NF_BLOCKED || grid.dirs(grid.cell(sx), grid.cell(sz)) === 0) {
       if (!grid.nearestFree(sx, sz, 4, tmpP)) return this.fail(req);
       sx = tmpP.x;
       sz = tmpP.z;
     }
-    // Goal: clamp very long trips, then nearest free cell.
-    let gx = req.gx, gz = req.gz;
+    // Goal: clamp very long trips (the indoor tail is then planned with a later leg), then
+    // nearest free cell.
     const dx = gx - sx, dz = gz - sz;
     const d = hyp(dx, dz);
     if (d > MAX_PLAN_DIST) {
       gx = sx + (dx / d) * MAX_PLAN_DIST;
       gz = sz + (dz / d) * MAX_PLAN_DIST;
       req.partial = true;
+      this.sufCount = 0;
     }
     const gf = grid.flagsAt(gx, gz);
     if (gf & NF_BLOCKED || grid.dirs(grid.cell(gx), grid.cell(gz)) === 0) {
@@ -214,7 +276,7 @@ export class PathPlanner {
     this.goalZ = gz;
     // Cache lookup (goal cell + 4 m start bucket).
     this.cacheKey = (ggz * grid.cells + ggx) * 65536 + ((sgz >> 2) & 255) * 256 + ((sgx >> 2) & 255);
-    const hit = this.cache.get(this.cacheKey);
+    const hit = this.composite ? undefined : this.cache.get(this.cacheKey);
     if (hit && this.tick - hit.tick < CACHE_TTL_TICKS && hit.count > 0 &&
         grid.lineOfWalk(req.sx, req.sz, hit.pts[0], hit.pts[1], false, true)) {
       req.pts.set(hit.pts.subarray(0, hit.count * 2));
@@ -225,9 +287,11 @@ export class PathPlanner {
       return false;
     }
     if (sgx === ggx && sgz === ggz) {
-      req.pts[0] = gx;
-      req.pts[1] = gz;
-      req.count = 1;
+      let count = this.copyPrefix(req.pts);
+      req.pts[count * 2] = gx;
+      req.pts[count * 2 + 1] = gz;
+      count = this.appendSuffix(req, count + 1);
+      req.count = count;
       req.status = PATH_DONE;
       return false;
     }
@@ -347,7 +411,7 @@ export class PathPlanner {
     }
     const grid = this.grid;
     const out = req.pts;
-    let count = 0;
+    let count = this.copyPrefix(out);
     let ax = this.startX, az = this.startZ;
     const endX = reached ? this.goalX : this.cx(this.cellBuf[n - 1]);
     const endZ = reached ? this.goalZ : this.cz(this.cellBuf[n - 1]);
@@ -378,14 +442,34 @@ export class PathPlanner {
     out[count * 2] = endX;
     out[count * 2 + 1] = endZ;
     count++;
+    if (reached) count = this.appendSuffix(req, count);
     req.count = count;
     req.status = PATH_DONE;
+    if (this.composite) return;
     // Cache.
     if (this.cache.size >= CACHE_SIZE) {
       const first = this.cache.keys().next();
       if (!first.done) this.cache.delete(first.value);
     }
     this.cache.set(this.cacheKey, { pts: out.slice(0, count * 2), count, partial: req.partial, tick: this.tick });
+  }
+
+  /** Copy the indoor prefix (upper floor -> ground stairs) into out; returns the point count. */
+  private copyPrefix(out: Float32Array): number {
+    const n = Math.min(this.preCount, MAX_PATH_POINTS - 2);
+    if (n > 0) out.set(this.pre.subarray(0, n * 2));
+    return n;
+  }
+
+  /** Append the indoor suffix (ground stairs -> upper floor) when it fits; returns the count. */
+  private appendSuffix(req: PathRequest, count: number): number {
+    if (this.sufCount === 0) return count;
+    if (count + this.sufCount > MAX_PATH_POINTS) {
+      req.partial = true;
+      return count;
+    }
+    req.pts.set(this.suf.subarray(0, this.sufCount * 2), count * 2);
+    return count + this.sufCount;
   }
 
   private cx(node: number): number {

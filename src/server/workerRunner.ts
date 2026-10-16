@@ -6,6 +6,7 @@
 // Benefits: the ~0.5 s synchronous world generation at match start no longer stalls other matches
 // or the WebSocket loop, and concurrent matches use multiple cores.
 
+import { randomInt } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import path from 'node:path';
@@ -173,6 +174,7 @@ class WorkerRunner implements MatchRunnerLike {
         }
         break;
       case 'ready':
+      case 'prewarmed':
         break;
     }
   };
@@ -202,6 +204,8 @@ export function createWorkerRunnerFactory(options: WorkerRunnerFactoryOptions = 
   const useSpare = options.warmSpare ?? true;
   const active = new Set<Worker>();
   let spare: Worker | null = null;
+  /** Seed whose island world the spare has (pre)generated. */
+  let spareSeed = 0;
   let spareTimer: ReturnType<typeof setTimeout> | null = null;
   let disposed = false;
 
@@ -227,6 +231,8 @@ export function createWorkerRunnerFactory(options: WorkerRunnerFactoryOptions = 
     w.unref();
     w.on('error', onSpareError);
     w.on('exit', onSpareExit);
+    spareSeed = randomInt(0, 0x1_0000_0000);
+    w.postMessage({ k: 'prewarm', seed: spareSeed } satisfies ToWorker);
     spare = w;
   }
 
@@ -239,18 +245,20 @@ export function createWorkerRunnerFactory(options: WorkerRunnerFactoryOptions = 
     spareTimer.unref();
   }
 
-  function takeWorker(): Worker {
-    let w = spare;
+  /** A worker for the next match plus the island seed it has pre-generated (if any). */
+  function takeWorker(): { w: Worker; seed: number | null } {
+    const w = spare;
     if (w) {
       spare = null;
       w.off('error', onSpareError);
       w.off('exit', onSpareExit);
-    } else {
-      w = spawnWorker(limits);
-      w.unref();
+      scheduleSpare();
+      return { w, seed: spareSeed };
     }
+    const fresh = spawnWorker(limits);
+    fresh.unref();
     scheduleSpare();
-    return w;
+    return { w: fresh, seed: null };
   }
 
   const release = (w: Worker): void => {
@@ -259,9 +267,12 @@ export function createWorkerRunnerFactory(options: WorkerRunnerFactoryOptions = 
 
   const factory = ((opts: RunnerOptions): MatchRunnerLike => {
     if (disposed) throw new Error('worker runner factory disposed');
-    const w = takeWorker();
+    const { w, seed } = takeWorker();
     active.add(w);
-    return new WorkerRunner(w, opts, log, release);
+    // The lobby picked a random seed; the spare's pre-generated random seed is just as random and
+    // lets the match skip world generation (clients learn the seed from matchInit as always).
+    const config = seed !== null && opts.config.mode === 'br' ? { ...opts.config, seed } : opts.config;
+    return new WorkerRunner(w, { ...opts, config }, log, release);
   }) as WorkerRunnerFactory;
 
   Object.defineProperty(factory, 'activeWorkers', { get: () => active.size });

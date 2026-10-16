@@ -37,6 +37,8 @@ export class LootRenderer {
   private readonly material = createEntityMaterial({ rim: false, fogScale: 1 });
   private readonly batch: THREE.BatchedMesh;
   private readonly geoIds = new Map<ItemId, number>();
+  private vertexCapacity = 0;
+  private usedVertices = 0;
   private readonly rings: THREE.InstancedMesh;
   private readonly ringMat: THREE.MeshBasicMaterial;
   private readonly active = new Map<EntityId, LootEntry>();
@@ -58,7 +60,9 @@ export class LootRenderer {
       geos.push(g);
       verts += g.getAttribute('position').count;
     }
-    this.batch = new THREE.BatchedMesh(MAX_VISIBLE, verts + 16, 0, this.material);
+    this.vertexCapacity = verts + 16;
+    this.usedVertices = verts;
+    this.batch = new THREE.BatchedMesh(MAX_VISIBLE, this.vertexCapacity, 0, this.material);
     this.batch.name = 'loot';
     this.batch.castShadow = false;
     this.batch.receiveShadow = true;
@@ -100,6 +104,30 @@ export class LootRenderer {
     this.rings.renderOrder = 1;
     this.rings.count = 0;
     parent.add(this.rings);
+  }
+
+  /**
+   * Rebuild the meshes of some item kinds (e.g. once their real models were registered): the new
+   * geometry is added to the batch, live instances are re-pointed, the old one is released.
+   */
+  refreshItems(ids: readonly ItemId[]): void {
+    for (const id of ids) {
+      const old = this.geoIds.get(id);
+      const g = buildLootGeometry(id);
+      const n = g.getAttribute('position').count;
+      if (this.usedVertices + n > this.vertexCapacity) {
+        this.vertexCapacity = this.usedVertices + n + 1024;
+        this.batch.setGeometrySize(this.vertexCapacity, 0);
+      }
+      const gid = this.batch.addGeometry(g);
+      this.usedVertices += n;
+      g.dispose();
+      this.geoIds.set(id, gid);
+      this.active.forEach((e) => {
+        if (e.item === id) this.batch.setGeometryIdAt(e.inst, gid);
+      });
+      if (old !== undefined) this.batch.deleteGeometry(old);
+    }
   }
 
   private readonly visit = (item: LootItem): void => {

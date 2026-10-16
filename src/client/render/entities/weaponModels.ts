@@ -47,8 +47,43 @@ const C = {
 const _m = new THREE.Matrix4();
 const _l = new THREE.Matrix4();
 
+/**
+ * Real weapon meshes (curated glTF models, same weapon frame) registered once they loaded. While a
+ * weapon has no registered asset the procedural model below is used.
+ */
+const assetGeometry = new Map<WeaponId, { geometry: THREE.BufferGeometry; tint: number }>();
+
+/**
+ * Register a loaded weapon model (vertex-coloured geometry in the weapon frame) and its hold
+ * points. Geometries built afterwards (soldiers, gear, loot) use it instead of the procedural gun.
+ */
+export function setWeaponAsset(
+  id: WeaponId, geometry: THREE.BufferGeometry, tint: number, hold: Omit<WeaponHold, 'pistol'> & { pistol?: boolean },
+): void {
+  assetGeometry.set(id, { geometry, tint });
+  WEAPON_HOLD[id] = {
+    pistol: hold.pistol ?? WEAPON_HOLD[id].pistol,
+    // Pistols are positioned from the grip (see rig.ts), so their butt reference stays at the origin.
+    butt: WEAPON_HOLD[id].pistol ? [0, 0, 0] : hold.butt,
+    fore: hold.fore,
+    muzzle: hold.muzzle,
+    length: hold.length,
+  };
+}
+
+/** True when the real model of this weapon is in use. */
+export function hasWeaponAsset(id: WeaponId): boolean {
+  return assetGeometry.has(id);
+}
+
 /** Add a weapon model to `b`, transformed by `base`, assigned to `bone`. */
 export function buildWeapon(id: WeaponId, b: GeoBuilder, base: THREE.Matrix4, bone = 0): void {
+  const asset = assetGeometry.get(id);
+  if (asset) {
+    const vc = asset.geometry.getAttribute('color') !== undefined;
+    b.add(asset.geometry, base, { color: asset.tint, bone, vertexColors: vc, smooth: true });
+    return;
+  }
   const st = (color: number): PartStyle => ({ color, bone });
   const box = (w: number, h: number, d: number, x: number, y: number, z: number, color: number, rx = 0, ry = 0, rz = 0): void => {
     b.box(w, h, d, _m.multiplyMatrices(base, xform(x, y, z, rx, ry, rz, 1, 1, 1, _l)), st(color));

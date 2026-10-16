@@ -6,6 +6,7 @@ import { parentPort } from 'node:worker_threads';
 import { createBotDriver } from '../shared/bots/index';
 import type { ServerMessage } from '../shared/protocol';
 import { MatchRunner } from '../shared/sim/index';
+import { generateWorld } from '../shared/world/index';
 import type { FromWorker, ToWorker } from './matchWorkerProtocol';
 
 /** Loop interval (ms). MatchRunner.update is a fixed-step accumulator; this bounds tick jitter. */
@@ -71,6 +72,14 @@ function tick(): void {
 
 function handle(m: ToWorker): void {
   switch (m.k) {
+    case 'prewarm': {
+      if (runner) return;
+      const t0 = performance.now();
+      // generateWorld caches by (seed, kind): the MatchRunner built for this seed reuses it.
+      generateWorld(m.seed, 'island');
+      post({ k: 'prewarmed', seed: m.seed, genMs: performance.now() - t0 });
+      return;
+    }
     case 'init': {
       if (runner || failed) return;
       const t0 = performance.now();
@@ -131,7 +140,9 @@ port.on('message', (m: ToWorker) => {
   try {
     handle(m);
   } catch (err) {
-    fail(m.k, err, m.k === 'start');
+    // A failed prewarm is harmless (init generates the world itself); anything else is fatal
+    // once it breaks the runner's lifecycle.
+    if (m.k !== 'prewarm') fail(m.k, err, m.k === 'start' || m.k === 'init');
   }
 });
 

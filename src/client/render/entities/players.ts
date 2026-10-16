@@ -40,6 +40,7 @@ const _v = new THREE.Vector3();
 const _m = new THREE.Matrix4();
 const _m2 = new THREE.Matrix4();
 const _seat: Vec3 = { x: 0, y: 0, z: 0 };
+const _sphere = new THREE.Sphere(new THREE.Vector3(), 1.9);
 const _animIn: AnimInput = { view: null, seat: null, aimYawRel: 0, localVx: 0, localVz: 0, time: 0, dt: 0 };
 const _rigIn: RigInput = { pose: createPose(), aimPitch: 0, aimYaw: 0, weapon: null, slungDepth: 0 };
 /** Scratch per-player frame handed to the body backends (created on first use, then reused). */
@@ -51,7 +52,7 @@ function bodyFrame(v: PlayerView): BodyFrame {
         accent: new THREE.Color(), cloth: new THREE.Color(), legs: new THREE.Color(), skin: new THREE.Color(),
         gear: [0, 0, 0], weapon: null,
       },
-      showWeapon: false, fade: 0, shadows: false, view: v, logical: createLogicalAnim(), anim: new AnimState(),
+      showWeapon: false, fade: 0, shadows: false, onScreen: true, view: v, logical: createLogicalAnim(), anim: new AnimState(),
       moveX: 0, moveZ: 0, aimPitch: 0, aimYawRel: 0, dt: 0, time: 0,
     };
   }
@@ -148,6 +149,8 @@ export interface PlayersUpdateContext {
   focalPx: number;
   shadows: boolean;
   time: number;
+  /** Camera view frustum for this frame (body culling). */
+  frustum: THREE.Frustum;
 }
 
 export class PlayersRenderer {
@@ -203,6 +206,11 @@ export class PlayersRenderer {
       this.mid.clear();
       this.mid = nextMid;
     }
+  }
+
+  /** Rebuild procedural geometry after real weapon models were registered. */
+  refreshWeaponModels(): void {
+    this.procNear.rebuildGeometry();
   }
 
   /** Name of the active near / mid backends (diagnostics). */
@@ -439,6 +447,8 @@ export class PlayersRenderer {
       _body.look = e.look;
       _body.showWeapon = v.weapon !== null && v.life !== 'dead';
       _body.shadows = ctx.shadows;
+      _sphere.center.set(e.rootPos.x, e.rootPos.y + 0.8, e.rootPos.z);
+      _body.onScreen = ctx.frustum.intersectsSphere(_sphere);
       _body.view = v;
       _body.logical = e.logical;
       _body.anim = e.anim;

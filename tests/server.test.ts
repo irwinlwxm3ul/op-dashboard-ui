@@ -712,8 +712,10 @@ describe('match worker threads (real MatchRunner)', () => {
       await a.next('matchInit', () => true, 20_000);
       expect(created).toHaveLength(2);
       a.send({ t: 'leaveMatch' });
+      await a.next('backToLobby');
       b.send({ t: 'leaveMatch' });
-      await b.next('lobbyState', (m) => m.lobby.status === 'waiting', 5000);
+      await b.next('backToLobby');
+      await a.next('lobbyState', (m) => m.lobby.status === 'waiting', 5000);
       expect(workers.activeWorkers).toBe(0); // abandoned match: worker terminated
     } finally {
       await s.close();

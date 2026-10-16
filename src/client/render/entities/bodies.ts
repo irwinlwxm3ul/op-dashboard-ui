@@ -27,6 +27,11 @@ export interface BodyFrame {
   fade: number;
   /** Cast shadows (near LOD on shadow-enabled qualities). */
   shadows: boolean;
+  /**
+   * The body's bounds intersect the view frustum. Backends without their own culling (e.g. skinned
+   * characters with frustumCulled = false) can skip drawing and animation updates when false.
+   */
+  onScreen: boolean;
   view: PlayerView;
   logical: LogicalAnim;
   /** Procedural animation state (smoothed lean, flinch / kick springs, blended pose incl. drop pitch). */

@@ -1,17 +1,19 @@
 // Multi-floor navigation inside buildings.
 //
 // The ground-level NavGrid covers terrain and every ground floor. Upper floors (and roofs reached
-// by stairs) are separate per-building *levels*: small 1 m grids on the same lattice as the
-// ground grid, one per slab height, rasterised exactly like the ground grid (0.25 m sub-samples:
-// a sample is walkable when a slab of that level lies under it and nothing occupies the standing
-// character's vertical span above it; 1 m moves are allowed when every sub-sample between the two
-// cell centres is walkable). Stairwell holes have no slab, rails and walls are obstructions.
+// by stairs) are separate per-building *levels*: small 0.5 m grids (stair landings and corridors
+// are only ~1 m wide), one per slab height, rasterised like the ground grid with 0.25 m
+// sub-samples: a sample is walkable when a slab of that level lies under it and nothing occupies
+// the standing character's vertical span above it; a move between neighbouring cells is allowed
+// when every sub-sample between the two centres is walkable. Stairwell holes have no slab, rails
+// and walls are obstructions.
 //
 // Levels are connected by stair *runs* recovered from the building's step boxes (consecutive
 // 'stairs' boxes on one base slab with rising tops). A run is a link from an entry point in front
 // of its first step on the lower floor to an exit point just past its last step on the upper
 // floor; walking straight along it is what the real character controller does on stairs. The run
-// that starts on the ground floor links the levels to the ground grid through its entry point.
+// that starts on the ground floor links the levels to the ground grid through its first step (the
+// ground grid already treats the lowest steps as walkable floor).
 //
 // Path planning across floors is hierarchical: a small Dijkstra over one building's levels and
 // runs (a few hundred cells) produces the indoor part, the budgeted ground A* the rest.
@@ -25,12 +27,14 @@ import { hyp } from './util';
 /** Level index used for the ground floor (handled by the ground grid). */
 export const GROUND = -1;
 
-const FINE = 4;
+/** Level cell size (m) and sub-samples per cell side (0.25 m spacing). */
+const CELL = 0.5;
+const FINE = 2;
 const CLEAR_LO = STEP_HEIGHT;
 const CLEAR_HI = 1.75;
 const BLOCK_INFLATE = 0.05;
-const NEAR_INFLATE = 0.5;
-const MIN_RASTER = 1 / FINE + 0.01;
+const NEAR_INFLATE = 0.45;
+const MIN_RASTER = CELL / FINE + 0.01;
 /** Slab tops within this distance belong to the same level. */
 const LEVEL_EPS = 0.08;
 /** A stair run has at least this many step boxes (entrance treads have fewer and lie outside). */
@@ -95,18 +99,17 @@ const tmpP = { x: 0, z: 0 };
 /** Navigation data for one building's upper floors. */
 export class BuildingNav {
   readonly bi: number;
-  /** Lattice origin (global cells) and size of the level grids. */
-  readonly gx0: number;
-  readonly gz0: number;
+  /** Level grid origin (world) and size in cells. */
+  readonly ox: number;
+  readonly oz: number;
   readonly W: number;
   readonly H: number;
   readonly levels: FloorLevel[] = [];
   readonly runs: StairRun[] = [];
-  /** Ground-floor entry of the stairs (bottom of the run that starts on the ground floor). */
+  /** Ground-floor anchor of the stairs (first step of the run that starts on the ground floor). */
   groundX = 0;
   groundZ = 0;
   hasGround = false;
-  private readonly half: number;
   private readonly grid: NavGrid;
   // Dijkstra scratch.
   private dist = new Float32Array(0);
@@ -120,12 +123,11 @@ export class BuildingNav {
   constructor(world: World, grid: NavGrid, bi: number) {
     this.bi = bi;
     this.grid = grid;
-    this.half = world.half;
     const b = world.buildings[bi];
-    this.gx0 = grid.cell(b.min.x) - 1;
-    this.gz0 = grid.cell(b.min.z) - 1;
-    this.W = grid.cell(b.max.x) + 2 - this.gx0;
-    this.H = grid.cell(b.max.z) + 2 - this.gz0;
+    this.ox = b.min.x - 1;
+    this.oz = b.min.z - 1;
+    this.W = Math.ceil((b.max.x - b.min.x + 2) / CELL);
+    this.H = Math.ceil((b.max.z - b.min.z + 2) / CELL);
     this.build(world);
   }
 
@@ -135,14 +137,14 @@ export class BuildingNav {
 
   /** Local cell index of a world position (-1 outside the grid). */
   cellAt(x: number, z: number): number {
-    const i = Math.floor(x + this.half) - this.gx0, j = Math.floor(z + this.half) - this.gz0;
+    const i = Math.floor((x - this.ox) / CELL), j = Math.floor((z - this.oz) / CELL);
     return i < 0 || j < 0 || i >= this.W || j >= this.H ? -1 : j * this.W + i;
   }
   cellX(c: number): number {
-    return this.gx0 + (c % this.W) + 0.5 - this.half;
+    return this.ox + ((c % this.W) + 0.5) * CELL;
   }
   cellZ(c: number): number {
-    return this.gz0 + Math.floor(c / this.W) + 0.5 - this.half;
+    return this.oz + (Math.floor(c / this.W) + 0.5) * CELL;
   }
 
   /** Is the cell walkable on that level? */
@@ -152,7 +154,7 @@ export class BuildingNav {
 
   /** Nearest walkable cell to (x, z) on a level within r cells (-1 if none). */
   nearestCell(level: number, x: number, z: number, r: number): number {
-    const ci = Math.floor(x + this.half) - this.gx0, cj = Math.floor(z + this.half) - this.gz0;
+    const ci = Math.floor((x - this.ox) / CELL), cj = Math.floor((z - this.oz) / CELL);
     let best = -1, bestD = Infinity;
     for (let dj = -r; dj <= r; dj++) {
       for (let di = -r; di <= r; di++) {
@@ -184,7 +186,7 @@ export class BuildingNav {
     }
     if (lv < 0) return false;
     let c = this.cellAt(x, z);
-    if (c < 0 || !this.free(lv, c)) c = this.nearestCell(lv, x, z, 2);
+    if (c < 0 || !this.free(lv, c)) c = this.nearestCell(lv, x, z, 3);
     if (c < 0) return false;
     out.building = this.bi;
     out.level = lv;
@@ -243,29 +245,42 @@ export class BuildingNav {
       let j = i;
       if (node !== G) {
         while (j + 1 < seq.length && seq[j + 1] !== G && Math.floor(seq[j + 1] / N) === lv) j++;
-        // Same-level stretch i..j: smoothed walk from the anchor.
         const lastOfPath = j === seq.length - 1;
-        const res = this.smoothStretch(lv, i, j, ax, az, lastOfPath ? gx : NaN, lastOfPath ? gz : NaN, push);
-        if (res === null) return -1;
-        ax = res.x;
-        az = res.z;
+        let run: StairRun | null = null;
+        let up = false;
+        if (!lastOfPath) {
+          run = this.linkFrom(seq[j], seq[j + 1]);
+          if (!run) return -1;
+          up = run.bottomLevel === lv;
+        }
+        // Same-level stretch i..j: smoothed walk from the anchor to the goal / stair entry.
+        const termX = lastOfPath ? gx : up ? run!.bx : run!.tx;
+        const termZ = lastOfPath ? gz : up ? run!.bz : run!.tz;
+        if (!this.smoothStretch(lv, i, j, ax, az, termX, termZ, lastOfPath, push)) return -1;
         if (lastOfPath) break;
       } else if (j === seq.length - 1) {
         break;
       }
       // Stair link seq[j] -> seq[j + 1].
       const a = seq[j], b = seq[j + 1];
-      const la = a === G ? GROUND : Math.floor(a / N), lb = b === G ? GROUND : Math.floor(b / N);
-      const run = this.linkRun(la, a === G ? -1 : a - la * N, lb, b === G ? -1 : b - lb * N);
+      const run = this.linkFrom(a, b);
       if (!run) return -1;
-      const up = run.bottomLevel === la && (la === GROUND || run.bottomCell === a - la * N) && run.topLevel === lb;
-      if (!this.pushRun(run, up, push)) return -1;
+      const up = a === G || run.bottomLevel === Math.floor(a / N);
+      // Coming from the ground grid the walker already stands on the first step.
+      if (a === G ? !(push(run.ex, run.ez) && push(run.tx, run.tz)) : !this.pushRun(run, up, push)) return -1;
       ax = up ? run.tx : run.bx;
       az = up ? run.tz : run.bz;
       i = j + 1;
       if (b === G) break;
     }
     return count;
+  }
+
+  /** The stair run linking two Dijkstra nodes. */
+  private linkFrom(a: number, b: number): StairRun | null {
+    const N = this.cells, G = this.levels.length * N;
+    const la = a === G ? GROUND : Math.floor(a / N), lb = b === G ? GROUND : Math.floor(b / N);
+    return this.linkRun(la, a === G ? -1 : a - la * N, lb, b === G ? -1 : b - lb * N);
   }
 
   /** The stair run linking (la, ca) and (lb, cb) in either direction (GROUND uses cell -1). */
@@ -287,22 +302,22 @@ export class BuildingNav {
   }
 
   /**
-   * Greedy string pulling over seq[i..j] on one level from anchor (ax, az). Emits intermediate
-   * waypoints; for the final stretch it also emits (endX, endZ). Returns the last position.
+   * Greedy string pulling over seq[i..j] on one level from anchor (ax, az) toward the terminal
+   * point (the goal, or the stair entry / exit the stretch ends at). Emits intermediate waypoints
+   * and, when `pushTerm`, the terminal point itself. Returns false when out of space.
    */
   private smoothStretch(
-    lv: number, i: number, j: number, ax: number, az: number, endX: number, endZ: number,
+    lv: number, i: number, j: number, ax: number, az: number, termX: number, termZ: number, pushTerm: boolean,
     push: (x: number, z: number) => boolean,
-  ): { x: number; z: number } | null {
+  ): boolean {
     const N = this.cells;
     const seq = this.seq;
     const h = this.levels[lv].h;
     let anchorCell = seq[i] - lv * N;
-    const final = !Number.isNaN(endX);
-    for (let k = i + 1; k <= j + (final ? 1 : 0); k++) {
+    for (let k = i + 1; k <= j + 1; k++) {
       const isEnd = k > j;
-      const px = isEnd ? endX : this.cellX(seq[k] - lv * N);
-      const pz = isEnd ? endZ : this.cellZ(seq[k] - lv * N);
+      const px = isEnd ? termX : this.cellX(seq[k] - lv * N);
+      const pz = isEnd ? termZ : this.cellZ(seq[k] - lv * N);
       if (hyp(px - ax, pz - az) <= MAX_SEGMENT && this.lineOfWalk(lv, ax, az, px, pz) &&
           this.grid.clearSegment(ax, az, px, pz, SMOOTH_CLEARANCE, h)) {
         continue;
@@ -315,23 +330,19 @@ export class BuildingNav {
       tmpP.x = this.cellX(wc);
       tmpP.z = this.cellZ(wc);
       if (this.levels[lv].flags[wc] & NF_NEAR) this.relax(lv, tmpP);
-      if (!push(tmpP.x, tmpP.z)) return null;
+      if (!push(tmpP.x, tmpP.z)) return false;
       ax = tmpP.x;
       az = tmpP.z;
       anchorCell = wc;
     }
-    if (final) {
-      if (!push(endX, endZ)) return null;
-      return { x: endX, z: endZ };
-    }
-    return { x: ax, z: az };
+    return pushTerm ? push(termX, termZ) : true;
   }
 
   /** Grid DDA on a level: every crossed cell boundary must be an allowed move. */
   lineOfWalk(lv: number, ax: number, az: number, bx: number, bz: number): boolean {
     const L = this.levels[lv];
-    const u0 = ax + this.half - this.gx0, v0 = az + this.half - this.gz0;
-    const u1 = bx + this.half - this.gx0, v1 = bz + this.half - this.gz0;
+    const u0 = (ax - this.ox) / CELL, v0 = (az - this.oz) / CELL;
+    const u1 = (bx - this.ox) / CELL, v1 = (bz - this.oz) / CELL;
     let cx = Math.floor(u0), cz = Math.floor(v0);
     const ex = Math.floor(u1), ez = Math.floor(v1);
     const W = this.W, H = this.H;
@@ -452,7 +463,7 @@ export class BuildingNav {
         if (!(m & (1 << k))) continue;
         const ni = ci + DIR_DX[k], nj = cj + DIR_DZ[k];
         if (ni < 0 || nj < 0 || ni >= W || nj >= H) continue;
-        this.relaxEdge(node, lv * N + nj * W + ni, d0 + (k & 1 ? Math.SQRT2 : 1) + pen);
+        this.relaxEdge(node, lv * N + nj * W + ni, d0 + (k & 1 ? Math.SQRT2 * CELL : CELL) + pen * CELL);
       }
       for (const r of this.runs) {
         if (r.bottomLevel === lv && r.bottomCell === c && r.topCell >= 0) this.relaxEdge(node, r.topLevel * N + r.topCell, d0 + r.len + 1);
@@ -598,8 +609,8 @@ export class BuildingNav {
         run.bottomCell = c >= 0 && this.free(bottomLevel, c) ? c : this.nearestCell(bottomLevel, bx, bz, 1);
         if (run.bottomCell < 0) continue;
       } else {
-        this.groundX = bx;
-        this.groundZ = bz;
+        this.groundX = sx;
+        this.groundZ = sz;
         this.hasGround = true;
       }
       const c = this.cellAt(tx, tz);
@@ -613,71 +624,82 @@ export class BuildingNav {
   /** Level grid for the slab height h. */
   private rasterLevel(world: World, h: number): FloorLevel {
     const W = this.W, H = this.H, FW = W * FINE, FH = H * FINE;
+    const SP = CELL / FINE; // sub-sample spacing; sample i sits at origin + (i + 0.5) * SP
     if (fineFloor.length < FW * FH) {
       fineFloor = new Float32Array(FW * FH);
       fineObs = new Uint8Array(FW * FH);
     }
     fineFloor.fill(NaN, 0, FW * FH);
     fineObs.fill(0, 0, FW * FH);
-    const wx0 = this.gx0 - this.half, wz0 = this.gz0 - this.half;
+    const wx0 = this.ox, wz0 = this.oz;
+    // Sample index range covering [a, b] (sample positions wx0 + (i + 0.5) * SP).
+    const lo = (a: number, o: number): number => Math.max(0, Math.ceil((a - o) / SP - 0.5));
+    const hiI = (b: number, o: number, n: number): number => Math.min(n - 1, Math.floor((b - o) / SP - 0.5));
     boxBuf.length = 0;
-    const boxes = world.queryBoxes(wx0 - 1, wz0 - 1, wx0 + W + 1, wz0 + H + 1, boxBuf);
+    const boxes = world.queryBoxes(wx0 - 1, wz0 - 1, wx0 + W * CELL + 1, wz0 + H * CELL + 1, boxBuf);
     // Slabs of this level.
     for (let i = 0; i < boxes.length; i++) {
       const b = boxes[i];
       if (Math.abs(b.max.y - h) > LEVEL_EPS || b.max.y - b.min.y > 1.0) continue;
-      const fi0 = Math.max(0, Math.ceil((b.min.x - wx0) * FINE)), fi1 = Math.min(FW - 1, Math.floor((b.max.x - wx0) * FINE));
-      const fj0 = Math.max(0, Math.ceil((b.min.z - wz0) * FINE)), fj1 = Math.min(FH - 1, Math.floor((b.max.z - wz0) * FINE));
+      const fi0 = lo(b.min.x, wx0), fi1 = hiI(b.max.x, wx0, FW);
+      const fj0 = lo(b.min.z, wz0), fj1 = hiI(b.max.z, wz0, FH);
       for (let fj = fj0; fj <= fj1; fj++) for (let fi = fi0; fi <= fi1; fi++) fineFloor[fj * FW + fi] = h;
     }
     // Obstructions in the standing span above it.
-    const lo = h + CLEAR_LO, hi = h + CLEAR_HI;
+    const yLo = h + CLEAR_LO, yHi = h + CLEAR_HI;
     const flags = new Uint8Array(W * H);
     for (let i = 0; i < boxes.length; i++) {
       const b = boxes[i];
-      if (b.min.y >= hi || b.max.y <= lo) continue;
+      if (b.min.y >= yHi || b.max.y <= yLo) continue;
       const ix = Math.max(BLOCK_INFLATE, (MIN_RASTER - (b.max.x - b.min.x)) / 2);
       const iz = Math.max(BLOCK_INFLATE, (MIN_RASTER - (b.max.z - b.min.z)) / 2);
-      const fi0 = Math.max(0, Math.ceil((b.min.x - ix - wx0) * FINE)), fi1 = Math.min(FW - 1, Math.floor((b.max.x + ix - wx0) * FINE));
-      const fj0 = Math.max(0, Math.ceil((b.min.z - iz - wz0) * FINE)), fj1 = Math.min(FH - 1, Math.floor((b.max.z + iz - wz0) * FINE));
+      const fi0 = lo(b.min.x - ix, wx0), fi1 = hiI(b.max.x + ix, wx0, FW);
+      const fj0 = lo(b.min.z - iz, wz0), fj1 = hiI(b.max.z + iz, wz0, FH);
       for (let fj = fj0; fj <= fj1; fj++) for (let fi = fi0; fi <= fi1; fi++) fineObs[fj * FW + fi] = 1;
       // NEAR: cell centres within NEAR_INFLATE of the box.
-      const ci0 = Math.max(0, Math.floor(b.min.x - NEAR_INFLATE - wx0)), ci1 = Math.min(W - 1, Math.floor(b.max.x + NEAR_INFLATE - wx0));
-      const cj0 = Math.max(0, Math.floor(b.min.z - NEAR_INFLATE - wz0)), cj1 = Math.min(H - 1, Math.floor(b.max.z + NEAR_INFLATE - wz0));
+      const ci0 = Math.max(0, Math.floor((b.min.x - NEAR_INFLATE - wx0) / CELL)), ci1 = Math.min(W - 1, Math.floor((b.max.x + NEAR_INFLATE - wx0) / CELL));
+      const cj0 = Math.max(0, Math.floor((b.min.z - NEAR_INFLATE - wz0) / CELL)), cj1 = Math.min(H - 1, Math.floor((b.max.z + NEAR_INFLATE - wz0) / CELL));
       for (let cj = cj0; cj <= cj1; cj++) {
-        const cz = wz0 + cj + 0.5;
+        const cz = wz0 + (cj + 0.5) * CELL;
         if (cz < b.min.z - NEAR_INFLATE || cz > b.max.z + NEAR_INFLATE) continue;
         for (let ci = ci0; ci <= ci1; ci++) {
-          const cx = wx0 + ci + 0.5;
+          const cx = wx0 + (ci + 0.5) * CELL;
           if (cx >= b.min.x - NEAR_INFLATE && cx <= b.max.x + NEAR_INFLATE) flags[cj * W + ci] |= NF_NEAR;
         }
       }
     }
     const ok = (o: number): boolean => !Number.isNaN(fineFloor[o]) && fineObs[o] === 0;
-    // Cells from their centre sample; holes / slab edges near a cell count as NEAR (no dropping).
+    // A cell is walkable when its 2 x 2 central sub-samples are; slab edges (holes) next to it
+    // make it NEAR (paths keep away from drops).
+    const cellOk = (ci: number, cj: number): boolean => {
+      const o = cj * FINE * FW + ci * FINE;
+      return ok(o) && ok(o + 1) && ok(o + FW) && ok(o + FW + 1);
+    };
     for (let cj = 0; cj < H; cj++) {
       for (let ci = 0; ci < W; ci++) {
-        const o = (cj * FINE + 2) * FW + ci * FINE + 2;
-        if (!ok(o)) flags[cj * W + ci] |= NF_BLOCKED;
-        else if (Number.isNaN(fineFloor[o - 2]) || Number.isNaN(fineFloor[o + 2]) ||
-                 Number.isNaN(fineFloor[o - 2 * FW]) || Number.isNaN(fineFloor[o + 2 * FW])) {
-          flags[cj * W + ci] |= NF_NEAR;
+        if (!cellOk(ci, cj)) {
+          flags[cj * W + ci] |= NF_BLOCKED;
+          continue;
+        }
+        for (let dj = -1; dj <= 1; dj++) {
+          for (let di = -1; di <= 1; di++) {
+            const ni = ci + di, nj = cj + dj;
+            if (ni < 0 || nj < 0 || ni >= W || nj >= H) continue;
+            const o = nj * FINE * FW + ni * FINE;
+            if (Number.isNaN(fineFloor[o]) || Number.isNaN(fineFloor[o + FW + 1])) flags[cj * W + ci] |= NF_NEAR;
+          }
         }
       }
     }
-    // Moves: every sub-sample between the two centres must be walkable.
-    const walk = (o: number, stride: number): boolean => {
-      for (let s = 1; s <= FINE; s++) if (!ok(o + s * stride)) return false;
-      return true;
-    };
+    // Moves between neighbouring walkable cells: both cells' samples cover the strip between the
+    // centres, so the move is open when both cells are walkable.
     const openE = new Uint8Array(W * H), openS = new Uint8Array(W * H);
     for (let cj = 0; cj < H; cj++) {
       for (let ci = 0; ci < W; ci++) {
         const k = cj * W + ci;
         if (flags[k] & NF_BLOCKED) continue;
-        const o = (cj * FINE + 2) * FW + ci * FINE + 2;
-        if (ci < W - 1 && !(flags[k + 1] & NF_BLOCKED) && walk(o, 1)) openE[k] = 1;
-        if (cj < H - 1 && !(flags[k + W] & NF_BLOCKED) && walk(o, FW)) openS[k] = 1;
+        if (ci < W - 1 && !(flags[k + 1] & NF_BLOCKED)) openE[k] = 1;
+        if (cj < H - 1 && !(flags[k + W] & NF_BLOCKED)) openS[k] = 1;
       }
     }
     const dirs = new Uint8Array(W * H);

@@ -17,6 +17,11 @@ export interface PartStyle {
   bone?: number;
   /** Keep smooth normals instead of per-face normals. */
   smooth?: boolean;
+  /**
+   * Multiply `color` by the source geometry's own `color` attribute (linear, e.g. vertex-coloured
+   * glTF models) instead of using a flat colour.
+   */
+  vertexColors?: boolean;
 }
 
 export const M_ACCENT = [1, 0, 0] as const;
@@ -74,6 +79,7 @@ export class GeoBuilder {
     if (!src.getAttribute('normal')) src.computeVertexNormals();
     const p = src.getAttribute('position') as THREE.BufferAttribute;
     const n = src.getAttribute('normal') as THREE.BufferAttribute;
+    const vc = style.vertexColors ? (src.getAttribute('color') as THREE.BufferAttribute | undefined) : undefined;
     _n.getNormalMatrix(m);
     _col.setHex(style.color);
     const mask = style.mask ?? [0, 0, 0];
@@ -106,7 +112,12 @@ export class GeoBuilder {
         } else {
           this.nor.push(fx, fy, fz);
         }
-        this.col.push(_col.r, _col.g, _col.b);
+        if (vc) {
+          const j = order[k];
+          this.col.push(_col.r * vc.getX(j), _col.g * vc.getY(j), _col.b * vc.getZ(j));
+        } else {
+          this.col.push(_col.r, _col.g, _col.b);
+        }
         this.msk.push(mask[0], mask[1], mask[2]);
         this.bone.push(bone);
       }

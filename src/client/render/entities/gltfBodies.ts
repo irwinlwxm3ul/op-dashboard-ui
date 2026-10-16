@@ -252,7 +252,6 @@ const _qb = new THREE.Quaternion();
 const _qp = new THREE.Quaternion();
 const _qRoot = new THREE.Quaternion();
 const _qId = new THREE.Quaternion();
-const _v = new THREE.Vector3();
 const _cur = new THREE.Vector3();
 const _des = new THREE.Vector3();
 const _axis = new THREE.Vector3();
@@ -418,6 +417,11 @@ class GltfNearBody implements NearBody {
 
   apply(f: BodyFrame): void {
     const root = this.inst.root;
+    // Instances are not frustum culled by three (skinned bounds); cull here and skip animating.
+    if (!f.onScreen) {
+      root.visible = false;
+      return;
+    }
     root.visible = true;
     // --- Root (free-fall body pitch from the procedural pose; clips are upright) ---------------
     const freefall = f.logical.state === 'freefall' || f.logical.state === 'dive';

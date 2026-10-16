@@ -18,7 +18,7 @@
 // muzzle flash + light, shell ejection, healing item animations, grenade throw, fists unarmed.
 
 import * as THREE from 'three';
-import { WEAPONS } from '../../../../shared/items';
+import { WEAPONS, WEAPON_IDS } from '../../../../shared/items';
 import { angleDiff, clamp, damp, lerp } from '../../../../shared/math';
 import type { ConsumableId, Vec3, WeaponId, World } from '../../../../shared/types';
 import type { ClientEventBus, LocalPlayerView } from '../../../game/types';
@@ -31,7 +31,8 @@ import {
   easeInOutSine, easeOutBack, easeOutCubic, pulse, sineNoise, smooth01, springStep, window4, type Spring1,
 } from '../cameraMath';
 import { Arm, type HandStyle } from './arms';
-import { BOLT_KNOB, buildGun, type GunModel } from './guns';
+import { instantiateWeapon } from '../../../assets';
+import { BOLT_KNOB, buildGun, buildModelGun, type GunModel } from './guns';
 import { HeldItems } from './heldItems';
 import { MuzzleFlash } from './muzzleFlash';
 import { releaseMaterials, retainMaterials, type MatKey } from './parts';
@@ -100,7 +101,10 @@ export class Viewmodel {
   private readonly mats: Record<MatKey, THREE.Material>;
   private readonly pivot = new THREE.Group();
   private readonly holder = new THREE.Group();
+  /** Procedural guns (fallback until / unless the imported model loads). */
   private readonly guns = new Map<WeaponId, GunModel>();
+  /** Guns built from the imported weapon models (src/client/assets). */
+  private readonly modelGuns = new Map<WeaponId, GunModel>();
   private gun: GunModel | null = null;
   private readonly rightArm: Arm;
   private readonly leftArm: Arm;
@@ -206,6 +210,11 @@ export class Viewmodel {
       renderer.autoClear = autoClear;
     };
 
+    // Imported weapon models replace the procedural guns as soon as they are loaded.
+    for (const id of WEAPON_IDS) {
+      instantiateWeapon(id).then((obj) => { if (obj) this.onModelLoaded(id, obj); }, () => { /* keep procedural */ });
+    }
+
     this.unsubs.push(
       events.on('localShot', (ev) => this.onShot(ev.weapon)),
       events.on('localReload', (ev) => this.onReload(ev.weapon, ev.empty)),
@@ -282,7 +291,11 @@ export class Viewmodel {
         }
       });
     }
+    // Imported models share geometry/materials with the asset cache (and their spare mags with
+    // the procedural guns above): only detach them.
+    for (const g of this.modelGuns.values()) g.root.removeFromParent();
     this.guns.clear();
+    this.modelGuns.clear();
     this.rightArm.dispose();
     this.leftArm.dispose();
     this.items.dispose();
@@ -343,6 +356,10 @@ export class Viewmodel {
   // ------------------------------------------------------------------------------------------
 
   private getGun(id: WeaponId): GunModel {
+    return this.modelGuns.get(id) ?? this.getProcGun(id);
+  }
+
+  private getProcGun(id: WeaponId): GunModel {
     let g = this.guns.get(id);
     if (!g) {
       g = buildGun(id, this.mats);
@@ -351,6 +368,22 @@ export class Viewmodel {
       this.guns.set(id, g);
     }
     return g;
+  }
+
+  private onModelLoaded(id: WeaponId, obj: THREE.Object3D): void {
+    if (this.disposed || this.modelGuns.has(id)) return;
+    const g = buildModelGun(id, obj, this.getProcGun(id));
+    g.root.visible = false;
+    this.holder.add(g.root);
+    this.modelGuns.set(id, g);
+    // Swap in place if this weapon is on screen (keeps all animation state).
+    if (this.shown === id && this.gun && this.gun !== g) {
+      this.gun.root.visible = false;
+      this.gun = g;
+      g.root.visible = true;
+      g.root.add(this.flash.group);
+      this.flash.group.position.copy(g.muzzle);
+    }
   }
 
   private setShown(id: WeaponId | null): void {
@@ -580,7 +613,8 @@ export class Viewmodel {
 
     let px: number, py: number, pz: number, rx: number, ry: number, rz: number;
     if (gun) {
-      const ax = 0, ay = -gun.sightY, az = -gun.eyeRelief - gun.sightZ;
+      // ADS: the sight line (through the sight point, parallel to the bore) lies on the camera axis.
+      const ax = -gun.sightX, ay = -gun.sightY, az = -gun.eyeRelief - gun.sightZ;
       px = lerp(gun.hip.x, ax, adsE);
       py = lerp(gun.hip.y, ay, adsE);
       pz = lerp(gun.hip.z, az, adsE);
@@ -713,65 +747,72 @@ export class Viewmodel {
   }
   private readonly magScratch = { off: 0, visible: true };
 
+  /**
+   * Mechanical part motions for this frame (0..1 travel each), shared by the moving meshes of
+   * procedural guns and by the hand targets (imported models have no separate parts, so the hands
+   * still work the bolt / pump / charging handle).
+   */
+  private readonly parts = { slide: 0, charge: 0, pump: 0, boltLift: 0, boltBack: 0, bolt: -1 };
+
   private poseParts(self: LocalPlayerView): void {
     const gun = this.gun;
     if (!gun) return;
     const r = this.reload;
     const reloading = r.active && r.perShell === 0;
     const u = reloading ? r.u : 0;
-    // Magazine
+    const P = this.parts;
+    // Slide (pistol): blowback after each shot, locked back on empty, released during reload.
+    let slide = 0;
+    if (this.slideT > 0) {
+      const k = 1 - this.slideT / SLIDE_TIME;
+      slide = k < 0.3 ? k / 0.3 : 1 - (k - 0.3) / 0.7;
+    }
+    if (this.slideLocked) slide = 1;
+    if (reloading && r.empty && gun.id === 'pistol') {
+      slide = u < 0.74 ? 1 : Math.max(0, 1 - (u - 0.74) / 0.03);
+      if (u >= 0.77) this.slideLocked = false;
+    }
+    P.slide = slide;
+    // Charging handle / bolt carrier on empty reloads.
+    P.charge = reloading && r.empty ? (u < 0.76 ? 0 : u < 0.82 ? smooth01((u - 0.76) / 0.06) : Math.max(0, 1 - (u - 0.82) / 0.025)) : 0;
+    // Shotgun pump: after each shot and when racking after an empty reload.
+    let pump = 0;
+    if (this.pumpActive && this.pumpT >= 0) pump = window4(this.pumpT / PUMP_TIME, 0, 0.4, 0.48, 0.92);
+    if (r.active && this.shellStage === 'pump') pump = window4(r.exitT / SHELL_PUMP, 0, 0.42, 0.5, 0.95);
+    P.pump = pump;
+    // Bolt action: after each shot, and at the end of an empty reload.
+    let b = -1;
+    if (this.boltActive && this.boltT >= 0) b = this.boltT / this.boltDuration();
+    else if (reloading && r.empty && WEAPONS[gun.id].fireMode === 'bolt' && u >= 0.72) b = Math.min(1, (u - 0.72) / 0.24);
+    P.bolt = b;
+    P.boltLift = b >= 0 ? window4(b, 0, 0.18, 0.75, 0.92) : 0;
+    P.boltBack = b >= 0 ? window4(b, 0.2, 0.42, 0.5, 0.72) : 0;
+
+    // Magazine (procedural part) or the spare magazine handed in (imported models).
+    const ms = this.magState(reloading ? u : 0);
     if (gun.mag) {
-      const ms = this.magState(reloading ? u : 0);
       gun.mag.position.copy(gun.magDrop).multiplyScalar(ms.off);
       gun.mag.visible = ms.visible;
     }
-    // Insert jolt (edge-detected on progress)
+    if (gun.spareMag) {
+      const show = reloading && u >= 0.47 && u < 0.66;
+      gun.spareMag.visible = show;
+      if (show) gun.spareMag.position.copy(gun.spareRest).addScaledVector(gun.magDrop, ms.off);
+    }
+    // Insert jolt (edge-detected on progress); imported models also jolt when the old mag is pulled.
     if (reloading) {
       if (this.prevU < 0.66 && u >= 0.66) this.jolt.v += 0.14;
+      if (gun.fixedMag && this.prevU < 0.24 && u >= 0.24) this.jolt.v -= 0.08;
       this.prevU = u;
     } else {
       this.prevU = 0;
     }
-    // Pistol slide
-    if (gun.slide) {
-      let back = 0;
-      if (this.slideT > 0) {
-        const k = 1 - this.slideT / SLIDE_TIME;
-        back = k < 0.3 ? k / 0.3 : 1 - (k - 0.3) / 0.7;
-      }
-      if (this.slideLocked) back = 1;
-      if (reloading && r.empty) {
-        // Locked back until the slide release at 0.74, then snaps forward.
-        back = u < 0.74 ? 1 : Math.max(0, 1 - (u - 0.74) / 0.03);
-        if (u >= 0.77) this.slideLocked = false;
-      }
-      gun.slide.position.z = back * 0.034;
-    }
-    // Charging handle (AR / SMG / DMR) on empty reloads
-    if (gun.charge) {
-      let back = 0;
-      if (reloading && r.empty) back = u < 0.76 ? 0 : u < 0.82 ? smooth01((u - 0.76) / 0.06) : Math.max(0, 1 - (u - 0.82) / 0.025);
-      gun.charge.position.z = back * 0.065;
-    }
-    // Shotgun pump: after each shot and when racking after an empty reload
-    if (gun.pump) {
-      let back = 0;
-      if (this.pumpActive && this.pumpT >= 0) back = window4(this.pumpT / PUMP_TIME, 0, 0.4, 0.48, 0.92);
-      if (r.active && this.shellStage === 'pump') back = window4(r.exitT / SHELL_PUMP, 0, 0.42, 0.5, 0.95);
-      gun.pump.position.z = back * 0.075;
-    }
-    // Sniper bolt: after each shot, and at the end of an empty reload
+    if (gun.slide) gun.slide.position.z = P.slide * 0.034;
+    if (gun.charge) gun.charge.position.z = P.charge * 0.065;
+    if (gun.pump) gun.pump.position.z = P.pump * 0.075;
     if (gun.bolt) {
-      let b = -1;
-      if (this.boltActive && this.boltT >= 0) b = this.boltT / this.boltDuration();
-      else if (reloading && r.empty && u >= 0.72) b = Math.min(1, (u - 0.72) / 0.24);
-      let lift = 0, back = 0;
-      if (b >= 0) {
-        lift = window4(b, 0, 0.18, 0.75, 0.92);
-        back = window4(b, 0.2, 0.42, 0.5, 0.72);
-      }
-      gun.bolt.rotation.z = lift * 1.15;
-      gun.bolt.position.z = 0.06 + back * 0.085;
+      gun.bolt.rotation.z = P.boltLift * 1.15;
+      gun.bolt.position.z = 0.06 + P.boltBack * 0.085;
     }
     // Red dot reticle only when looking roughly through the sight.
     if (gun.reticle) gun.reticle.visible = self.ads > 0.25;
@@ -799,17 +840,21 @@ export class Viewmodel {
     // ----- right hand -----
     let rightStyle: HandStyle = 'grip';
     if (gun) {
-      this.rightT.set(0, 0, 0);
+      this.rightT.copy(gun.gripOffset);
       this.e2.copy(gun.gripRot);
-      // Bolt cycle: hand goes to the knob.
+      // Bolt cycle: hand goes to the knob (procedural bolt part, or the model's knob + motion).
       let bw = 0;
-      let b = -1;
-      if (this.boltActive && this.boltT >= 0 && gun.bolt) b = this.boltT / this.boltDuration();
-      else if (r.active && r.empty && gun.bolt && r.u >= 0.7) b = Math.min(1, (r.u - 0.72) / 0.24);
-      if (b >= 0 && gun.bolt) {
+      const b = this.parts.bolt;
+      if (b >= 0 && (gun.bolt || gun.boltKnob)) {
         bw = window4(b, -0.02, 0.12, 0.85, 1);
-        gun.bolt.updateMatrix();
-        this.v.copy(BOLT_KNOB).applyMatrix4(gun.bolt.matrix);
+        if (gun.bolt) {
+          gun.bolt.updateMatrix();
+          this.v.copy(BOLT_KNOB).applyMatrix4(gun.bolt.matrix);
+        } else {
+          this.v.copy(gun.boltKnob!);
+          this.v.y += this.parts.boltLift * 0.025;
+          this.v.z += this.parts.boltBack * 0.085;
+        }
         this.rightT.lerp(this.v.add(this.v2.set(0.012, -0.01, 0.02)), bw);
       }
       this.toPivot(this.rightT, this.v2);
@@ -830,7 +875,8 @@ export class Viewmodel {
     if (gun) {
       this.leftT.copy(gun.support);
       this.leftR.copy(gun.supportRot);
-      if (gun.pump) this.leftT.z += gun.pump.position.z;
+      // The support hand rides the pump (shotgun) whether or not the gun has a pump part.
+      if (gun.id === 'shotgun') this.leftT.z += this.parts.pump * 0.075;
       if (r.active) {
         if (r.perShell > 0) this.shellLeftHand(gun);
         else this.magLeftHand(gun);
@@ -873,18 +919,20 @@ export class Viewmodel {
     const T = this.tgt;
     // Magazine bottom (follows the current mag offset), a point down out of view, charging handle.
     const ms = this.magState(u);
-    const mbx = gun.magBottom.x + gun.magDrop.x * ms.off - 0.012;
-    const mby = gun.magBottom.y + gun.magDrop.y * ms.off - 0.02;
-    const mbz = gun.magBottom.z + gun.magDrop.z * ms.off + 0.01;
+    // Imported models keep their magazine in place: the hand only tugs it before stowing.
+    const off = gun.fixedMag && u < 0.4 ? Math.min(ms.off, 0.02) : ms.off;
+    const mbx = gun.magBottom.x + gun.magDrop.x * off - 0.012;
+    const mby = gun.magBottom.y + gun.magDrop.y * off - 0.02;
+    const mbz = gun.magBottom.z + gun.magDrop.z * off + 0.01;
     const dx = gun.magBottom.x - 0.08, dy = gun.magBottom.y - 0.3, dz = gun.magBottom.z + 0.08;
-    const cx = gun.chargeAnchor.x, cy = gun.chargeAnchor.y, cz = gun.chargeAnchor.z + (gun.charge ? gun.charge.position.z : 0);
+    const cx = gun.chargeAnchor.x, cy = gun.chargeAnchor.y, cz = gun.chargeAnchor.z + this.parts.charge * 0.065;
     let k = 1;
     if (u < 0.1) this.mixTarget(S.x, S.y, S.z, mbx, mby, mbz, u / 0.1);
     else if (u < 0.3) T.set(mbx, mby, mbz);
     else if (u < 0.42) this.mixTarget(mbx, mby, mbz, dx, dy, dz, (u - 0.3) / 0.12);
     else if (u < 0.5) T.set(dx, dy, dz);
     else if (u < 0.66) this.mixTarget(dx, dy, dz, mbx, mby, mbz, (u - 0.5) / 0.1);
-    else if (!r.empty || !gun.charge) {
+    else if (!r.empty || gun.id === 'pistol' || WEAPONS[gun.id].fireMode === 'bolt') {
       if (u < 0.8) this.mixTarget(mbx, mby, mbz, S.x, S.y, S.z, (u - 0.66) / 0.14);
       else k = 0;
     } else if (u < 0.74) this.mixTarget(mbx, mby, mbz, cx, cy, cz, (u - 0.66) / 0.08);

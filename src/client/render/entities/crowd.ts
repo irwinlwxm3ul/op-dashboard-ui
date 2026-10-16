@@ -117,7 +117,7 @@ export class NearSoldier implements NearBody {
 /** Procedural near-LOD backend: pool of skinned procedural soldiers sharing one geometry. */
 export class NearPool implements NearBodyProvider {
   readonly name = 'procedural';
-  readonly geometry = buildNearSoldierGeometry();
+  private geometry = buildNearSoldierGeometry();
   private readonly all: NearSoldier[] = [];
   private readonly free: NearSoldier[] = [];
 
@@ -125,6 +125,14 @@ export class NearPool implements NearBodyProvider {
 
   setCapacity(n: number): void {
     this.capacity = n;
+  }
+
+  /** Rebuild the shared soldier geometry (e.g. after real weapon models were registered). */
+  rebuildGeometry(): void {
+    const old = this.geometry;
+    this.geometry = buildNearSoldierGeometry();
+    for (const s of this.all) s.mesh.geometry = this.geometry;
+    old.dispose();
   }
 
   get inUse(): number {

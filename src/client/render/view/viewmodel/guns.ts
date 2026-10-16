@@ -6,6 +6,7 @@
 
 import * as THREE from 'three';
 import type { WeaponId } from '../../../../shared/types';
+import { WEAPON_MODELS } from '../../../assets';
 import type { CasingKind } from '../../fx/casings';
 import { PartBuilder, type MatKey } from './parts';
 
@@ -50,6 +51,19 @@ export interface GunModel {
   scoped: boolean;
   /** Left hand shape at rest: wrapped around a grip, or palm-up under a handguard. */
   supportStyle: 'grip' | 'palm';
+  /** Offset of the right hand group from the gun origin (models put the fist centre at the origin). */
+  gripOffset: THREE.Vector3;
+  /** Sight line x (normally 0). */
+  sightX: number;
+  /** The magazine is part of a single static mesh (imported model): reloads hand in a spare mag. */
+  fixedMag: boolean;
+  /** Spare magazine carried in by the support hand during reloads (fixed-mag guns), rest offset. */
+  spareMag: THREE.Object3D | null;
+  spareRest: THREE.Vector3;
+  /** Bolt knob (gun-local) for guns without an animated bolt part (imported bolt-action model). */
+  boltKnob: THREE.Vector3 | null;
+  /** Geometry/materials are shared with the asset cache: never dispose them. */
+  shared: boolean;
 }
 
 function base(id: WeaponId, root: THREE.Group): GunModel {
@@ -75,6 +89,13 @@ function base(id: WeaponId, root: THREE.Group): GunModel {
     flashScale: 1,
     scoped: false,
     supportStyle: 'palm',
+    gripOffset: new THREE.Vector3(),
+    sightX: 0,
+    fixedMag: false,
+    spareMag: null,
+    spareRest: new THREE.Vector3(),
+    boltKnob: null,
+    shared: false,
   };
 }
 
@@ -436,3 +457,127 @@ export function buildGun(id: WeaponId, mats: Record<MatKey, THREE.Material>): Gu
 
 /** Bolt knob position in bolt-pivot space (right hand target during the bolt cycle). */
 export const BOLT_KNOB = new THREE.Vector3(0.043, -0.026, 0.02);
+
+// ------------------------------------------------------------------------------------------------
+// Imported weapon models (Quaternius Ultimate Guns, see src/client/assets)
+// ------------------------------------------------------------------------------------------------
+
+type V3 = readonly [number, number, number];
+
+/**
+ * First-person hold data for the imported models, in the weapon frame of the asset manifest
+ * (fist centre at the origin, barrel -Z). Measured from the meshes: `support` is the underside of
+ * the handguard / fore-end (where a palm-up support hand sits), `magBottom` the lowest point of
+ * the magazine, `eject` the ejection port, `charge` the charging handle / bolt knob, `port` the
+ * shotgun loading port. Muzzle, sight line and nominal support come from WEAPON_MODELS.
+ */
+interface ModelHold {
+  hip: V3;
+  hipRot: V3;
+  eyeRelief: number;
+  gripRot: V3;
+  supportStyle: 'grip' | 'palm';
+  support: V3;
+  supportRot: V3;
+  magBottom: V3;
+  magDrop: V3;
+  eject: V3;
+  charge: V3;
+  port: V3;
+}
+
+const MODEL_HOLD: Record<WeaponId, ModelHold> = {
+  pistol: {
+    hip: [0.11, -0.12, -0.37], hipRot: [0.02, 0.06, 0], eyeRelief: 0.36, gripRot: [-0.22, 0, 0],
+    supportStyle: 'grip', support: [-0.024, 0.008, 0.004], supportRot: [-0.22, 0.3, 0.12],
+    magBottom: [0, -0.05, 0.02], magDrop: [0, -0.96, 0.27], eject: [0.017, 0.068, -0.04],
+    charge: [-0.012, 0.07, 0.03], port: [0, 0, 0],
+  },
+  smg: {
+    hip: [0.13, -0.15, -0.31], hipRot: [0, 0.035, 0], eyeRelief: 0.2, gripRot: [-0.25, 0, 0],
+    supportStyle: 'palm', support: [0, 0.035, -0.23], supportRot: [0, 0, 0],
+    magBottom: [0, -0.105, -0.1], magDrop: [0, -1, 0], eject: [0.017, 0.08, -0.05],
+    charge: [-0.018, 0.1, -0.02], port: [0, 0, 0],
+  },
+  ar: {
+    hip: [0.135, -0.165, -0.3], hipRot: [0, 0.035, 0], eyeRelief: 0.24, gripRot: [-0.3, 0, 0],
+    supportStyle: 'palm', support: [0, 0.045, -0.31], supportRot: [0, 0, 0],
+    magBottom: [0, -0.16, -0.142], magDrop: [0, -0.99, 0.12], eject: [0.021, 0.085, -0.07],
+    charge: [-0.012, 0.115, 0.06], port: [0, 0, 0],
+  },
+  shotgun: {
+    hip: [0.135, -0.155, -0.3], hipRot: [0, 0.035, 0], eyeRelief: 0.25, gripRot: [-0.45, 0, 0],
+    supportStyle: 'palm', support: [0, -0.042, -0.36], supportRot: [0, 0, 0],
+    magBottom: [0, -0.07, -0.1], magDrop: [0, -1, 0], eject: [0.021, 0.02, -0.05],
+    charge: [0, -0.042, -0.36], port: [0, -0.07, -0.1],
+  },
+  dmr: {
+    hip: [0.135, -0.17, -0.31], hipRot: [0, 0.035, 0], eyeRelief: 0.1, gripRot: [-0.35, 0, 0],
+    supportStyle: 'palm', support: [0, 0.02, -0.34], supportRot: [0, 0, 0],
+    magBottom: [0, -0.03, -0.06], magDrop: [0, -1, 0], eject: [0.024, 0.06, -0.03],
+    charge: [0.036, 0.04, -0.028], port: [0, 0, 0],
+  },
+  sniper: {
+    hip: [0.135, -0.17, -0.33], hipRot: [0, 0.035, 0], eyeRelief: 0.1, gripRot: [-0.35, 0, 0],
+    supportStyle: 'palm', support: [0, 0.01, -0.38], supportRot: [0, 0, 0],
+    magBottom: [0, -0.066, -0.03], magDrop: [0, -1, 0], eject: [0.024, 0.065, -0.03],
+    charge: [0.037, 0.042, -0.05], port: [0, 0, 0],
+  },
+};
+
+/** Offset that puts the procedural grip-hand mesh (wraps y ~ -0.04) on a model's fist centre. */
+const MODEL_GRIP_OFFSET = new THREE.Vector3(-0.004, 0.038, 0);
+
+/**
+ * Wrap an imported weapon model (already cloned, weapon frame) as a GunModel. `proc` is the
+ * procedural gun of the same id: its magazine is cloned as the spare mag handed in on reloads,
+ * since the imported mesh has no separate magazine part.
+ */
+export function buildModelGun(id: WeaponId, model: THREE.Object3D, proc: GunModel): GunModel {
+  const root = new THREE.Group();
+  root.name = `vm-model-${id}`;
+  model.traverse((o) => {
+    o.frustumCulled = false;
+    const m = o as THREE.Mesh;
+    if (m.isMesh) { m.castShadow = false; m.receiveShadow = false; }
+  });
+  root.add(model);
+  const wm = WEAPON_MODELS[id];
+  const h = MODEL_HOLD[id];
+  const g = base(id, root);
+  g.shared = true;
+  g.fixedMag = true;
+  g.muzzle.set(wm.muzzle[0], wm.muzzle[1], wm.muzzle[2]);
+  g.eject.set(h.eject[0], h.eject[1], h.eject[2]);
+  g.support.set(h.support[0], h.support[1], h.support[2]);
+  g.supportRot.set(h.supportRot[0], h.supportRot[1], h.supportRot[2]);
+  g.supportStyle = h.supportStyle;
+  g.gripRot.set(h.gripRot[0], h.gripRot[1], h.gripRot[2]);
+  g.gripOffset.copy(MODEL_GRIP_OFFSET);
+  g.chargeAnchor.set(h.charge[0], h.charge[1], h.charge[2]);
+  g.magBottom.set(h.magBottom[0], h.magBottom[1], h.magBottom[2]);
+  g.magDrop.set(h.magDrop[0], h.magDrop[1], h.magDrop[2]).normalize();
+  g.port.set(h.port[0], h.port[1], h.port[2]);
+  // ADS: the manifest sight point lies on the line of sight (parallel to the bore).
+  g.sightX = wm.sight[0];
+  g.sightY = wm.sight[1];
+  g.sightZ = wm.sight[2];
+  g.eyeRelief = h.eyeRelief;
+  g.hip.set(h.hip[0], h.hip[1], h.hip[2]);
+  g.hipRot.set(h.hipRot[0], h.hipRot[1], h.hipRot[2]);
+  g.casing = proc.casing;
+  g.flashScale = proc.flashScale;
+  g.scoped = wm.optic === 'scope';
+  if (id === 'sniper') g.boltKnob = new THREE.Vector3(h.charge[0], h.charge[1], h.charge[2]);
+  if (proc.mag) {
+    // Align the procedural magazine's bottom with the model's magazine bottom.
+    const spare = proc.mag.clone(true);
+    spare.name = `vm-spare-mag-${id}`;
+    spare.visible = false;
+    g.spareRest.copy(g.magBottom).sub(proc.magBottom);
+    spare.position.copy(g.spareRest);
+    root.add(spare);
+    g.spareMag = spare;
+  }
+  return g;
+}

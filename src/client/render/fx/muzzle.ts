@@ -6,16 +6,23 @@
 import { EYE_HEIGHT, PLAYER_RADIUS, STANCE_HEIGHT } from '../../../shared/constants';
 import type { MovementMode, Stance, Vec3, WeaponId } from '../../../shared/types';
 import { PF } from '../../../shared/protocol';
+import { WEAPON_MODELS } from '../../assets';
 
-/** Distance from the shoulder to the muzzle per weapon (m). */
-export const BARREL_REACH: Record<WeaponId, number> = {
-  pistol: 0.5,
-  smg: 0.62,
-  ar: 0.82,
-  shotgun: 0.9,
-  dmr: 0.95,
-  sniper: 1.05,
-};
+/** How far in front of the eye a pistol is held at arm's length (m). */
+const PISTOL_HOLD = 0.42;
+
+/**
+ * Forward distance (m) from the shooter's shoulder / eye plane to the muzzle and the muzzle height
+ * above the shoulder line, from the imported weapon models (WEAPON_MODELS, weapon frame: grip at
+ * the origin, butt on the shoulder, barrel -Z). Pistols are held out at arm's length.
+ */
+export const BARREL_REACH: Record<WeaponId, number> = {} as Record<WeaponId, number>;
+export const BARREL_RISE: Record<WeaponId, number> = {} as Record<WeaponId, number>;
+for (const id of Object.keys(WEAPON_MODELS) as WeaponId[]) {
+  const m = WEAPON_MODELS[id];
+  BARREL_REACH[id] = (m.pistol ? PISTOL_HOLD : m.butt[2]) - m.muzzle[2];
+  BARREL_RISE[id] = m.muzzle[1] - m.butt[1];
+}
 
 /** Approximate eye height above the feet for a third-person pose. */
 export function poseEyeHeight(stance: Stance, mode: MovementMode, downed: boolean): number {
@@ -44,9 +51,12 @@ export function approxMuzzle(
   const side = (ads ? 0.07 : stance === 'prone' ? 0.1 : 0.2) + lean * 0.33;
   const drop = ads ? 0.06 : stance === 'prone' ? 0.08 : 0.17;
   const reach = weapon ? BARREL_REACH[weapon] : 0.4;
-  out.x = pos.x + rx * side + fx * reach;
-  out.y = pos.y + eye - drop + fy * reach;
-  out.z = pos.z + rz * side + fz * reach;
+  const rise = weapon ? BARREL_RISE[weapon] : 0;
+  // Up vector of the aim frame (pitch tilts the barrel's height offset with it).
+  const ux = sy * sp, uy = cp, uz = cy * sp;
+  out.x = pos.x + rx * side + fx * reach + ux * rise;
+  out.y = pos.y + eye - drop + fy * reach + uy * rise;
+  out.z = pos.z + rz * side + fz * reach + uz * rise;
   return out;
 }
 

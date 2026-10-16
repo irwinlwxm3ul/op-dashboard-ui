@@ -19,6 +19,9 @@ import { PlaneRenderer } from './plane';
 import { PlayersRenderer, type PlayersUpdateContext } from './players';
 import { VehicleRenderer } from './vehicles';
 import type { MidBodyRenderer, NearBodyProvider } from './bodies';
+import { CHARACTER_VARIANT_IDS, loadCharacter } from '../../assets';
+import { loadWeaponAssets } from './assetBridge';
+import { CharacterLibrary, GltfNearProvider } from './gltfBodies';
 
 export type { BodyFrame, MidBodyRenderer, NearBody, NearBodyProvider } from './bodies';
 export type { LogicalAnim, LogicalAnimOverlay, LogicalAnimState, WeaponClass } from './animState';
@@ -63,6 +66,10 @@ class EntityRendererImpl implements EntityRendererInternals {
   private quality: Quality;
   private localId: EntityId | null = null;
   private time = 0;
+  private disposed = false;
+  private characters: CharacterLibrary | null = null;
+  private gltfNear: GltfNearProvider | null = null;
+  private readonly projScreen = new THREE.Matrix4();
 
   constructor(private readonly core: RenderCore, world: World, overlay: HTMLElement, events: ClientEventBus) {
     this.root.name = 'entities';
@@ -81,6 +88,7 @@ class EntityRendererImpl implements EntityRendererInternals {
       focalPx: 1000,
       shadows: this.quality !== 'low',
       time: 0,
+      frustum: new THREE.Frustum(),
     };
     this.unsubscribe.push(
       events.on('hit', (ev) => {
@@ -96,6 +104,37 @@ class EntityRendererImpl implements EntityRendererInternals {
       }),
       events.on('targetHit', (ev) => this.dummies.onHit(ev.target, ev.damage, ev.part === 'head')),
     );
+    void this.loadAssets();
+  }
+
+  /**
+   * Asynchronously swap in the curated models: real weapon meshes (third-person guns, ground
+   * loot), then the skinned glTF characters for the near LOD. The procedural soldier and guns stay
+   * in use until then, and permanently if loading fails.
+   */
+  private async loadAssets(): Promise<void> {
+    try {
+      // Start the character downloads right away; they resolve from the loader cache later.
+      for (const id of CHARACTER_VARIANT_IDS) void loadCharacter(id);
+      const weapons = await loadWeaponAssets();
+      if (this.disposed) return;
+      if (weapons.length) {
+        this.players.refreshWeaponModels();
+        this.loot.refreshItems(weapons);
+      }
+      // Gear meshes of the characters are built after the weapons registered (real guns in hand).
+      const lib = await CharacterLibrary.load();
+      if (!lib) return;
+      if (this.disposed) {
+        lib.dispose();
+        return;
+      }
+      this.characters = lib;
+      this.gltfNear = new GltfNearProvider(this.root, lib, nearCapacity(this.quality));
+      this.players.setBodyBackends(this.gltfNear, null);
+    } catch (err) {
+      console.warn('[entities] asset models unavailable, keeping procedural models', err);
+    }
   }
 
   get group(): THREE.Group {
@@ -126,6 +165,10 @@ class EntityRendererImpl implements EntityRendererInternals {
     this.ctx.cam = cam;
     this.ctx.focalPx = focal;
     this.ctx.time = this.time;
+    const camera = this.core.camera;
+    camera.updateMatrixWorld();
+    this.projScreen.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
+    this.ctx.frustum.setFromProjectionMatrix(this.projScreen);
     this.players.update(frame, this.ctx, step);
     this.vehicles.update(frame.vehicles, this.camPos, step, focal, PLAYER_RENDER_DISTANCE);
     this.loot.update(frame.loot, this.camPos, step);
@@ -135,9 +178,13 @@ class EntityRendererImpl implements EntityRendererInternals {
   }
 
   dispose(): void {
+    this.disposed = true;
     for (const off of this.unsubscribe) off();
     this.unsubscribe.length = 0;
     this.nameplates.dispose();
+    this.players.setBodyBackends(null, null);
+    this.gltfNear?.dispose();
+    this.characters?.dispose();
     this.players.dispose();
     this.vehicles.dispose();
     this.loot.dispose();

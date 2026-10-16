@@ -14,6 +14,11 @@ export interface WorkerClientInit {
 
 /** Main thread -> worker. */
 export type ToWorker =
+  /**
+   * Warm spare only: generate (and cache) the island world for `seed` ahead of time. The next br
+   * match handed this worker uses that seed, so its init skips world generation.
+   */
+  | { k: 'prewarm'; seed: number }
   /** Build the MatchRunner (world generation happens here, off the main thread). */
   | { k: 'init'; config: MatchConfig; clients: WorkerClientInit[] }
   /** Start the match (matchInit to every client) and the worker's own fixed-step loop. */
@@ -26,6 +31,8 @@ export type ToWorker =
 export type FromWorker =
   /** Modules loaded; the worker accepts `init`. */
   | { k: 'ready' }
+  /** Prewarm finished (world generated in `genMs`). */
+  | { k: 'prewarmed'; seed: number; genMs: number }
   /** Runner constructed (world generated) in `genMs`. */
   | { k: 'inited'; genMs: number }
   /** Outgoing ServerMessages batched per loop iteration: msgs[i] goes to client ids[i]. */

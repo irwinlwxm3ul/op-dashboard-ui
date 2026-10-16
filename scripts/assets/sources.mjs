@@ -13,4 +13,12 @@ export const UAL1 = 'ual/UAL1.glb'; // github.com/tilakpatell/tilakverse-assets 
 export const UAL2 = 'ual/UAL2.glb'; // ... quaternius/universal-animation-library-2/Unreal-Godot/UAL2.glb
 
 export const abs = (rel) => path.join(DL, rel);
-export const UGP = 'ugp'; // github.com/WingNut17/ps1-style @ 42b446d7983d87b6029f42d5e110861a80c6ebee assets/models/props/items/weapons/Ultimate Gun Pack by Quaternius/*.fbx (copied flat)
+// github.com/regnaio/assets @ 336e580f990c2efd62f640957967e874efab1226
+//   quaternius/ultimategun/Ultimate Gun Pack - July 2019/FBX/*.fbx (+ License.txt), copied flat.
+//   (Identical blobs are also in github.com/WingNut17/ps1-style @ 42b446d.)
+export const UGP = 'ugp';
+// Items, copied flat with a prefix (see fetch-sources.sh):
+//   surv_*  regnaio/assets quaternius/survival/Survival Pack - Sept 2020/FBX/*.fbx
+//   zsky_*  regnaio/assets itch/zsky2000/low-poly-weapons-pack-v1/WeaponsPack_V.1/FBX/*Ammo_Box.fbx (CC BY 4.0)
+//   toon_*  regnaio/assets quaternius/toonshootergamekit/Toon Shooter Game Kit - Dec 2022/{Guns,Characters}/glTF/*.gltf
+export const ITEMS_SRC = 'items';
