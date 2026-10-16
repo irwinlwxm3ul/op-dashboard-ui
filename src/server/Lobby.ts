@@ -1,6 +1,7 @@
 // A lobby room: members, team slots, ready flags, host and settings. Pure state + rules; all
 // network output goes through the LobbyClient interface (implemented by ClientConnection).
 
+import { hasTwoTeams } from '../shared/validate';
 import type {
   LobbyErrorCode, LobbyMember, LobbySettings, LobbyState, LobbyStatus, LobbySummary, ServerMessage,
 } from '../shared/protocol';
@@ -162,6 +163,8 @@ export class Lobby {
     if (this.status !== 'waiting') return 'lobby.inGame';
     // Kick-free: the player cap can never drop below the humans already in the room.
     if (settings.maxPlayers < this.members.size) return 'lobby.badSettings';
+    // At least two teams (a well-formed request, but not a playable match).
+    if (!hasTwoTeams(settings)) return 'lobby.badSettings';
     const teamsChanged =
       settings.teamSize !== this.settings.teamSize || settings.maxPlayers !== this.settings.maxPlayers;
     this.settings = settings;

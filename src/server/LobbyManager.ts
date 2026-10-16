@@ -2,6 +2,7 @@
 // start, chat, routing of in-match messages to the lobby's MatchRunner and the post-match return
 // to the lobby room.
 
+import { hasTwoTeams } from '../shared/validate';
 import { randomBytes, randomInt } from 'node:crypto';
 import type { ClientMessage, LobbySettings, LobbySummary, ServerMessage } from '../shared/protocol';
 import type { CheatFlag } from '../shared/sim/index';
@@ -110,6 +111,10 @@ export class LobbyManager implements MatchLoopHost {
     for (const l of this.lobbies.values()) if (l !== ownHosted && l.host()?.ip === client.ip) fromIp++;
     if (this.lobbies.size - (ownHosted ? 1 : 0) >= limits.maxLobbies || fromIp >= limits.maxLobbiesPerIp) {
       client.send({ t: 'error', code: 'lobby.serverLimit' });
+      return;
+    }
+    if (!hasTwoTeams(settings)) {
+      client.send({ t: 'error', code: 'lobby.badSettings' });
       return;
     }
     if (client.lobbyId) this.leave(client, false);

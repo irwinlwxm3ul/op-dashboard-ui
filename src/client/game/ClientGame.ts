@@ -648,7 +648,6 @@ export class ClientGame implements ClientGameApi {
       if (this.env.vehicle) this.stepOtherVehicles(this.env.vehicle);
       this.curPos.x = p.pos.x; this.curPos.y = p.pos.y; this.curPos.z = p.pos.z;
       this.emitTickEvents(p, input, this.tickEv);
-      this.interaction = this.computeInteraction(p);
     }
     this.prevButtons = input.buttons;
 
@@ -857,7 +856,6 @@ export class ClientGame implements ClientGameApi {
         this.vehYawOff = 0;
       }
     }
-    this.interaction = this.computeInteraction(p);
   }
 
   /** Local feedback events for a freshly predicted tick (never for replays). */
@@ -935,10 +933,15 @@ export class ClientGame implements ClientGameApi {
   // Interaction
   // ---------------------------------------------------------------------------
 
-  private computeInteraction(p: PlayerState): Interaction | null {
+  /**
+   * Interaction prompt for this frame. The pick ray is the one the crosshair and bullets use:
+   * origin `self.eye`, direction = effective aim (base + breathing sway + predicted recoil).
+   */
+  private computeInteraction(p: PlayerState, view: LocalPlayerView): Interaction | null {
     if (this.latest?.phase === 'ended') return null; // the server ignores actions after the match
-    const eye = eyePosition(p, p.lean, p.yaw, this.eyeScratch);
-    const cy = this.input.yaw + p.recoilYaw, cp = this.input.pitch + p.recoilPitch;
+    const eye = this.eyeScratch;
+    eye.x = view.eye.x; eye.y = view.eye.y; eye.z = view.eye.z;
+    const cy = view.aimYaw, cp = view.aimPitch;
     const ccp = Math.cos(cp);
     this.lookDir.x = -Math.sin(cy) * ccp;
     this.lookDir.y = Math.sin(cp);
@@ -1252,6 +1255,8 @@ export class ClientGame implements ClientGameApi {
     this.placeRiders();
     this.updateTraining();
 
+    // Picking uses exactly the crosshair / bullet ray of this frame (FPP and TPP alike).
+    this.interaction = this.predicted && f.self ? this.computeInteraction(this.predicted, f.self) : null;
     f.interaction = this.interaction;
     const self = f.self;
     if (self) {

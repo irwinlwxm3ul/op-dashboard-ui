@@ -877,6 +877,27 @@ describe('interaction prompt', () => {
     expect(resolveInteraction(e, out())).toBeNull();
   });
 
+  it('picks what the crosshair (self.eye + effective aim of the frame) points at', () => {
+    const t = new StubTransport();
+    let now = 0;
+    const left = loot(60, -1.2, -1.6), right = loot(61, 1.2, -1.6);
+    const game = new ClientGame(t, makeInit([left, right]), memorySettings(), { world: makeWorld(), now: () => now });
+    t.deliver({ t: 'snap', s: snap(0, { self: selfFrom(basePlayer()) }) });
+    const aimAt = (l: LootItem) => {
+      const f = game.getFrame().self;
+      const eye = f ? f.eye : { x: 0, y: 1.62, z: 0 };
+      const dx = l.pos.x - eye.x, dy = l.pos.y - eye.y, dz = l.pos.z - eye.z;
+      game.setAim(Math.atan2(-dx, -dz), Math.atan2(dy, Math.hypot(dx, dz)));
+      for (let i = 0; i < 4; i++) { now += 16.7; game.update(0.0167); }
+    };
+    for (let i = 0; i < 4; i++) { now += 16.7; game.update(0.0167); }
+    aimAt(left);
+    expect(game.getFrame().interaction?.targetId).toBe(60);
+    aimAt(right);
+    expect(game.getFrame().interaction?.targetId).toBe(61);
+    game.dispose();
+  });
+
   it('performInteraction queues the action into the next input', () => {
     const t = new StubTransport();
     let now = 0;

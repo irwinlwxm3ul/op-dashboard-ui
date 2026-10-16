@@ -125,6 +125,11 @@ export function sanitizeInput(raw: unknown): PlayerInput | null {
 const TEAM_SIZES: readonly number[] = [1, 2, 4];
 const DIFFS: readonly string[] = ['easy', 'normal', 'hard'];
 
+/** A battle royale needs at least two teams: more players than one team holds. */
+export function hasTwoTeams(s: { maxPlayers: number; teamSize: number }): boolean {
+  return s.maxPlayers > s.teamSize;
+}
+
 export function sanitizeLobbySettings(raw: unknown): LobbySettings | null {
   if (!isObj(raw)) return null;
   const { name, maxPlayers, teamSize, botFill, botDifficulty, zoneSpeed } = raw;
@@ -133,8 +138,6 @@ export function sanitizeLobbySettings(raw: unknown): LobbySettings | null {
   if (!num(zoneSpeed)) return null;
   if (!TEAM_SIZES.includes(teamSize)) return null;
   if (maxPlayers < MIN_PLAYERS || maxPlayers > MAX_PLAYERS) return null;
-  // A battle royale needs at least two teams.
-  if (maxPlayers <= teamSize) return null;
   const n = sanitizeText(name, MAX_LOBBY_NAME_LEN);
   if (!n) return null;
   return {
