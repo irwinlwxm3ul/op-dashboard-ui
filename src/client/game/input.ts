@@ -426,6 +426,9 @@ export class InputController implements InputApi {
     this.pitch = clamp(pitch, -PITCH_LIMIT, PITCH_LIMIT);
     this.freeYaw = 0;
     this.freePitch = 0;
+    // The new aim carries no sway yet; the next update adds the current offset on top.
+    this.swayYaw = 0;
+    this.swayPitch = 0;
   }
 
   /** Free look is active while Alt is held or the camera is still easing back. */
@@ -480,8 +483,12 @@ export class InputController implements InputApi {
   }
 
   /** Current breathing sway offsets (radians) included in the aim (diagnostics / camera effects). */
-  get swayOffset(): { yaw: number; pitch: number } {
-    return { yaw: this.swayYaw, pitch: this.swayPitch };
+  get swayYawOffset(): number {
+    return this.swayYaw;
+  }
+
+  get swayPitchOffset(): number {
+    return this.swayPitch;
   }
 
   /** Remaining breath (0..1) for holding the scope steady. */

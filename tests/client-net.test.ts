@@ -1012,6 +1012,123 @@ describe('input controller', () => {
     expect(ic.freeLook).toBe(false);
   });
 
+  const scopedCtx = (stance: 'stand' | 'crouch' | 'prone' = 'stand') => ({
+    mode: 'ground' as const, life: 'alive' as const, stance, seat: -1,
+    weapons: [{ id: 'sniper' as const, mag: 5 }, null, null] as [{ id: 'sniper'; mag: number }, null, null],
+    activeSlot: 0 as const, frags: 2, ads: 1, adsZoom: WEAPONS.sniper.adsZoom, scoped: true,
+  });
+  /** Max |yaw| / |pitch| deviation of the aim over `seconds` of 60 Hz frames. */
+  const swayRange = (ic: InputController, seconds: number) => {
+    const y0 = ic.yaw, p0 = ic.pitch;
+    let my = 0, mp = 0;
+    for (let i = 0; i < seconds * 60; i++) {
+      ic.update(1 / 60);
+      my = Math.max(my, Math.abs(ic.yaw - y0));
+      mp = Math.max(mp, Math.abs(ic.pitch - p0));
+    }
+    return { my, mp };
+  };
+
+  it('scoped breathing sway: figure-8 scaled by zoom and stance, mouse stays additive', () => {
+    const amp = 0.00035 / WEAPONS.sniper.adsZoom;
+    const ic = new InputController(memorySettings());
+    ic.mouseButton(2, true); // ADS held
+    ic.setContext(scopedCtx('stand'));
+    const r = swayRange(ic, 7.2);
+    // Deviation around the start of a full period spans up to 2x the amplitude.
+    expect(r.my).toBeGreaterThan(amp * 0.8);
+    expect(r.my).toBeLessThan(amp * 2.05);
+    expect(r.mp).toBeGreaterThan(amp * 0.6 * 0.8);
+    expect(r.mp).toBeLessThan(amp * 0.6 * 2.05);
+    expect(Math.abs(ic.swayYawOffset)).toBeLessThanOrEqual(amp + 1e-12);
+    // Mouse input is additive on top of the sway.
+    const before = ic.yaw;
+    ic.mouseMove(10, 0);
+    const k = 0.0022 * 1 * WEAPONS.sniper.adsZoom; // scope sensitivity 1 x zoom at full ADS
+    expect(ic.yaw).toBeCloseTo(before - 10 * k, 12);
+    // Stance scaling.
+    const crouch = new InputController(memorySettings());
+    crouch.mouseButton(2, true);
+    crouch.setContext(scopedCtx('crouch'));
+    const prone = new InputController(memorySettings());
+    prone.mouseButton(2, true);
+    prone.setContext(scopedCtx('prone'));
+    let mc = 0, mpz = 0;
+    for (let i = 0; i < 7.2 * 60; i++) {
+      crouch.update(1 / 60);
+      prone.update(1 / 60);
+      mc = Math.max(mc, Math.abs(crouch.swayYawOffset));
+      mpz = Math.max(mpz, Math.abs(prone.swayYawOffset));
+    }
+    expect(mc).toBeCloseTo(amp * 0.6, 5);
+    expect(mpz).toBeCloseTo(amp * 0.3, 5);
+    // No sway without a magnified scope.
+    const iron = new InputController(memorySettings());
+    iron.mouseButton(2, true);
+    iron.setContext({ ...scopedCtx(), scoped: false, adsZoom: 0.82 });
+    expect(swayRange(iron, 4).my).toBe(0);
+  });
+
+  it('holding breath damps the sway to ~10 % for up to 4 s, then it comes back stronger', () => {
+    const amp = 0.00035 / WEAPONS.sniper.adsZoom;
+    const ic = new InputController(memorySettings());
+    ic.mouseButton(2, true);
+    ic.setContext(scopedCtx('stand'));
+    for (let i = 0; i < 120; i++) ic.update(1 / 60);
+    ic.keyDown('ShiftLeft'); // hold breath (sprint key while scoped)
+    expect(ic.sample(1, 0).buttons & (1 << 9)).not.toBe(0); // BTN.HOLD_BREATH, no SPRINT
+    let held = 0;
+    for (let i = 0; i < 3.5 * 60; i++) {
+      ic.update(1 / 60);
+      if (i > 60) held = Math.max(held, Math.abs(ic.swayYawOffset));
+    }
+    expect(ic.holdBreath).toBe(true);
+    expect(held).toBeLessThan(amp * 0.16);
+    // Out of breath after ~4 s: steadying stops and the sway is stronger than normal for a moment.
+    let strong = 0;
+    for (let i = 0; i < 2 * 60; i++) {
+      ic.update(1 / 60);
+      strong = Math.max(strong, Math.abs(ic.swayYawOffset));
+    }
+    expect(ic.holdBreath).toBe(false);
+    expect(strong).toBeGreaterThan(amp * 1.2);
+    ic.keyUp('ShiftLeft');
+    for (let i = 0; i < 8 * 60; i++) ic.update(1 / 60);
+    expect(ic.breath).toBe(1);
+  });
+
+  it('setAim, armed frag and hold-breath state, no firing while free-looking', () => {
+    const t = new StubTransport();
+    let now = 0;
+    const game = new ClientGame(t, makeInit(), memorySettings(), { world: makeWorld(), now: () => now });
+    const p = armedPlayer();
+    p.items.frag = 2;
+    t.deliver({ t: 'snap', s: snap(0, { self: selfFrom(p) }) });
+    const ic = game.input;
+    ic.setAim(3, 0);
+    game.setAim(-3, 2); // unwrapped next to the current yaw, pitch clamped
+    expect(ic.yaw).toBeCloseTo(3 + (2 * Math.PI - 6), 9);
+    expect(ic.pitch).toBeCloseTo((89 * Math.PI) / 180, 9);
+    for (let i = 0; i < 3; i++) { now += 16.7; game.update(0.0167); }
+    ic.keyDown('Digit4');
+    for (let i = 0; i < 3; i++) { now += 16.7; game.update(0.0167); }
+    expect(game.getFrame().self!.grenadeArmed).toBe(true);
+    expect(game.getFrame().self!.holdBreath).toBe(false);
+    ic.keyDown('Digit4'); // cancel
+    for (let i = 0; i < 3; i++) { now += 16.7; game.update(0.0167); }
+    expect(game.getFrame().self!.grenadeArmed).toBe(false);
+    // Free look: the trigger is ignored while Alt is held.
+    t.takeInputs();
+    ic.keyDown('AltLeft');
+    ic.mouseButton(0, true);
+    for (let i = 0; i < 4; i++) { now += 16.7; game.update(0.0167); }
+    expect(t.takeInputs().every((x) => (x.buttons & 1) === 0)).toBe(true);
+    ic.keyUp('AltLeft');
+    for (let i = 0; i < 4; i++) { now += 16.7; game.update(0.0167); }
+    expect(t.takeInputs().some((x) => (x.buttons & 1) !== 0)).toBe(true);
+    game.dispose();
+  });
+
   it('vehicle context: seat keys, handbrake / boost buttons; UI edge events', () => {
     const ic = new InputController(memorySettings());
     ic.setContext({
