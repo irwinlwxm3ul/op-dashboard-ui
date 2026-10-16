@@ -1293,7 +1293,7 @@ describe('netcode hardening', () => {
       const a = h.add('Killer');
       const b = h.add('Last');
       const o = findOpen(h.world, 26, 4, 4);
-      startOnGround(h, { [a]: [o.x, o.z, Math.PI], [b]: [o.x, o.z - (how === 'frag' ? 6 : 20), 0] });
+      startOnGround(h, { [a]: [o.x, o.z, Math.PI], [b]: [o.x, o.z - 20, 0] });
       h.p(b).health = 1;
       if (how === 'sniper') {
         h.arm(a, 'sniper');
@@ -1306,9 +1306,16 @@ describe('netcode hardening', () => {
         expect(h.of('shot')[0]?.projectiles?.length).toBe(1);
       } else {
         h.p(a).items.frag = 2;
-        h.step(1, () => ({ [a]: { pitch: 0.2, actions: [{ a: 'throw' }] } }));
-        h.step(35);
-        h.step(1, () => ({ [a]: { pitch: 0.5, yaw: 1, actions: [{ a: 'throw' }] } }));
+        h.step(1, () => ({ [a]: { pitch: -0.2, actions: [{ a: 'throw' }] } }));
+        h.step(30);
+        // The victim stands right next to the resting grenade (away from the thrower).
+        const g = [...h.sim.projectiles.values()][0];
+        expect(g.kind).toBe('frag');
+        const dir = Math.atan2(g.pos.x - h.p(a).pos.x, g.pos.z - h.p(a).pos.z);
+        h.place(b, g.pos.x + Math.sin(dir) * 1.5, g.pos.z + Math.cos(dir) * 1.5);
+        h.step(60);
+        // A second grenade is still in the air when the first one ends the match.
+        h.step(1, () => ({ [a]: { pitch: 0.9, yaw: 2, actions: [{ a: 'throw' }] } }));
         expect(h.sim.projectiles.size).toBe(2);
       }
       h.stepUntil(() => h.sim.isOver(), 300);
