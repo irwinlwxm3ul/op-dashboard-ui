@@ -67,11 +67,14 @@ The game detects the browser language and has a switcher in the main menu and se
 ```bash
 npm test             # unit + simulation + bot soak + server/WebSocket integration + cheat probes
 npm run test:cheats  # anti-cheat probes only
-npm run test:e2e     # Playwright smoke tests in headless Chromium (menu/RTL, training, SP, two-window MP)
+npm run test:e2e     # Playwright in headless Chromium against the production build: smoke tests and the
+                     # browser half of the PLAN §8 acceptance tests (RTL, ballistics, SP loop, two-window MP)
 npm run typecheck
 ```
 
-The manual acceptance tests are in [PLAN.md §8](PLAN.md#8-manual-acceptance-tests).
+The manual acceptance tests are in [PLAN.md §8](PLAN.md#8-manual-acceptance-tests). Most are also automated:
+the server-side half in `tests/integration/acceptance.test.ts` (part of `npm test`) and the browser half in
+`tests/e2e/acceptance.spec.ts`.
 
 ## Project layout
 

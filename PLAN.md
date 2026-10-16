@@ -228,6 +228,13 @@ Setup: `npm install`, then `npm run dev` (client on :5173 + game server on :8787
 * **Cheat probes** as in test 10.
 * **Playwright smoke**: boot the client in headless Chromium, run the training ground and a short SP match,
   assert no console errors, capture screenshots.
+* **Acceptance automation**: the mechanics behind every §8 test also run unattended. Simulation and
+  server checks are in `tests/integration/acceptance.test.ts`: ballistics, recoil pattern and prediction
+  parity, the SP loop, duo combat and revive, lag compensation at 150 ms, vehicles, distance relevance, and
+  a duo lobby through the real server. Browser checks are in `tests/e2e/acceptance.spec.ts`: languages and
+  RTL, the F3 overlay, range ballistics, AR spray, the SP loop, two-window MP and distant players. What
+  still needs a person at a real GPU is the *feel*: how recoil, hit feedback, sound and the
+  no-pop LOD transitions look and sound.
 
 ## 10. Build approach
 
