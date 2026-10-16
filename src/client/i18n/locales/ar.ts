@@ -593,6 +593,7 @@ export const ar: LocaleDict = {
   // --- flow
   'flow.loading.world': 'جارٍ إنشاء التضاريس…',
   'flow.loading.scene': 'جارٍ بناء العالم…',
+  'flow.loading.assets': 'جارٍ تحميل النماذج…',
   'flow.loading.waiting': 'بانتظار بيانات المباراة…',
   'flow.loading.starting': 'جارٍ بدء المحاكاة…',
   'flow.loading.ready': 'جاهز',

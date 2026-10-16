@@ -592,6 +592,7 @@ export const fr: LocaleDict = {
   // --- flow
   'flow.loading.world': 'Génération du terrain…',
   'flow.loading.scene': 'Construction du monde…',
+  'flow.loading.assets': 'Chargement des modèles…',
   'flow.loading.waiting': 'En attente des données de la partie…',
   'flow.loading.starting': 'Lancement de la simulation…',
   'flow.loading.ready': 'Prêt',

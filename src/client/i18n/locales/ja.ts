@@ -592,6 +592,7 @@ export const ja: LocaleDict = {
   // --- flow
   'flow.loading.world': '地形を生成中…',
   'flow.loading.scene': 'ワールドを構築中…',
+  'flow.loading.assets': 'モデルを読み込み中…',
   'flow.loading.waiting': 'マッチデータを待っています…',
   'flow.loading.starting': 'シミュレーションを開始中…',
   'flow.loading.ready': '準備完了',

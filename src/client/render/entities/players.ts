@@ -5,12 +5,12 @@
 import * as THREE from 'three';
 import { MAX_PLAYERS } from '../../../shared/constants';
 import { wrapAngle } from '../../../shared/math';
-import { seatWorldPosition } from '../../../shared/vehicles';
+import { VEHICLES, seatWorldPosition } from '../../../shared/vehicles';
 import type { EntityId, Vec3, VehicleState, WeaponId } from '../../../shared/types';
 import type { FrameState, PlayerView, VehicleView } from '../../game/types';
 import type { CameraState } from '../contracts';
 import {
-  type AnimInput, AnimState, DEATH_FADE_START, DEATH_FADE_TIME, type SeatInfo, animate, deathSink, deathVisibility,
+  type AnimInput, AnimState, DEATH_FADE_START, DEATH_FADE_TIME, type SeatInfo, animate, createSeatInfo, deathSink, deathVisibility,
 } from './animator';
 import { type LogicalAnim, createLogicalAnim, resolveLogicalAnim } from './animState';
 import type { BodyFrame, MidBodyRenderer, NearBody, NearBodyProvider } from './bodies';
@@ -53,7 +53,7 @@ function bodyFrame(v: PlayerView): BodyFrame {
         gear: [0, 0, 0], weapon: null,
       },
       showWeapon: false, fade: 0, shadows: false, onScreen: true, view: v, logical: createLogicalAnim(), anim: new AnimState(),
-      moveX: 0, moveZ: 0, aimPitch: 0, aimYawRel: 0, dt: 0, time: 0,
+      moveX: 0, moveZ: 0, aimPitch: 0, aimYawRel: 0, seat: null, dt: 0, time: 0,
     };
   }
   return _bodyScratch;
@@ -104,7 +104,7 @@ export class PlayerEntry {
   /** Horizontal velocity in the model frame (x right, z backward). */
   moveX = 0;
   moveZ = 0;
-  readonly seat: SeatInfo = { type: 'buggy', seat: 0, steer: 0 };
+  readonly seat: SeatInfo = createSeatInfo();
 
   reset(id: EntityId): void {
     this.id = id;
@@ -153,6 +153,8 @@ export interface PlayersUpdateContext {
   frustum: THREE.Frustum;
   /** Extra rider lift (m, vehicle up axis) for seats of real vehicle models. */
   seatLift: (vehicleId: EntityId, seat: number) => number;
+  /** Fills a rider's contact points (hands on the controls, feet on the pegs) for the shown model. */
+  riderContacts: (vehicle: VehicleView, seat: SeatInfo, lift: number) => void;
 }
 
 export class PlayersRenderer {
@@ -354,6 +356,9 @@ export class PlayersRenderer {
       seat.type = veh.type;
       seat.seat = v.seat;
       seat.steer = veh.steer;
+      seat.speed = Math.min(1, Math.abs(veh.speed) / VEHICLES[veh.type].maxSpeed);
+      seat.roll = veh.roll;
+      ctx.riderContacts(veh, seat, lift);
     } else {
       let yaw = v.yaw;
       if (v.life === 'dead') {
@@ -460,6 +465,7 @@ export class PlayersRenderer {
       _body.moveZ = e.moveZ;
       _body.aimPitch = v.pitch;
       _body.aimYawRel = aimYawRel;
+      _body.seat = seat;
       _body.dt = dt;
       _body.time = ctx.time;
     }

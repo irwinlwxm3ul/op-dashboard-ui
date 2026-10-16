@@ -7,7 +7,7 @@
 
 import type * as THREE from 'three';
 import type { PlayerView } from '../../game/types';
-import type { AnimState } from './animator';
+import type { AnimState, SeatInfo } from './animator';
 import type { LogicalAnim } from './animState';
 import type { SoldierLook } from './crowd';
 
@@ -42,6 +42,8 @@ export interface BodyFrame {
   /** Aim pitch (rad) and aim yaw relative to the model facing (seated passengers). */
   aimPitch: number;
   aimYawRel: number;
+  /** Vehicle seat (with rider contact points: hands on the controls, feet on the pegs) or null. */
+  seat: SeatInfo | null;
   dt: number;
   time: number;
 }

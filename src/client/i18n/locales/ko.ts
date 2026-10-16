@@ -592,6 +592,7 @@ export const ko: LocaleDict = {
   // --- flow
   'flow.loading.world': '지형 생성 중…',
   'flow.loading.scene': '월드 구성 중…',
+  'flow.loading.assets': '모델 불러오는 중…',
   'flow.loading.waiting': '매치 데이터를 기다리는 중…',
   'flow.loading.starting': '시뮬레이션 시작 중…',
   'flow.loading.ready': '준비 완료',

@@ -90,6 +90,7 @@ class EntityRendererImpl implements EntityRendererInternals {
       time: 0,
       frustum: new THREE.Frustum(),
       seatLift: (id, seat) => this.vehicles.riderLift(id, seat),
+      riderContacts: (veh, seat, lift) => this.vehicles.riderContacts(veh, seat, lift),
     };
     this.unsubscribe.push(
       events.on('hit', (ev) => {

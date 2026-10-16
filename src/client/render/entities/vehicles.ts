@@ -16,7 +16,8 @@ import { GeoBuilder, type PartStyle, xform } from './geometry';
 import { applyEntityShader, createEntityMaterial, createEntityUniforms } from './materials';
 import { WRECK_TINT, vehiclePaintHex } from './palette';
 import { ParticleSystem } from './particles';
-import { DRIVER_CONTROLS } from './seating';
+import type { SeatInfo } from './animator';
+import { BIKE_MODEL_GRIP, BIKE_MODEL_PEGS, BIKE_PROC_PEGS, DRIVER_CONTROLS, UAZ_MODEL_WHEEL, ringGrips } from './seating';
 
 const TYPES: readonly VehicleType[] = ['buggy', 'uaz', 'bike'];
 const PAINT: PartStyle = { color: 0xffffff };
@@ -163,6 +164,7 @@ function buildBike(paint: GeoBuilder, chassis: GeoBuilder): void {
   chassis.box(0.05, 0.05, Math.abs(rw.z - 0.1), xform(0.08, (rAxleY + s0.y + 0.05) / 2, (rw.z + 0.1) / 2, 0.15), { color: TUBE });
   chassis.box(0.05, 0.05, Math.abs(rw.z - 0.1), xform(-0.08, (rAxleY + s0.y + 0.05) / 2, (rw.z + 0.1) / 2, 0.15), { color: TUBE });
   chassis.box(0.5, 0.03, 0.06, xform(0, s0.y + 0.05, s0.z + 0.05), { color: METAL }); // pegs
+  for (const sx of [-1, 1]) chassis.box(0.12, 0.03, 0.05, xform(sx * 0.18, s1.y + 0.02, s1.z + 0.02), { color: METAL }); // passenger pegs
   chassis.box(0.06, 0.06, 0.08, xform(0, ax.head.y - 0.05, ax.head.z + 0.04), { color: TUBE });
 }
 
@@ -247,6 +249,9 @@ interface GlbVehicleType {
   normal: Map<THREE.Material, THREE.Material>;
   wreck: Map<THREE.Material, THREE.Material>;
   free: GlbVehicle[];
+  /** Fork node rest position (model space) and rake, for the handlebar grips (bike). */
+  forkPos: THREE.Vector3 | null;
+  forkRake: number;
 }
 
 /** Loaded real vehicle templates (types without a model keep the procedural one). */
@@ -265,6 +270,9 @@ const _c = new THREE.Color();
 const _white = new THREE.Color(1, 1, 1);
 const _wreck = new THREE.Color().setHex(WRECK_TINT);
 const _v = new THREE.Vector3();
+const _ex = new THREE.Euler(0, 0, 0, 'XYZ');
+/** Hand travel round the real UAZ's (static) steering wheel per unit steer (rad). */
+const REAL_WHEEL_TURN = 1.2;
 
 /** Instance layout per vehicle: [paint, chassis, wheels..., (fork)] */
 export class VehicleRenderer {
@@ -389,7 +397,17 @@ export class VehicleRenderer {
           this.glbMaterials.push(n, w);
         }
       });
-      this.glbTypes[type] = { model: entry.model, template: entry.template, normal, wreck, free: [] };
+      let forkPos: THREE.Vector3 | null = null;
+      let forkRake = 0;
+      const forkNode = entry.model.fork ? entry.template.getObjectByName(entry.model.fork.node) : undefined;
+      if (forkNode) {
+        // Model space (the template root's own transform is replaced by the vehicle matrix).
+        entry.template.updateMatrixWorld(true);
+        _m.copy(entry.template.matrixWorld).invert().multiply(forkNode.matrixWorld);
+        forkPos = new THREE.Vector3().setFromMatrixPosition(_m);
+        forkRake = forkNode.rotation.x;
+      }
+      this.glbTypes[type] = { model: entry.model, template: entry.template, normal, wreck, free: [], forkPos, forkRake };
     }
   }
 
@@ -457,6 +475,82 @@ export class VehicleRenderer {
     const surface = model.seatSurfaceY[seat];
     if (surface === null || surface === undefined) return 0;
     return Math.max(0, surface - (def.seatOffsets[seat].y + SEAT_HIP_HEIGHT));
+  }
+
+  /**
+   * Rider contact points for the model currently shown (real or procedural), in the rider's root
+   * space (seat origin raised by `lift` along the vehicle up axis, vehicle orientation): the
+   * driver's hands on the handlebar grips / steering wheel rim (following the steering exactly
+   * like the drawn fork / wheel), a bike passenger's hands on the driver's waist (or the tail when
+   * riding alone) and bike riders' feet on the footpegs. Writes info.contacts / hands / feet.
+   */
+  riderContacts(v: VehicleView, info: SeatInfo, lift: number): void {
+    const c = info.contacts;
+    info.hands = false;
+    info.feet = false;
+    const def = VEHICLES[v.type];
+    const seat = info.seat;
+    if (seat < 0 || seat >= def.seatOffsets.length) return;
+    const real = this.slots.get(v.id)?.glb ? this.glbTypes[v.type] : undefined;
+    if (v.type === 'bike') {
+      if (seat === 0) {
+        // Grips rotate with the fork: R = Rx(rake) * Ry(steer) about the fork pivot.
+        let gx: number, gy: number, gz: number, rake: number;
+        let pivot: THREE.Vector3;
+        if (real && real.forkPos) {
+          pivot = real.forkPos;
+          rake = real.forkRake;
+          gx = BIKE_MODEL_GRIP[0]; gy = BIKE_MODEL_GRIP[1]; gz = BIKE_MODEL_GRIP[2];
+        } else {
+          pivot = this.bike.axle;
+          rake = this.bike.rake;
+          gx = DRIVER_CONTROLS.bike.radius - 0.06; gy = this.bike.len; gz = 0;
+        }
+        _ex.set(rake, -v.steer * def.steerMax, 0, 'XYZ');
+        _q.setFromEuler(_ex);
+        _v.set(-gx, gy, gz).applyQuaternion(_q).add(pivot);
+        c[0] = _v.x; c[1] = _v.y; c[2] = _v.z;
+        _v.set(gx, gy, gz).applyQuaternion(_q).add(pivot);
+        c[3] = _v.x; c[4] = _v.y; c[5] = _v.z;
+      } else if (v.seats[0] !== null && v.seats[0] !== undefined) {
+        // Passenger: hands on the driver's waist.
+        const s0 = def.seatOffsets[0];
+        const y = s0.y + SEAT_HIP_HEIGHT + this.riderLift(v.id, 0) + 0.12;
+        c[0] = -0.17; c[1] = y; c[2] = s0.z + 0.04;
+        c[3] = 0.17; c[4] = y; c[5] = s0.z + 0.04;
+      } else {
+        // Riding alone on the back: hands on the tail behind the hips.
+        const so = def.seatOffsets[seat];
+        const y = so.y + SEAT_HIP_HEIGHT + lift - 0.03;
+        c[0] = -0.16; c[1] = y; c[2] = so.z + 0.2;
+        c[3] = 0.16; c[4] = y; c[5] = so.z + 0.2;
+      }
+      info.hands = true;
+      const pg = (real ? BIKE_MODEL_PEGS : BIKE_PROC_PEGS)[Math.min(seat, 1)];
+      c[6] = -pg[0]; c[7] = pg[1]; c[8] = pg[2];
+      c[9] = pg[0]; c[10] = pg[1]; c[11] = pg[2];
+      info.feet = true;
+    } else if (seat === 0) {
+      if (real && v.type === 'uaz') {
+        // The real wheel has no node of its own (it does not turn): hands slide round the rim.
+        const w = UAZ_MODEL_WHEEL;
+        ringGrips(w.center[0], w.center[1], w.center[2], w.radius, w.upY, w.upZ, v.steer * REAL_WHEEL_TURN, c);
+      } else {
+        const k = DRIVER_CONTROLS[v.type];
+        const so = def.seatOffsets[0];
+        ringGrips(so.x + k.center[0], so.y + k.center[1], so.z + k.center[2], k.radius, Math.cos(k.tilt), Math.sin(k.tilt), v.steer * k.wheelTurn, c);
+      }
+      info.hands = true;
+    } else {
+      return;
+    }
+    // Vehicle-local -> rider root space.
+    const so = def.seatOffsets[seat];
+    for (let i = 0; i < 12; i += 3) {
+      c[i] -= so.x;
+      c[i + 1] -= so.y + lift;
+      c[i + 2] -= so.z;
+    }
   }
 
   private poseGlb(s: VehicleSlot, v: VehicleView, m: THREE.Matrix4, steerAngle: number): void {

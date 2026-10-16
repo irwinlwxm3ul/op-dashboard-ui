@@ -119,7 +119,7 @@ export function assetGrassSet(g: GLTF, shared: WorldUniforms, fade: { value: THR
   if (variants.length === 0) return null;
   return {
     variants,
-    densityScale: 0.45,
+    densityScale: 0.15,
     alphaTested: [...materials.values()],
     dispose() {
       for (const geo of geometries) geo.dispose();

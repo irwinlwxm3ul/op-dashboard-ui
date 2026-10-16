@@ -184,13 +184,16 @@ export class App implements AppActions {
   private async beginMatch(hub: MessageHub, init: MatchInit, context: MatchContext): Promise<void> {
     this.context = context;
     this.ui.show('loading');
-    this.ui.setLoading(0.3, 'flow.loading.world');
+    this.ui.setLoading(0.2, 'flow.loading.world');
     // Cached when everything loaded; re-attempted after a degraded (fallback) load.
     const modules = await loadRenderModules();
     this.modules = modules;
+    // Download / decode the 3D assets during the loading screen so nothing visibly swaps from the
+    // procedural fallbacks at match start. Bounded: a slow network never blocks the match.
+    await this.preloadModels();
     await nextFrame();
     const core = this.ensureCore(modules);
-    this.ui.setLoading(0.6, 'flow.loading.scene');
+    this.ui.setLoading(0.75, 'flow.loading.scene');
     await nextFrame();
     const session = new MatchSession({
       ui: this.ui,
@@ -216,6 +219,23 @@ export class App implements AppActions {
     core.resize();
     session.start();
     hub.send({ t: 'loaded' });
+  }
+
+  /** Preload every asset category (cached after the first match), reporting loading progress. */
+  private async preloadModels(): Promise<void> {
+    const ASSET_PRELOAD_TIMEOUT_MS = 20000;
+    try {
+      const assets = await import('../assets');
+      const progress = (done: number, total: number) => {
+        this.ui.setLoading(0.2 + 0.5 * (total > 0 ? done / total : 1), 'flow.loading.assets');
+      };
+      await Promise.race([
+        assets.preloadAssets(['characters', 'weapons', 'items', 'vehicles', 'props', 'nature'], progress),
+        new Promise<void>((resolve) => setTimeout(resolve, ASSET_PRELOAD_TIMEOUT_MS)),
+      ]);
+    } catch (err) {
+      console.warn('[app] asset preload failed; renderers fall back to procedural models', err);
+    }
   }
 
   private onResults(_results: MatchResults): void {

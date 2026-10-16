@@ -8,6 +8,7 @@
 //   3. Death: snapshot of the last live pose blended into a tumbling fall onto the ground.
 // The gait phase advances with speed / stride length so the leg cycle matches footstep timing.
 
+import * as THREE from 'three';
 import { PF } from '../../../shared/protocol';
 import { hashFloat } from '../../../shared/rng';
 import type { VehicleType, WeaponId } from '../../../shared/types';
@@ -16,6 +17,7 @@ import {
   P, type Pose, accumulatePose, advancePhase, clearPose, createPose, easeInQuad, lerpPose, normalizeWeights, sat, smooth,
   strideLength,
 } from './pose';
+import { DIM } from './rig';
 import { driverHandTargets } from './seating';
 import { WEAPON_HOLD } from './weaponModels';
 
@@ -42,6 +44,24 @@ export interface SeatInfo {
   type: VehicleType;
   seat: number;
   steer: number;
+  /** |forward speed| / max speed (0..1). */
+  speed: number;
+  /** Vehicle roll (rad, + = right side up, i.e. a bike leaning left). */
+  roll: number;
+  /**
+   * Contact points in the rider's root space (seat origin raised by the seat lift, vehicle
+   * orientation, -Z forward): hand L, hand R (where the palms hold: handlebar grips, steering wheel
+   * rim, the driver's waist / the tail for a bike passenger), foot L, foot R (footpeg tops).
+   * Filled by the vehicle renderer for the model actually shown; valid per `hands` / `feet`.
+   */
+  readonly contacts: Float32Array;
+  hands: boolean;
+  feet: boolean;
+}
+
+/** A fresh SeatInfo (no contacts). */
+export function createSeatInfo(): SeatInfo {
+  return { type: 'buggy', seat: 0, steer: 0, speed: 0, roll: 0, contacts: new Float32Array(12), hands: false, feet: false };
 }
 
 export interface AnimInput {
@@ -388,6 +408,85 @@ function genChute(p: Pose, g: GenParams): void {
   p[P.WHOLSTER] = 1;
 }
 
+// --- Seated riders: hands on the controls, feet on the footpegs ---------------------------------
+
+/** The rig's arm IK targets wrists: pull a palm contact back toward the shoulder by this much. */
+const PALM_REACH = 0.065;
+/** Ankle above / behind a footpeg top (sole under the ankle, ball of the foot on the peg). */
+const ANKLE_ABOVE_PEG = 0.085;
+const ANKLE_BEHIND_PEG = 0.05;
+
+const _hq = new THREE.Quaternion();
+const _hqi = new THREE.Quaternion();
+const _he = new THREE.Euler(0, 0, 0, 'YXZ');
+const _hj = new THREE.Vector3();
+const _lt = new THREE.Vector3();
+const _lp = new THREE.Vector3();
+const _ln = new THREE.Vector3();
+const _lm = new THREE.Vector3();
+const _lk = new THREE.Vector3();
+const _lu = new THREE.Vector3();
+const _ls = new THREE.Vector3();
+const _lh = new THREE.Vector3();
+const _ly = new THREE.Vector3();
+const _lz = new THREE.Vector3();
+const _lmat = new THREE.Matrix4();
+
+/** Wrist target (model space) for a palm contact, approached from a shoulder at (sx, sy, sz). */
+function seatHand(p: Pose, left: boolean, c: Float32Array, at: number, sx: number, sy: number, sz: number): void {
+  const x = c[at], y = c[at + 1], z = c[at + 2];
+  const dx = x - sx, dy = y - sy, dz = z - sz;
+  const k = PALM_REACH / Math.max(0.1, Math.hypot(dx, dy, dz));
+  if (left) {
+    p[P.LRX] = x - dx * k; p[P.LRY] = y - dy * k; p[P.LRZ] = z - dz * k; p[P.LRW] = 1;
+  } else {
+    p[P.RRX] = x - dx * k; p[P.RRY] = y - dy * k; p[P.RRZ] = z - dz * k; p[P.RRW] = 1;
+  }
+}
+
+/**
+ * Two-bone leg IK onto a footpeg, written as the rig's thigh (pitch, yaw, abduction) and knee
+ * channels. Uses the hips placement already in the pose; the knee bends toward `pole` (model
+ * space). side: -1 left, +1 right.
+ */
+function seatLeg(p: Pose, side: number, px: number, py: number, pz: number, poleX: number, poleY: number, poleZ: number): void {
+  _hq.setFromEuler(_he.set(p[P.HPITCH], p[P.HYAW], p[P.HROLL], 'YXZ'));
+  _hqi.copy(_hq).invert();
+  _hj.set(side * DIM.hipJointX, DIM.hipJointY, 0).applyQuaternion(_hq);
+  _hj.x += p[P.HX]; _hj.y += p[P.HY]; _hj.z += p[P.HZ];
+  // Ankle target and knee pole in the hips frame.
+  _lt.set(px, py + ANKLE_ABOVE_PEG, pz + ANKLE_BEHIND_PEG).sub(_hj).applyQuaternion(_hqi);
+  _lp.set(poleX, poleY, poleZ).applyQuaternion(_hqi);
+  const a = DIM.thigh, b = DIM.shin;
+  let d = _lt.length();
+  if (d < 1e-4) return;
+  _ln.copy(_lt).multiplyScalar(1 / d);
+  d = Math.min(a + b - 1e-3, Math.max(Math.abs(a - b) + 0.02, d));
+  const along = (a * a - b * b + d * d) / (2 * d);
+  const up = Math.sqrt(Math.max(0, a * a - along * along));
+  _lm.copy(_lp).addScaledVector(_ln, -_lp.dot(_ln));
+  if (_lm.lengthSq() < 1e-8) _lm.set(0, 0, -1).addScaledVector(_ln, _ln.z);
+  _lm.normalize();
+  _lk.copy(_ln).multiplyScalar(along).addScaledVector(_lm, up); // knee
+  _lu.copy(_lk).normalize(); // thigh direction
+  _ls.copy(_ln).multiplyScalar(d).sub(_lk).normalize(); // shin direction
+  const knee = Math.acos(Math.max(-1, Math.min(1, _lu.dot(_ls))));
+  // Thigh basis: local -Y along the thigh, local X = knee hinge (shin bends toward local +Z).
+  _lh.crossVectors(_ls, _lu);
+  if (_lh.lengthSq() < 1e-8) _lh.crossVectors(_lu, _lm);
+  _lh.normalize();
+  _ly.copy(_lu).negate();
+  _lz.crossVectors(_lh, _ly).normalize();
+  _lh.crossVectors(_ly, _lz);
+  _lmat.makeBasis(_lh, _ly, _lz);
+  _he.setFromRotationMatrix(_lmat, 'YXZ');
+  if (side < 0) {
+    p[P.LLP] = _he.x; p[P.LLY] = _he.y; p[P.LLR] = -_he.z; p[P.LKNEE] = knee;
+  } else {
+    p[P.RLP] = _he.x; p[P.RLY] = _he.y; p[P.RLR] = _he.z; p[P.RKNEE] = knee;
+  }
+}
+
 function genSeat(p: Pose, g: GenParams): void {
   clearPose(p);
   const seat = g.seat;
@@ -395,14 +494,26 @@ function genSeat(p: Pose, g: GenParams): void {
   const driver = seat !== null && seat.seat === 0;
   p[P.HY] = SEATED_HIP_HEIGHT;
   const breath = Math.sin(g.time * 1.6) * 0.01;
-  if (bike) {
-    p[P.HPITCH] = driver ? -0.3 : -0.12;
-    p[P.SPITCH] = driver ? -0.18 : -0.08;
-    p[P.CPITCH] = -0.08 + breath;
-    p[P.NPITCH] = driver ? 0.5 : 0.22;
+  if (seat && bike) {
+    // Forward lean that grows with speed; leaning into turns beyond the bike's own roll, head
+    // kept nearer the horizon.
+    const sp = seat.speed;
+    p[P.HPITCH] = driver ? -(0.2 + 0.24 * sp) : -(0.1 + 0.1 * sp);
+    p[P.SPITCH] = driver ? -(0.1 + 0.12 * sp) : -0.06;
+    p[P.CPITCH] = -0.06 + breath;
+    p[P.SROLL] = 0.3 * seat.roll - (driver ? 0.06 * g.steer : 0);
+    p[P.CROLL] = 0.1 * seat.roll;
+    p[P.NPITCH] = -0.85 * (p[P.HPITCH] + p[P.SPITCH] + p[P.CPITCH]);
+    p[P.NROLL] = -0.6 * (seat.roll + p[P.SROLL] + p[P.CROLL]);
     p[P.LLP] = 1.05; p[P.RLP] = 1.05;
     p[P.LLR] = 0.3; p[P.RLR] = 0.3;
     p[P.LKNEE] = 1.5; p[P.RKNEE] = 1.5;
+    if (seat.feet) {
+      // Feet on the pegs, knees forward and a little out (gripping the tank).
+      const c = seat.contacts;
+      seatLeg(p, -1, c[6], c[7], c[8], -0.35, 0.25, -1);
+      seatLeg(p, 1, c[9], c[10], c[11], 0.35, 0.25, -1);
+    }
   } else {
     p[P.HPITCH] = 0.15;
     p[P.SPITCH] = -0.06;
@@ -413,30 +524,50 @@ function genSeat(p: Pose, g: GenParams): void {
     p[P.LKNEE] = 0.72; p[P.RKNEE] = 0.68;
   }
   if (driver && seat) {
-    driverHandTargets(seat.type, g.steer, g.hands);
-    p[P.LRX] = g.hands[0]; p[P.LRY] = g.hands[1]; p[P.LRZ] = g.hands[2]; p[P.LRW] = 1;
-    p[P.RRX] = g.hands[3]; p[P.RRY] = g.hands[4]; p[P.RRZ] = g.hands[5]; p[P.RRW] = 1;
+    if (seat.hands) {
+      // Palms on the grips / rim (contacts follow the steering of the model shown).
+      const c = seat.contacts;
+      const sz = bike ? -0.2 : -0.05;
+      seatHand(p, true, c, 0, -DIM.shoulderX, 0.85, sz);
+      seatHand(p, false, c, 3, DIM.shoulderX, 0.85, sz);
+    } else {
+      driverHandTargets(seat.type, g.steer, g.hands);
+      p[P.LRX] = g.hands[0]; p[P.LRY] = g.hands[1]; p[P.LRZ] = g.hands[2]; p[P.LRW] = 1;
+      p[P.RRX] = g.hands[3]; p[P.RRY] = g.hands[4]; p[P.RRZ] = g.hands[5]; p[P.RRW] = 1;
+    }
     p[P.LCX] = -0.2; p[P.LCY] = -0.1; p[P.LCZ] = -0.35;
     p[P.RCX] = 0.2; p[P.RCY] = -0.1; p[P.RCZ] = -0.35;
-    p[P.LPX] = -0.7; p[P.LPY] = -1; p[P.LPZ] = 0.3;
-    p[P.RPX] = 0.7; p[P.RPY] = -1; p[P.RPZ] = 0.3;
+    if (bike) {
+      // Elbows out and up a little (attack position).
+      p[P.LPX] = -0.9; p[P.LPY] = -0.45; p[P.LPZ] = 0.35;
+      p[P.RPX] = 0.9; p[P.RPY] = -0.45; p[P.RPZ] = 0.35;
+    } else {
+      p[P.LPX] = -0.7; p[P.LPY] = -1; p[P.LPZ] = 0.3;
+      p[P.RPX] = 0.7; p[P.RPY] = -1; p[P.RPZ] = 0.3;
+      p[P.SROLL] = -0.06 * g.steer;
+    }
     p[P.WHOLSTER] = 1;
-    // Lean into turns a little.
-    p[P.SROLL] = (bike ? -0.1 : -0.06) * g.steer;
     p[P.NYAW] = -0.15 * g.steer;
     p[P.AIMBODY] = 0;
     return;
   }
-  // Passenger: hands on thighs / driver's waist, or holding the weapon.
-  if (bike) {
-    p[P.LRX] = -0.17; p[P.LRY] = 0.62; p[P.LRZ] = -0.28; p[P.LRW] = 1;
-    p[P.RRX] = 0.17; p[P.RRY] = 0.62; p[P.RRZ] = -0.28; p[P.RRW] = 1;
+  // Passenger: hands on the driver's waist / the tail (bike) or the thighs, or holding the weapon.
+  if (seat && bike && seat.hands) {
+    seatHand(p, true, seat.contacts, 0, -DIM.shoulderX, 0.86, -0.08);
+    seatHand(p, false, seat.contacts, 3, DIM.shoulderX, 0.86, -0.08);
+    p[P.LPX] = -0.8; p[P.LPY] = -0.7; p[P.LPZ] = 0.4;
+    p[P.RPX] = 0.8; p[P.RPY] = -0.7; p[P.RPZ] = 0.4;
   } else {
-    p[P.LRX] = -0.15; p[P.LRY] = 0.44; p[P.LRZ] = -0.32; p[P.LRW] = 1;
-    p[P.RRX] = 0.15; p[P.RRY] = 0.44; p[P.RRZ] = -0.32; p[P.RRW] = 1;
+    if (bike) {
+      p[P.LRX] = -0.17; p[P.LRY] = 0.62; p[P.LRZ] = -0.28; p[P.LRW] = 1;
+      p[P.RRX] = 0.17; p[P.RRY] = 0.62; p[P.RRZ] = -0.28; p[P.RRW] = 1;
+    } else {
+      p[P.LRX] = -0.15; p[P.LRY] = 0.44; p[P.LRZ] = -0.32; p[P.LRW] = 1;
+      p[P.RRX] = 0.15; p[P.RRY] = 0.44; p[P.RRZ] = -0.32; p[P.RRW] = 1;
+    }
+    p[P.LPX] = -0.6; p[P.LPY] = -0.4; p[P.LPZ] = 1;
+    p[P.RPX] = 0.6; p[P.RPY] = -0.4; p[P.RPZ] = 1;
   }
-  p[P.LPX] = -0.6; p[P.LPY] = -0.4; p[P.LPZ] = 1;
-  p[P.RPX] = 0.6; p[P.RPY] = -0.4; p[P.RPZ] = 1;
   if (g.armed > 0) {
     weaponHold(p, g.armed, g.pistolW);
     p[P.LRW] = 1 - g.armed;

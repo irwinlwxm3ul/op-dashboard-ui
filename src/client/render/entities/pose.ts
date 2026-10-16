@@ -33,9 +33,12 @@ export const P = {
   WPX: 43, WPY: 44, WPZ: 45, WPITCH: 46, WYAW: 47, WROLL: 48, WAIM: 49, WHOLSTER: 50,
   // How much the aim pitch bends the torso / head (0..1).
   AIMBODY: 51,
+  // Leg yaw about the hips' vertical axis (outermost of the thigh's YXZ rotation; left, right):
+  // lets seated leg IK put a folded leg's foot anywhere (bike footpegs).
+  LLY: 52, RLY: 53,
 } as const;
 
-export const POSE_SIZE = 52;
+export const POSE_SIZE = 54;
 
 export type Pose = Float32Array;
 

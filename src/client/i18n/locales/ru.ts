@@ -592,6 +592,7 @@ export const ru: LocaleDict = {
   // --- flow
   'flow.loading.world': 'Генерация ландшафта…',
   'flow.loading.scene': 'Построение мира…',
+  'flow.loading.assets': 'Загрузка моделей…',
   'flow.loading.waiting': 'Ожидание данных матча…',
   'flow.loading.starting': 'Запуск симуляции…',
   'flow.loading.ready': 'Готово',

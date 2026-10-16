@@ -301,9 +301,10 @@ export function assetVegetationSet(src: NatureGltfs, shared: WorldUniforms): Veg
   for (const v of NATURE_MODELS.bushes.variants) {
     const near = band(src.bushes.scene, v.node, { trunk: false, wrap: 0.3 }, true);
     const mid = band(src.bushes.scene, v.lod1Node ?? v.node, { trunk: false, wrap: 0.3 }, true);
-    // The Ultimate Stylized Nature bushes are a saturated lime: pull them toward the muted palette.
+    // The Ultimate Stylized Nature bushes (bush_2 / bush_3) are a saturated lime: pull them toward
+    // the muted palette; the MegaKit bush is dark, lift it slightly.
     const lime = v.material !== NATURE_MODELS.bushes.variants[0].material;
-    if (near && mid) bushes.push({ near, mid, trunkRadius: 1, tint: lime ? [0.62, 0.66, 0.5] : undefined });
+    if (near && mid) bushes.push({ near, mid, trunkRadius: 1, tint: lime ? [0.52, 0.6, 0.42] : [1.12, 1.12, 1.06] });
   }
   const rocks: SpeciesVariant[] = [];
   for (const v of NATURE_MODELS.rocks.variants) {

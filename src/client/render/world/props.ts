@@ -13,6 +13,15 @@ import type { PropPlan } from './propPlacement';
 const UPDATE_INTERVAL = 0.25;
 const HYSTERESIS = 8;
 const VIS_WIDTH = 256;
+/**
+ * Model distance per prop relative to the quality's propModelDistance: heavy models (chain-link
+ * panels ~1 500 tris each, military crates, sandbag walls) switch to their boxes sooner.
+ */
+const DISTANCE_SCALE: Partial<Record<WorldPropId, number>> = {
+  fence_chainlink: 0.5,
+  crate_military: 0.7,
+  sandbag_wall: 0.8,
+};
 
 /** Per-pid on/off flags for the merged prop boxes (pid 0 = boxes that are always drawn). */
 export class PropVisibility {
@@ -60,6 +69,8 @@ export class PropRenderer {
   private readonly vis: PropVisibility;
   private readonly slots = new Map<WorldPropId, ModelSlot>();
   private readonly band: Uint8Array;
+  /** 1 / per-model distance scale (scaled distances are compared with the shared edge). */
+  private readonly distMul: Float32Array;
   private readonly edges = [140];
   private readonly materials: THREE.Material[] = [];
   private readonly geometries: THREE.BufferGeometry[] = [];
@@ -73,6 +84,10 @@ export class PropRenderer {
     this.plans = plans;
     this.vis = vis;
     this.band = new Uint8Array(plans.length).fill(1);
+    this.distMul = new Float32Array(plans.length);
+    plans.forEach((p, i) => {
+      this.distMul[i] = 1 / (DISTANCE_SCALE[p.placements[0].model] ?? 1);
+    });
     const counts = new Map<WorldPropId, number>();
     for (const p of plans) for (const pl of p.placements) counts.set(pl.model, (counts.get(pl.model) ?? 0) + 1);
     for (const [id, cap] of counts) {
@@ -161,7 +176,7 @@ export class PropRenderer {
     for (let i = 0; i < this.plans.length; i++) {
       const p = this.plans[i];
       if (!this.hasModels(p)) continue;
-      const d = Math.max(0, Math.hypot(p.cx - cx, p.cy - cy, p.cz - cz) - p.radius) * lodScale;
+      const d = Math.max(0, Math.hypot(p.cx - cx, p.cy - cy, p.cz - cz) - p.radius) * lodScale * this.distMul[i];
       const b = selectBand(d, this.band[i], this.edges, HYSTERESIS);
       if (b !== this.band[i]) {
         this.band[i] = b;

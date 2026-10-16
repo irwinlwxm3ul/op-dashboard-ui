@@ -592,6 +592,7 @@ export const zh: LocaleDict = {
   // --- flow
   'flow.loading.world': '正在生成地形…',
   'flow.loading.scene': '正在构建世界…',
+  'flow.loading.assets': '正在加载模型…',
   'flow.loading.waiting': '正在等待对局数据…',
   'flow.loading.starting': '正在启动模拟…',
   'flow.loading.ready': '就绪',

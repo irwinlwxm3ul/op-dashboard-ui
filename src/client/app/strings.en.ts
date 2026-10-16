@@ -3,6 +3,7 @@
 export const appStrings = {
   'flow.loading.world': 'Generating terrain…',
   'flow.loading.scene': 'Building the world…',
+  'flow.loading.assets': 'Loading models…',
   'flow.loading.waiting': 'Waiting for match data…',
   'flow.loading.starting': 'Starting simulation…',
   'flow.loading.ready': 'Ready',

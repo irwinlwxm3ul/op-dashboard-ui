@@ -155,11 +155,11 @@ export function evaluateRig(inp: RigInput, out: THREE.Matrix4[]): THREE.Matrix4[
   out[B.HEAD].multiplyMatrices(out[B.CHEST], _local);
 
   // --- Legs -------------------------------------------------------------------------------------
-  rotLocal(_local, -DIM.hipJointX, DIM.hipJointY, 0, p[P.LLP], 0, -p[P.LLR]);
+  rotLocal(_local, -DIM.hipJointX, DIM.hipJointY, 0, p[P.LLP], p[P.LLY], -p[P.LLR]);
   out[B.THIGH_L].multiplyMatrices(out[B.HIPS], _local);
   rotLocal(_local, 0, -DIM.thigh, 0, -p[P.LKNEE], 0, 0);
   out[B.SHIN_L].multiplyMatrices(out[B.THIGH_L], _local);
-  rotLocal(_local, DIM.hipJointX, DIM.hipJointY, 0, p[P.RLP], 0, p[P.RLR]);
+  rotLocal(_local, DIM.hipJointX, DIM.hipJointY, 0, p[P.RLP], p[P.RLY], p[P.RLR]);
   out[B.THIGH_R].multiplyMatrices(out[B.HIPS], _local);
   rotLocal(_local, 0, -DIM.thigh, 0, -p[P.RKNEE], 0, 0);
   out[B.SHIN_R].multiplyMatrices(out[B.THIGH_R], _local);
