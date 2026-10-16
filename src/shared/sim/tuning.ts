@@ -188,3 +188,55 @@ export const COMBAT_RELEVANCE_TIME = 2;
 export const PROJECTILE_RELEVANCE = 800;
 /** Max catch-up ticks per MatchRunner.update before the backlog is dropped. */
 export const MAX_CATCHUP_TICKS = 5;
+
+// ---- Input queue / latency control -------------------------------------------------------------
+
+/**
+ * Per-player input queue capacity (~1 s). Honest clients never get near it: the server catches
+ * up on backlogs (see below) and the runner's token bucket bounds what a client can push.
+ */
+export const INPUT_QUEUE_CAPACITY = 32;
+/**
+ * A tick with no queued input does not invent one: the player's input-driven step is skipped
+ * ("paused") for up to this many ticks and one catch-up credit is granted per skipped tick, so the
+ * late inputs can be replayed later without any input ever being applied twice or dropped.
+ * Longer gaps (absent client) step the body with a neutral input so it still falls / lands.
+ */
+export const INPUT_PAUSE_MAX_TICKS = 15;
+/** Maximum banked catch-up credit (ticks). Bounds the burst a lag-switch could buy. */
+export const INPUT_CREDIT_MAX = 30;
+/** Clock drift allowance: credit earned per tick (0.2 %), so a slightly fast client clock never ratchets latency. */
+export const INPUT_DRIFT_CREDIT = 0.002;
+/** Unused credit expires at this rate (per tick with a shallow queue). */
+export const INPUT_CREDIT_DECAY = 1 / 30;
+/** Catch-up starts once the queue has been deeper than this ... */
+export const CATCHUP_DEPTH = 2;
+/** ... for this many ticks (~0.5 s), and runs (two inputs per tick) until the depth is <= 1. */
+export const CATCHUP_DELAY_TICKS = 15;
+/** Runner token bucket burst (inputs): covers a ~1 s delivery stall without dropping anything. */
+export const INPUT_TOKEN_BURST = INPUT_QUEUE_CAPACITY;
+
+// ---- Lag-compensation bound ---------------------------------------------------------------------
+
+/** Rewind allowed on top of (latency + server-measured queue wait): tick quantisation + jitter. */
+export const REWIND_SLACK_MS = 2 * (1000 / 30);
+/** Window of the per-player minimum view lag used when no transport RTT is known (s). */
+export const REWIND_BASELINE_WINDOW = 3;
+
+// ---- Aim heuristics (logged flags only, no gameplay effect) -------------------------------------
+
+/** Base-aim change between two consecutive inputs (rad) counted as a snap (~2000 deg/s). */
+export const FLAG_SNAP_RAD = 1.2;
+/** A hit this soon after a snap (inputs) counts as a snap-hit. */
+export const FLAG_SNAP_WINDOW = 2;
+/** Snap-hits on targets farther than this (m) are considered. */
+export const FLAG_SNAP_MIN_DIST = 10;
+/** Snap-hits within FLAG_SNAP_PERIOD seconds needed to raise an aimSnap flag. */
+export const FLAG_SNAP_COUNT = 3;
+export const FLAG_SNAP_PERIOD = 60;
+/** Rolling window of player hits for the headshot ratio. */
+export const FLAG_HS_WINDOW = 30;
+export const FLAG_HS_MIN_HITS = 20;
+export const FLAG_HS_RATIO = 0.6;
+/** Minimum seconds between two flags of the same kind for one player. */
+export const FLAG_COOLDOWN = 30;

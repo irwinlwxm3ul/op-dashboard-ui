@@ -120,12 +120,25 @@ export function firstFreeSeat(v: VehicleView): number {
 }
 
 /**
- * Resolve the interaction prompt. Priority: plane jump, open chute, exit vehicle, revive a downed
- * teammate, loot under the crosshair, vehicle (enter / refuel), training rack, other loot in view.
+ * Resolve the interaction prompt. Priority: exit vehicle (alive or downed), plane jump, open chute,
+ * revive a downed teammate, loot under the crosshair, vehicle (enter / refuel), training rack,
+ * other loot in view. Dead players get none; downed players only the exit.
  * Writes into `out` and returns it, or returns null when nothing is available.
  */
 export function resolveInteraction(env: InteractionEnv, out: Interaction): Interaction | null {
   const s = env.self;
+  if (s.life === 'dead') return null;
+
+  // Seated players (also downed ones, like the server allows) can always get out.
+  if (s.mode === 'vehicle') {
+    const r = reset(out, 'exit', false);
+    if (s.vehicleId !== null) {
+      r.targetId = s.vehicleId;
+      r.vehicleType = env.vehicles.get(s.vehicleId)?.type;
+    }
+    r.seat = s.seat;
+    return r;
+  }
   if (s.life !== 'alive') return null;
 
   if (s.mode === 'plane') {
@@ -137,16 +150,6 @@ export function resolveInteraction(env: InteractionEnv, out: Interaction): Inter
   }
   if (s.mode === 'parachute') return null;
   bodyCenterOf(s, center);
-
-  if (s.vehicleId !== null || s.mode === 'vehicle') {
-    const r = reset(out, 'exit', false);
-    if (s.vehicleId !== null) {
-      r.targetId = s.vehicleId;
-      r.vehicleType = env.vehicles.get(s.vehicleId)?.type;
-    }
-    r.seat = s.seat;
-    return r;
-  }
 
   // Revive the nearest downed teammate in range.
   let reviveBest: PlayerView | null = null;

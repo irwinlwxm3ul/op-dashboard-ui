@@ -596,6 +596,7 @@ export const enCore = {
   'error.lobby.notReady': 'Not everyone is ready yet.',
   'error.lobby.badSettings': 'Those lobby settings are not valid.',
   'error.lobby.nameInvalid': 'That name is not allowed. Please choose another one.',
+  'error.lobby.serverLimit': 'The server is busy — too many lobbies or matches. Try again shortly.',
   'error.net.rateLimited': 'Too many requests. Please slow down.',
   'error.net.badMessage': 'The server rejected an invalid message.',
   'error.net.versionMismatch': 'Your game version does not match the server. Reload the page to update.',

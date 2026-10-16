@@ -70,6 +70,9 @@ export interface StairRun {
   tz: number;
   /** Walking length entry -> exit (m). */
   len: number;
+  /** Floor heights at the bottom and the top. */
+  y0: number;
+  y1: number;
 }
 
 export interface FloorLevel {
@@ -192,6 +195,19 @@ export class BuildingNav {
     out.level = lv;
     out.cell = c;
     return true;
+  }
+
+  /** Is (x, y, z) on (or at either end of) one of the stair runs? */
+  onStairs(x: number, y: number, z: number): boolean {
+    for (const r of this.runs) {
+      if (y < r.y0 - 0.5 || y > r.y1 + 0.5) continue;
+      const dx = r.tx - r.bx, dz = r.tz - r.bz;
+      const l2 = dx * dx + dz * dz;
+      let t = l2 > 0 ? ((x - r.bx) * dx + (z - r.bz) * dz) / l2 : 0;
+      t = t < 0 ? 0 : t > 1 ? 1 : t;
+      if (hyp(r.bx + dx * t - x, r.bz + dz * t - z) < 1.0) return true;
+    }
+    return false;
   }
 
   /** Is a located position connected to the ground floor by stairs? */
@@ -603,6 +619,8 @@ export class BuildingNav {
       const run: StairRun = {
         bottomLevel, topLevel, bottomCell: -1, topCell: -1, bx, bz, sx, sz, ex, ez, tx, tz,
         len: hyp(tx - bx, tz - bz),
+        y0: r.base,
+        y1: r.top,
       };
       if (bottomLevel !== GROUND) {
         const c = this.cellAt(bx, bz);
@@ -852,6 +870,13 @@ export class FloorNav {
     this.navs[bi] = res;
     this.built++;
     return res;
+  }
+
+  /** Is (x, y, z) on a stair run of a building whose nav is built? */
+  onStairs(x: number, y: number, z: number): boolean {
+    const bi = this.buildingAt(x, z);
+    const nav = bi >= 0 ? this.navs[bi] : null;
+    return !!nav && nav.onStairs(x, y, z);
   }
 
   /**

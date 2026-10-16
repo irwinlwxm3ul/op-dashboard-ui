@@ -20,8 +20,24 @@ export interface ServerLimits {
   chatBurst: number;
   /** Maximum number of lobbies on this server. */
   maxLobbies: number;
+  /** Maximum lobbies hosted from one address. */
+  maxLobbiesPerIp: number;
   /** Maximum concurrent WebSocket connections. */
   maxConnections: number;
+  /** Maximum concurrent WebSocket connections from one address. */
+  maxConnectionsPerIp: number;
+  /** Sockets that have not sent a valid hello within this time are closed (ms). */
+  helloTimeoutMs: number;
+  /** Maximum concurrently running matches (each one is a worker thread with its own world). */
+  maxMatches: number;
+  /** Maximum concurrently running matches started from one address. */
+  maxMatchesPerIp: number;
+  /** Match start budget per connection / per address: burst, refilled by one every interval. */
+  matchStartBurst: number;
+  matchStartBurstPerIp: number;
+  matchStartIntervalMs: number;
+  /** A lobby must exist this long before its match starts; earlier starts are deferred (ms). */
+  minLobbyAgeMs: number;
   /** Heartbeat: ws ping interval and the silence after which a connection is terminated. */
   heartbeatMs: number;
   heartbeatTimeoutMs: number;
@@ -43,7 +59,16 @@ export const DEFAULT_LIMITS: ServerLimits = {
   chatRate: 1,
   chatBurst: 5,
   maxLobbies: 200,
+  maxLobbiesPerIp: 3,
   maxConnections: 2000,
+  maxConnectionsPerIp: 16,
+  helloTimeoutMs: 8000,
+  maxMatches: 50,
+  maxMatchesPerIp: 2,
+  matchStartBurst: 3,
+  matchStartBurstPerIp: 5,
+  matchStartIntervalMs: 30_000,
+  minLobbyAgeMs: 3000,
   heartbeatMs: 10_000,
   heartbeatTimeoutMs: 30_000,
   maxBufferedBytes: 4 * 1024 * 1024,
@@ -66,14 +91,30 @@ export class TokenBucket {
 
   /** Take `cost` tokens if available. */
   take(now: number, cost = 1): boolean {
-    const elapsed = now - this.last;
-    this.last = now;
-    if (elapsed > 0) this.tokens = Math.min(this.burst, this.tokens + (elapsed * this.ratePerSec) / 1000);
+    this.refill(now);
     if (this.tokens >= cost) {
       this.tokens -= cost;
       return true;
     }
     return false;
+  }
+
+  /** Whether `cost` tokens are available, without taking them. */
+  has(now: number, cost = 1): boolean {
+    this.refill(now);
+    return this.tokens >= cost;
+  }
+
+  /** True when the bucket is back at its burst size (an idle bucket can be discarded). */
+  isFull(now: number): boolean {
+    this.refill(now);
+    return this.tokens >= this.burst;
+  }
+
+  private refill(now: number): void {
+    const elapsed = now - this.last;
+    this.last = now;
+    if (elapsed > 0) this.tokens = Math.min(this.burst, this.tokens + (elapsed * this.ratePerSec) / 1000);
   }
 }
 

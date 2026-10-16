@@ -588,6 +588,7 @@ export const es: LocaleDict = {
   'error.lobby.notReady': 'Todavía no están todos listos.',
   'error.lobby.badSettings': 'Esos ajustes de sala no son válidos.',
   'error.lobby.nameInvalid': 'Ese nombre no está permitido. Elige otro.',
+  'error.lobby.serverLimit': 'El servidor está saturado: hay demasiadas salas o partidas. Vuelve a intentarlo en un momento.',
   'error.net.rateLimited': 'Demasiadas solicitudes. Ve más despacio.',
   'error.net.badMessage': 'El servidor ha rechazado un mensaje no válido.',
   'error.net.versionMismatch': 'Tu versión del juego no coincide con la del servidor. Recarga la página para actualizar.',

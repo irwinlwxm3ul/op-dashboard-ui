@@ -20,7 +20,7 @@ import { PlayersRenderer, type PlayersUpdateContext } from './players';
 import { VehicleRenderer } from './vehicles';
 import type { MidBodyRenderer, NearBodyProvider } from './bodies';
 import { CHARACTER_VARIANT_IDS, loadCharacter } from '../../assets';
-import { loadWeaponAssets } from './assetBridge';
+import { loadItemAssets, loadWeaponAssets } from './assetBridge';
 import { CharacterLibrary, GltfNearProvider } from './gltfBodies';
 
 export type { BodyFrame, MidBodyRenderer, NearBody, NearBodyProvider } from './bodies';
@@ -108,20 +108,18 @@ class EntityRendererImpl implements EntityRendererInternals {
   }
 
   /**
-   * Asynchronously swap in the curated models: real weapon meshes (third-person guns, ground
-   * loot), then the skinned glTF characters for the near LOD. The procedural soldier and guns stay
+   * Asynchronously swap in the curated models: real weapon and item meshes (third-person guns,
+   * ground loot, worn gear), then the skinned glTF characters for the near LOD. The procedural soldier and guns stay
    * in use until then, and permanently if loading fails.
    */
   private async loadAssets(): Promise<void> {
     try {
       // Start the character downloads right away; they resolve from the loader cache later.
       for (const id of CHARACTER_VARIANT_IDS) void loadCharacter(id);
-      const weapons = await loadWeaponAssets();
+      const [weapons, items] = await Promise.all([loadWeaponAssets(), loadItemAssets()]);
       if (this.disposed) return;
-      if (weapons.length) {
-        this.players.refreshWeaponModels();
-        this.loot.refreshItems(weapons);
-      }
+      if (weapons.length) this.players.refreshWeaponModels();
+      if (weapons.length || items.length) this.loot.refreshItems([...weapons, ...items]);
       // Gear meshes of the characters are built after the weapons registered (real guns in hand).
       const lib = await CharacterLibrary.load();
       if (!lib) return;

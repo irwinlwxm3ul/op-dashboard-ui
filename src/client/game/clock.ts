@@ -25,15 +25,18 @@ const PONG_WINDOW = 10;
 const PONG_MAX_AGE_MS = 10_000;
 /** Snapshot arrival samples kept, and the window of the data-clock maximum. */
 const BOUND_CAPACITY = 64;
-const DATA_WINDOW_MS = 750;
+const DATA_WINDOW_MS = 600;
 /** True-offset corrections larger than this (ms) are applied instantly instead of slewed. */
 const OFFSET_SNAP_MS = 250;
 /** Fraction of the remaining true-offset error corrected per observation. */
 const OFFSET_SLEW = 0.1;
-/** The pong estimate must exceed the data evidence by this much (+ 2x jitter) ... */
+/** The pong estimate must exceed the data evidence by this much (+ 2x jitter, bounded) ... */
 const STEP_TOLERANCE_MS = 40;
 /** ... for this long before it is considered a server clock step back. */
-const STEP_CONFIRM_MS = 500;
+const STEP_CONFIRM_MS = 250;
+/** Jitter bookkeeping: per-sample lateness cap and the jitter share of the step tolerance (ms). */
+const JITTER_SAMPLE_CAP_MS = 60;
+const STEP_JITTER_CAP_MS = 30;
 /** Extra interpolation delay allowed for jittery connections (ms). */
 const MAX_JITTER_DELAY_MS = 80;
 
@@ -103,11 +106,10 @@ export class ClockSync {
     this.boundCount = Math.min(BOUND_CAPACITY, this.boundCount + 1);
 
     // Data clock: maximum over the recent window (the least delayed snapshot).
-    const prevData = this.dataOffset;
     this.dataOffset = this.windowMax(now, DATA_WINDOW_MS, sample);
     if (!this.dataSynced) this.dataSynced = true;
-    else this.jitter += (Math.max(0, this.dataOffset - sample) - this.jitter) * 0.1;
-    void prevData;
+    // Capped so a clock step (every sample in the window looks late) does not read as jitter.
+    else this.jitter += (Math.min(JITTER_SAMPLE_CAP_MS, Math.max(0, this.dataOffset - sample)) - this.jitter) * 0.1;
 
     this.detectStep(now);
     this.adjust(this.targetOffset(now));
@@ -159,7 +161,7 @@ export class ClockSync {
     }
     const oneWay = Number.isFinite(this.rttFloor) ? this.rttFloor / 2 : 0;
     const excess = this.offset - (this.dataOffset + oneWay);
-    if (excess <= STEP_TOLERANCE_MS + 2 * this.jitter) {
+    if (excess <= STEP_TOLERANCE_MS + 2 * Math.min(this.jitter, STEP_JITTER_CAP_MS)) {
       this.stepSince = -1;
       return;
     }

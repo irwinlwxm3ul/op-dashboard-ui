@@ -304,10 +304,79 @@ describe('clock sync', () => {
       e.run();
     }
     expect(Math.abs(cs.offset - offset)).toBeLessThan(8);
+    expect(cs.discontinuities).toBe(0); // jitter alone never looks like a clock step
     expect(cs.rtt).toBeGreaterThan(80);
     expect(cs.rtt).toBeLessThan(130);
     expect(cs.interpDelay()).toBeGreaterThanOrEqual(100);
     expect(cs.interpDelay()).toBeLessThanOrEqual(180);
+  });
+
+  it.each([1, 3, 7, 11, 19, 42])('follows a server clock that steps back 300 ms within ~1 s, without overshoot or render time running backwards (seed %i)', (seed0) => {
+    const cs = new ClockSync();
+    const rc = new RenderClock();
+    let seed = seed0;
+    const rand = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
+    const oneWay = () => 30 + rand() * 20; // 30..50 ms
+    let serverOffset = 50_000; // server clock = local + serverOffset
+    const STEP_AT = 10_000;
+    type Ev = { at: number; run: () => void };
+    const evs: Ev[] = [];
+    const push = (e: Ev) => {
+      let i = evs.length;
+      while (i > 0 && evs[i - 1].at > e.at) i--;
+      evs.splice(i, 0, e);
+    };
+    let now = 0;
+    let nextSnap = 0, nextFrame = 0;
+    const errAfter: { t: number; trueErr: number; dataErr: number }[] = [];
+    let prevRender = -Infinity;
+    let minStepRatio = Infinity;
+    while (now < 16_000) {
+      const t = Math.min(nextSnap, nextFrame, evs.length ? evs[0].at : Infinity);
+      now = t;
+      if (now >= STEP_AT && serverOffset === 50_000) serverOffset -= 300; // backlog dropped after a stall
+      if (evs.length && evs[0].at === t) {
+        evs.shift()!.run();
+        continue;
+      }
+      if (t === nextSnap) {
+        const stamp = now + serverOffset;
+        push({ at: now + oneWay(), run: () => cs.onSnapshot(stamp, now) });
+        nextSnap += 50;
+        continue;
+      }
+      // 60 Hz frame: ping scheduling + render clock.
+      nextFrame += 1000 / 60;
+      if (cs.shouldPing(now)) {
+        const c = now;
+        const up = oneWay(), down = oneWay();
+        push({
+          at: c + up,
+          run: () => {
+            const s = now + serverOffset;
+            push({ at: now + down, run: () => cs.onPong(c, s, now) });
+          },
+        });
+      }
+      const r = rc.update(1000 / 60, cs.dataNow(now) - cs.interpDelay());
+      if (prevRender > -Infinity) minStepRatio = Math.min(minStepRatio, (r - prevRender) / (1000 / 60));
+      prevRender = r;
+      if (now >= STEP_AT) {
+        // Data clock truth: server time of a minimally delayed snapshot.
+        errAfter.push({ t: now - STEP_AT, trueErr: cs.offset - serverOffset, dataErr: cs.dataOffset - (serverOffset - 30) });
+      }
+    }
+    // Before 1 s after the step both estimates have converged ...
+    const late = errAfter.filter((e) => e.t > 1000);
+    expect(Math.max(...late.map((e) => Math.abs(e.trueErr)))).toBeLessThan(25);
+    expect(Math.max(...late.map((e) => Math.abs(e.dataErr)))).toBeLessThan(25);
+    // ... never overshooting below the new clock ...
+    expect(Math.min(...errAfter.map((e) => e.trueErr))).toBeGreaterThan(-25);
+    expect(Math.min(...errAfter.map((e) => e.dataErr))).toBeGreaterThan(-25);
+    expect(cs.discontinuities).toBeLessThanOrEqual(1); // never a false trigger
+    // ... while render time slowed down (never ran backwards, never jumped) and caught up.
+    expect(minStepRatio).toBeGreaterThanOrEqual(0.49);
+    expect(Math.abs(rc.time - (cs.dataNow(now) - cs.interpDelay()))).toBeLessThan(10);
   });
 
   it('render clock advances smoothly and converges without jumps', () => {
@@ -327,7 +396,20 @@ describe('clock sync', () => {
       prev = t;
     }
     expect(Math.abs(rc.time - target)).toBeLessThan(2);
-    // A huge discontinuity snaps.
+    // A large step back is slewed (time keeps moving forward at >= half speed), not snapped.
+    const before = rc.time;
+    target -= 300;
+    let t2 = rc.time;
+    for (let i = 0; i < 180; i++) {
+      target += 16;
+      const t = rc.update(16, target);
+      expect(t - t2).toBeGreaterThanOrEqual(16 * 0.5 - 1e-9);
+      if (i === 60) expect(Math.abs(t - target)).toBeLessThan(60); // the bulk is gone within ~1 s
+      t2 = t;
+    }
+    expect(rc.time).toBeGreaterThan(before);
+    expect(Math.abs(rc.time - target)).toBeLessThan(3);
+    // An absurd discontinuity snaps.
     rc.update(16, target + 5000);
     expect(rc.time).toBe(target + 5000);
   });
@@ -733,6 +815,11 @@ describe('interaction prompt', () => {
     seated.self.vehicleId = 50;
     seated.self.seat = 1;
     expect(resolveInteraction(seated, out())?.kind).toBe('exit');
+    // A downed passenger can still get out (the sim allows it); a dead one cannot.
+    seated.self.life = 'downed';
+    expect(resolveInteraction(seated, out())?.kind).toBe('exit');
+    seated.self.life = 'dead';
+    expect(resolveInteraction(seated, out())).toBeNull();
 
     const empty = baseEnv({ vehicles: new Map([[51, vehicleView(51, { x: 2.5, y: 1, z: 0 }, { fuel: 0 })]]) });
     empty.self.items.fuel = 1;
@@ -1196,6 +1283,7 @@ describe('single-player host (worker logic) end to end', () => {
       config: { ...CONFIG, mode: 'training', maxPlayers: 4, teamSize: 1, botFill: true, infiniteAmmo: true },
     });
     expect(posted[0]).toBe('matchInit');
+    host.receive({ t: 'loaded' }); // scene ready: forwarded to the runner (releases a held plane)
     const g = game as unknown as ClientGame;
     expect(g.world.kind).toBe('training');
     const step = (frames: number, each?: (i: number) => void) => {
@@ -1221,6 +1309,21 @@ describe('single-player host (worker logic) end to end', () => {
     expect(f.ping).toBe(0);
     expect(f.trainingTargets.length).toBeGreaterThan(0);
     expect(posted.filter((t) => t === 'pong').length).toBeGreaterThan(0);
+    // An exception while handling in-match traffic is logged, never fatal for the worker.
+    const runner = host.matchRunner!;
+    const original = runner.handleMessage.bind(runner);
+    const errors: unknown[] = [];
+    const origError = console.error;
+    console.error = (...args: unknown[]) => { errors.push(args); };
+    try {
+      runner.handleMessage = () => { throw new Error('boom'); };
+      expect(() => host.receive({ t: 'ping', c: 1 })).not.toThrow();
+      expect(errors.length).toBe(1);
+    } finally {
+      runner.handleMessage = original;
+      console.error = origError;
+    }
+    expect(host.running).toBe(true);
     host.receive({ t: 'leaveMatch' });
     expect(posted[posted.length - 1]).toBe('backToLobby');
     expect(host.running).toBe(false);

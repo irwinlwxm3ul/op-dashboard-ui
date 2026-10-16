@@ -588,6 +588,7 @@ export const zh: LocaleDict = {
   'error.lobby.notReady': '还有玩家未准备。',
   'error.lobby.badSettings': '房间设置无效。',
   'error.lobby.nameInvalid': '该名称不可用，请换一个。',
+  'error.lobby.serverLimit': '服务器繁忙，房间或对局数量过多。请稍后再试。',
   'error.net.rateLimited': '请求过于频繁，请稍后再试。',
   'error.net.badMessage': '服务器拒绝了无效的消息。',
   'error.net.versionMismatch': '游戏版本与服务器不一致，请刷新页面进行更新。',

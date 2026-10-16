@@ -1,9 +1,9 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import type { ItemId, VehicleType } from '../src/shared/types';
 import {
-  DICTIONARIES, LANGUAGES, errorText, fmtDuration, fmtNumber, getLanguage, hasKey, initI18n, isLang, isRTL,
-  itemName, langDir, onLanguageChange, pickLanguage, setLanguage, t, translateDom, vehicleName,
-  type Lang,
+  DICTIONARIES, LANGUAGES, USER_TEXT_PARAMS, bidiIsolate, errorText, fmtDuration, fmtList, fmtNumber, getLanguage,
+  hasKey, initI18n, isLang, isRTL, itemName, langDir, onLanguageChange, pickLanguage, setLanguage, t, translateDom,
+  vehicleName, type Lang,
 } from '../src/client/i18n';
 import { en } from '../src/client/i18n/locales/en';
 import { enCore } from '../src/client/i18n/locales/en.core';
@@ -13,6 +13,10 @@ import {
 
 const OTHER_LANGS = LANGUAGES.map((l) => l.code).filter((c): c is Exclude<Lang, 'en'> => c !== 'en');
 const CORE_KEYS = Object.keys(enCore);
+/** Bidi isolate wrappers t() puts around user text (FSI … PDI). */
+const FSI = '\u2068';
+const PDI = '\u2069';
+const iso = (s: string) => `${FSI}${s}${PDI}`;
 
 afterEach(() => setLanguage('en'));
 
@@ -70,11 +74,17 @@ describe('locale dictionaries', () => {
     for (const v of vehicles) expect(hasKey(`vehicle.${v}`), v).toBe(true);
     for (const code of [
       'lobby.notFound', 'lobby.full', 'lobby.inGame', 'lobby.notHost', 'lobby.teamFull', 'lobby.notReady',
-      'lobby.badSettings', 'lobby.nameInvalid', 'net.rateLimited', 'net.badMessage', 'net.versionMismatch', 'net.kicked',
+      'lobby.badSettings', 'lobby.nameInvalid', 'lobby.serverLimit', 'net.rateLimited', 'net.badMessage', 'net.versionMismatch', 'net.kicked',
     ]) {
       expect(hasKey(`error.${code}`), code).toBe(true);
     }
     expect(hasKey('hud.distanceMeters')).toBe(true);
+  });
+
+  it('keeps Arabic ammo calibres and lobby ping units compact and correctly ordered in RTL', () => {
+    // '.300' as an LTR isolate, otherwise the leading period renders on the wrong side ('300.').
+    expect(DICTIONARIES.ar['item.ammo_300']).toMatch(/^\u2066\.300\u2069 /);
+    expect(DICTIONARIES.ar['unit.ms']).toBe('{n} ms');
   });
 });
 
@@ -128,10 +138,45 @@ describe('pickLanguage', () => {
 
 describe('t', () => {
   it('interpolates parameters and leaves unknown placeholders untouched', () => {
-    expect(t('banner.youKilled', { name: 'Alex' })).toBe('You killed Alex');
+    expect(t('banner.youKilled', { name: 'Alex' })).toBe(`You killed ${iso('Alex')}`);
     expect(t('prompt.pickupCount', { item: itemName('ammo_556'), count: 30 })).toBe('Pick up 5.56mm x30');
     expect(t('banner.youKilled')).toBe('You killed {name}');
-    expect(t('feed.killed', { killer: 'A', victim: 'B' })).toBe('A killed B with {weapon}');
+    expect(t('feed.killed', { killer: 'A', victim: 'B' })).toBe(`${iso('A')} killed ${iso('B')} with {weapon}`);
+  });
+
+  it('bidi-isolates user-generated text params, not numbers or UI text', () => {
+    for (const p of ['name', 'names', 'player', 'killer', 'victim', 'reviver', 'target', 'from', 'host', 'lobby', 'winner', 'winners']) {
+      expect(USER_TEXT_PARAMS.has(p), p).toBe(true);
+    }
+    setLanguage('ar');
+    // A clan tag would otherwise jump to the far side of the name in RTL.
+    expect(t('banner.youKilled', { name: '[DZ] Bob' })).toBe(`قتلت ${iso('[DZ] Bob')}`);
+    expect(t('feed.killed', { killer: 'Ghost!', victim: 'علي', weapon: itemName('ar') })).toBe(
+      `${iso('Ghost!')} قتل ${iso('علي')} بسلاح ${itemName('ar')}`,
+    );
+    // Numbers are formatted, never isolated; translated UI text (keys, items) is left as is.
+    expect(t('hud.distanceMeters', { n: 250 })).toBe(`${fmtNumber(250)} م`);
+    expect(t('prompt.pickup', { item: 'AR-5' })).toBe('التقاط AR-5');
+    expect(t('hud.plane.pressToJump', { key: 'F' })).toBe('اضغط F للقفز');
+  });
+
+  it('bidiIsolate strips directional controls from user text and is not applied twice', () => {
+    expect(bidiIsolate('')).toBe('');
+    expect(bidiIsolate('\u202Eevil\u2069x\u2066')).toBe(iso('evilx'));
+    expect(t('hud.spectating', { name: bidiIsolate('Kim') })).toBe(`Spectating ${iso('Kim')}`);
+    expect(t('hud.spectating', { name: '' })).toBe('Spectating ');
+  });
+
+  it('fmtList joins with the language list pattern and isolates each item', () => {
+    expect(fmtList(['A', 'B', 'C'])).toBe(`${iso('A')}, ${iso('B')}, and ${iso('C')}`);
+    expect(fmtList(['A', 'B'], false)).toBe('A and B');
+    setLanguage('zh');
+    expect(fmtList(['王小明', 'Grim', 'Ann'], false)).toBe(new Intl.ListFormat('zh-CN', { type: 'conjunction' }).format(['王小明', 'Grim', 'Ann']));
+    setLanguage('ar');
+    const list = fmtList(['王小明', 'GrimNomad8', 'علي']);
+    expect(list).toBe(new Intl.ListFormat('ar', { type: 'conjunction' }).format([iso('王小明'), iso('GrimNomad8'), iso('علي')]));
+    // Already isolated per item: a {names} param is not wrapped a second time.
+    expect(t('banner.youKilled', { name: list })).toBe(`قتلت ${list}`);
   });
 
   it('formats numeric parameters for the language', () => {
@@ -294,7 +339,7 @@ describe('translateDom', () => {
     expect(input.getAttribute('placeholder')).toBe('Écrivez un message…');
     expect(input.getAttribute('title')).toBe('Discussion');
     expect(btn.getAttribute('aria-label')).toBe('Fermer');
-    expect(banner.textContent).toBe('Vous avez tué Kim');
+    expect(banner.textContent).toBe(`Vous avez tué ${iso('Kim')}`);
     expect(broken.textContent).toBe('OK');
   });
 });
@@ -391,5 +436,71 @@ describe('check-i18n hardcoded-string scanner', () => {
   it('reports the right line in multi-line statements', () => {
     const src = ['function f() {', '  label.textContent =', '    cond', "      ? t('a')", "      : 'Fallback';", '}'].join('\n');
     expect(lines(src)).toEqual([5]);
+  });
+
+  it('ignores string literals that are compared against (codes, not text)', () => {
+    expect(scanSource("el.textContent = mode === 'r' ? t('hud.reloading') : mode !== 'n' ? '' : t('hud.noAmmo');")).toEqual([]);
+    expect(scanSource("el.textContent = 'x' in map ? t('a') : t('b');")).toEqual([]);
+  });
+
+  it('checks TextSlot.set() on fields and locals typed or constructed as TextSlot', () => {
+    const src = [
+      'class Hud {',
+      '  private readonly name: TextSlot;',
+      '  private readonly gap: StyleSlot;',
+      '  private readonly items = new Map<string, number>();',
+      "  constructor(root: HTMLElement) { this.name = new TextSlot(h('span', 'dz-name', root)); }",
+      '  update(): void {',
+      "    this.name.set('Unknown player');",
+      "    this.name.set(t('common.unknown'));",
+      "    this.gap.set(`${gap}px`);",
+      "    this.items.set('frag', 1);",
+      "    const slot = new TextSlot(el); slot.set(ok ? 'Ready' : '');",
+      '  }',
+      '}',
+    ].join('\n');
+    expect(scanSource(src).map((v) => [v.line, v.sink, v.text])).toEqual([
+      [7, 'TextSlot.set()', 'Unknown player'],
+      [11, 'TextSlot.set()', 'Ready'],
+    ]);
+  });
+
+  it('checks the feel overlay banners, toasts and canvas labels', () => {
+    const src = [
+      'class Feel {',
+      '  private readonly killBanner: KillBanner;',
+      '  private readonly moment = new MomentBanner(root);',
+      '  private readonly notices: Notices;',
+      '  private readonly toasts = new Toasts(root);',
+      '  run(): void {',
+      "    this.killBanner.show('kill', 'You killed someone', null, [t('banner.killCount', { count }), 'far away'], now);",
+      "    this.killBanner.show('knock', t('banner.youKnocked', { name }), ev.headshot ? t('banner.headshot') : null, [], now);",
+      "    this.moment.show('zone', t('banner.zone.final'), 'Hurry up', 3, now);",
+      "    this.notices.push('Teammate down', 'bad', now);",
+      "    this.toasts.show('Saved', 'info');",
+      "    ctx.toast('Connection lost', 'error');",
+      "    ctx.fillText('North', 4, 8);",
+      '    ctx.strokeText(town.name, 4, 8);',
+      "    this.ui.show('main');",
+      '  }',
+      '}',
+    ].join('\n');
+    expect(scanSource(src).map((v) => [v.line, v.sink, v.text])).toEqual([
+      [7, 'KillBanner.show()', 'You killed someone'],
+      [7, 'KillBanner.show()', 'far away'],
+      [9, 'MomentBanner.show()', 'Hurry up'],
+      [10, 'Notices.push()', 'Teammate down'],
+      [11, 'Toasts.show()', 'Saved'],
+      [12, '.toast()', 'Connection lost'],
+      [13, '.fillText()', 'North'],
+    ]);
+  });
+
+  it('checks icon markup helpers and literal t() / txp() params', () => {
+    expect(scanSource("svgIcon('<svg viewBox=\"0 0 8 8\"><path d=\"M0 0h8\"/></svg>');\nbutton({ cls: 'dz-btn', label: 'common.back', icon: ICONS.back });")).toEqual([]);
+    expect(lines("svgIcon('<svg><text>Hi</text></svg>');\nbutton({ label: 'common.ok', icon: '<b>OK</b>' });")).toEqual([1, 2]);
+    expect(lines("t('banner.youKilled', { name: 'Player' });\ntxp(el, 'hud.spectating', { name: who ?? 'Nobody' });")).toEqual([1, 2]);
+    expect(scanSource("t('hud.kills', { count: 3 });\nt('hud.spectating', { name, key: keyCapLabel('KeyF') });\nt(cond ? 'a.b' : 'c.d');")).toEqual([]);
+    expect(scanSource("export function t(key: TKey, params = { name: 'x' }) {}\nfunction svgIcon(markup: string, cls = 'dz-icon') {}")).toEqual([]);
   });
 });

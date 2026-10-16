@@ -4,8 +4,9 @@
 // consumed by rendering / UI / audio / feel.
 //
 // Timeline: inputs are produced on fixed TICK_DT steps (one PlayerInput each) and predicted
-// immediately; remote entities are drawn at `renderTime` = estimated server time - interpolation
-// delay, which is also the `rt` sent with each input for lag compensation.
+// immediately; remote entities are drawn at `renderTime` = server time of the newest received data
+// - interpolation delay, which is also the `rt` sent with each input for lag compensation (the
+// server rewinds to exactly the world the player was looking at).
 
 import { MAX_EXTRAPOLATE_MS, MAX_HEALTH, REVIVE_TIME, TICK_DT } from '../../shared/constants';
 import { clamp, damp, lerp, lerpAngle } from '../../shared/math';
@@ -377,7 +378,9 @@ export class ClientGame implements ClientGameApi {
     this.lastUpdateAt = now;
     if (this.clock.shouldPing(now)) this.transport.send({ t: 'ping', c: now });
     this.serverNow = this.clock.serverNow(now);
-    this.renderTime = this.renderClock.update(dt * 1000, this.serverNow - this.clock.interpDelay());
+    // Render a fixed delay behind the newest data (not behind the true server time), so the
+    // interpolation buffer does not shrink with latency.
+    this.renderTime = this.renderClock.update(dt * 1000, this.clock.dataNow(now) - this.clock.interpDelay());
     this.input.update(dt);
 
     // Fixed input ticks.

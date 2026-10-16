@@ -18,12 +18,15 @@ export class LocalTransport extends BaseTransport {
     this.worker.onmessage = (ev: MessageEvent) => {
       if (isServerMessage(ev.data)) this.emitMessage(ev.data);
     };
+    // A worker 'error' only reaches us for fatal problems (module load failure, failing to start
+    // the match): in-match errors are handled inside the worker. Either way the session is over.
     this.worker.onerror = (ev: ErrorEvent) => {
       console.error('[net] local match worker failed', ev.message || ev);
       this.close();
     };
     this.worker.onmessageerror = () => {
-      console.warn('[net] local match worker sent an undecodable message');
+      console.error('[net] local match worker sent an undecodable message');
+      this.close();
     };
   }
 

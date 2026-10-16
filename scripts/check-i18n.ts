@@ -9,9 +9,12 @@
 //    variants may spell the number out and omit {count}).
 // 3. Scans src/client/**/*.ts (except the locale files) for hardcoded user-facing strings:
 //    assignments to textContent/innerText/innerHTML/outerHTML/placeholder/title/alt,
-//    setAttribute('title'|'placeholder'|'aria-label'|'alt', ...) and alert/confirm/prompt calls
-//    with literal text. A line containing `i18n-ignore` (or a comment line with it directly
-//    above) is exempt.
+//    setAttribute('title'|'placeholder'|'aria-label'|'alt', ...), alert/confirm/prompt calls,
+//    and the project's own text helpers: TextSlot.set (ui/dom.ts), svgIcon / button({ icon })
+//    markup (ui/dom.ts), toast / Toasts.show (ui), KillBanner.show / MomentBanner.show /
+//    Notices.push (feel/overlay/banners.ts), canvas fillText / strokeText, and literal values in
+//    t() / txp() params objects. (feel/overlay/dom.ts helpers take class names only.) A line
+//    containing `i18n-ignore` (or a comment line with it directly above) is exempt.
 //
 // Exits 1 when anything is reported, 0 otherwise. The checks are exported for tests.
 
@@ -358,12 +361,86 @@ function shorten(text: string): string {
   return s.length > 60 ? `${s.slice(0, 57)}…` : s;
 }
 
+/** Arguments of a helper call that end up as visible text (or as markup, when `html`). */
+interface ArgSink {
+  args: readonly number[];
+  html?: boolean;
+}
+
+/**
+ * Text-carrying methods of the project's own UI helper classes, resolved through the declared type
+ * of the receiver (`private readonly hp: TextSlot` / `this.hp = new TextSlot(...)` → `this.hp.set(...)`).
+ */
+const CLASS_METHOD_SINKS: Readonly<Record<string, Readonly<Record<string, ArgSink>>>> = {
+  TextSlot: { set: { args: [0] } }, // src/client/ui/dom.ts: TextSlot.set(text)
+  Toasts: { show: { args: [0] } }, // src/client/ui/toast.ts: show(text, kind)
+  KillBanner: { show: { args: [1, 2, 3] } }, // src/client/feel/overlay/banners.ts: show(kind, main, tag, details, now)
+  MomentBanner: { show: { args: [1, 2] } }, // show(kind, title, sub, duration, now)
+  Notices: { push: { args: [0] } }, // push(text, tone, now)
+};
+/** Methods whose name alone identifies a text sink, whatever the receiver. */
+const METHOD_SINKS: Readonly<Record<string, ArgSink>> = {
+  toast: { args: [0] }, // UiContext.toast(text, kind)
+  fillText: { args: [0] }, // canvas labels (map)
+  strokeText: { args: [0] },
+};
+/** Free helper functions with text or markup arguments. */
+const FUNCTION_SINKS: Readonly<Record<string, ArgSink>> = {
+  svgIcon: { args: [0], html: true }, // src/client/ui/dom.ts: icon markup, never text
+};
+/** Free helper functions taking an options object with text / markup properties (value = html). */
+const OPTION_SINKS: Readonly<Record<string, { arg: number; props: Readonly<Record<string, boolean>> }>> = {
+  button: { arg: 0, props: { icon: true } }, // src/client/ui/dom.ts: ButtonOpts.icon (markup); label is a TKey
+};
+/** Translation calls whose params object is interpolated into visible text: index of that argument. */
+const PARAM_SINKS: Readonly<Record<string, number>> = { t: 1, txp: 2 };
+
+const isP = (tok: Tok | undefined, v: string): boolean => tok?.k === 'p' && tok.v === v;
+const COMPARISONS = new Set(['===', '!==', '==', '!=', '<', '>', '<=', '>=']);
+/** A literal compared against (`mode === 'b' ? … : …`, `'x' in o`) is a code, not visible text. */
+const isOperand = (prev: Tok | undefined, next: Tok | undefined): boolean =>
+  (prev?.k === 'p' && COMPARISONS.has(prev.v)) ||
+  (next?.k === 'p' && COMPARISONS.has(next.v)) ||
+  (next?.k === 'id' && (next.v === 'in' || next.v === 'instanceof'));
+/** Table lookup that ignores Object.prototype members (`toString`, `constructor`, ...). */
+const own = <T>(table: Readonly<Record<string, T>>, key: string): T | undefined =>
+  Object.hasOwn(table, key) ? table[key] : undefined;
+
+/** Identifiers declared (type annotation or `= new`) as one of the helper classes above. */
+function collectTypedNames(tokens: Tok[], out: Map<string, Set<string>> = new Map()): Map<string, Set<string>> {
+  for (let i = 0; i < tokens.length; i++) {
+    const tok = tokens[i];
+    if (tok.k === 'tpl') {
+      for (const expr of tok.exprs) collectTypedNames(expr, out);
+      continue;
+    }
+    if (tok.k !== 'id') continue;
+    let j = i + 1;
+    if (isP(tokens[j], '?') || isP(tokens[j], '!')) j++;
+    if (!isP(tokens[j], ':') && !isP(tokens[j], '=')) continue;
+    let typeTok = tokens[j + 1];
+    if (typeTok?.k === 'id' && typeTok.v === 'new') typeTok = tokens[j + 2];
+    else if (isP(tokens[j], '=')) continue; // `x = other` says nothing about the type
+    if (typeTok?.k !== 'id' || !Object.hasOwn(CLASS_METHOD_SINKS, typeTok.v)) continue;
+    let set = out.get(tok.v);
+    if (set === undefined) out.set(tok.v, (set = new Set()));
+    set.add(typeTok.v);
+  }
+  return out;
+}
+
 class Scanner {
   readonly found: ScanViolation[] = [];
+  private typed = new Map<string, Set<string>>();
 
   constructor(private readonly lines: readonly string[]) {}
 
-  scan(tokens: Tok[]): void {
+  scanFile(tokens: Tok[]): void {
+    this.typed = collectTypedNames(tokens);
+    this.scan(tokens);
+  }
+
+  private scan(tokens: Tok[]): void {
     for (let i = 0; i < tokens.length; i++) {
       const tok = tokens[i];
       if (tok.k === 'tpl') {
@@ -384,35 +461,108 @@ class Scanner {
         }
         continue;
       }
-      if (tok.k !== 'id') continue;
+      if (tok.k !== 'id' || !isP(tokens[i + 1], '(')) continue;
       const prev = tokens[i - 1];
-      // el.setAttribute('title', ...)
-      if (tok.v === 'setAttribute' && prev?.k === 'p' && prev.v === '.') {
-        const open = tokens[i + 1];
-        const name = tokens[i + 2];
-        const comma = tokens[i + 3];
-        if (open?.k === 'p' && open.v === '(' && name?.k === 'str' && TEXT_ATTRS.has(name.v) && comma?.k === 'p' && comma.v === ',') {
-          const start = i + 4;
-          const end = this.expressionEnd(tokens, start, 'argument');
-          this.checkRange(tokens, start, end, false, `setAttribute('${name.v}')`, tok.line);
-        }
-        continue;
+      const open = i + 1;
+      if (prev?.k === 'id' && prev.v === 'function') continue; // declaration, not a call
+      if (isP(prev, '.') || isP(prev, '?.')) this.memberCall(tokens, i, open);
+      else this.functionCall(tokens, i, open);
+    }
+  }
+
+  /** `recv.method(...)`: setAttribute, dialogs on window, helper-class methods. */
+  private memberCall(tokens: Tok[], i: number, open: number): void {
+    const tok = tokens[i] as { v: string; line: number };
+    const recv = tokens[i - 2];
+    // el.setAttribute('title', ...)
+    if (tok.v === 'setAttribute') {
+      const name = tokens[open + 1];
+      if (name?.k === 'str' && TEXT_ATTRS.has(name.v) && isP(tokens[open + 2], ',')) {
+        const start = open + 3;
+        const end = this.expressionEnd(tokens, start, 'argument');
+        this.checkRange(tokens, start, end, false, `setAttribute('${name.v}')`, tok.line);
       }
-      // alert('...') / window.confirm('...')
-      if (DIALOG_FNS.has(tok.v) && tokens[i + 1]?.k === 'p' && (tokens[i + 1] as { v: string }).v === '(') {
-        const owner = tokens[i - 2];
-        const member = prev?.k === 'p' && (prev.v === '.' || prev.v === '?.');
-        if (member && !(owner?.k === 'id' && DIALOG_OWNERS.has(owner.v))) continue;
-        if (prev?.k === 'id' && prev.v === 'function') continue;
-        let j = i + 2;
-        while (j < tokens.length) {
-          const end = this.expressionEnd(tokens, j, 'argument');
-          this.checkRange(tokens, j, end, false, `${tok.v}()`, tok.line);
-          const sep = tokens[end];
-          if (!(sep?.k === 'p' && sep.v === ',')) break;
-          j = end + 1;
+      return;
+    }
+    // window.alert('...')
+    if (DIALOG_FNS.has(tok.v)) {
+      if (recv?.k === 'id' && DIALOG_OWNERS.has(recv.v)) this.checkArgs(tokens, open, { args: [0, 1] }, `${tok.v}()`, tok.line);
+      return;
+    }
+    let spec = own(METHOD_SINKS, tok.v);
+    let sink = `.${tok.v}()`;
+    if (spec === undefined && recv?.k === 'id') {
+      for (const cls of this.typed.get(recv.v) ?? []) {
+        const s = own(CLASS_METHOD_SINKS[cls], tok.v);
+        if (s !== undefined) {
+          spec = s;
+          sink = `${cls}.${tok.v}()`;
+          break;
         }
       }
+    }
+    if (spec !== undefined) this.checkArgs(tokens, open, spec, sink, tok.line);
+  }
+
+  /** `fn(...)`: dialogs, helper functions, translation params. */
+  private functionCall(tokens: Tok[], i: number, open: number): void {
+    const tok = tokens[i] as { v: string; line: number };
+    if (DIALOG_FNS.has(tok.v)) {
+      this.checkArgs(tokens, open, { args: [0, 1] }, `${tok.v}()`, tok.line);
+      return;
+    }
+    const fnSink = own(FUNCTION_SINKS, tok.v);
+    if (fnSink !== undefined) this.checkArgs(tokens, open, fnSink, `${tok.v}()`, tok.line);
+    const optSink = own(OPTION_SINKS, tok.v);
+    const paramArg = own(PARAM_SINKS, tok.v);
+    if (optSink === undefined && paramArg === undefined) return;
+    this.forEachArg(tokens, open, (k, start, end) => {
+      if (optSink !== undefined && k === optSink.arg) {
+        this.forEachProp(tokens, start, end, (key, vStart, vEnd) => {
+          const html = own(optSink.props, key);
+          if (html !== undefined) this.checkRange(tokens, vStart, vEnd, html, `${tok.v}({ ${key} })`, tok.line);
+        });
+      }
+      if (paramArg !== undefined && k === paramArg) {
+        this.forEachProp(tokens, start, end, (key, vStart, vEnd) => {
+          this.checkRange(tokens, vStart, vEnd, false, `${tok.v}() param "${key}"`, tok.line);
+        });
+      }
+    });
+  }
+
+  private checkArgs(tokens: Tok[], open: number, spec: ArgSink, sink: string, sinkLine: number): void {
+    this.forEachArg(tokens, open, (k, start, end) => {
+      if (spec.args.includes(k)) this.checkRange(tokens, start, end, spec.html === true, sink, sinkLine);
+    });
+  }
+
+  /** Calls `fn(index, start, end)` for each argument of the call whose `(` is at `open`. */
+  private forEachArg(tokens: Tok[], open: number, fn: (k: number, start: number, end: number) => void): void {
+    let j = open + 1;
+    for (let k = 0; j < tokens.length && !isP(tokens[j], ')'); k++) {
+      const end = this.expressionEnd(tokens, j, 'argument');
+      fn(k, j, end);
+      if (!isP(tokens[end], ',')) return;
+      j = end + 1;
+    }
+  }
+
+  /** Calls `fn(key, start, end)` for each `key: value` of an object literal spanning [start, end). */
+  private forEachProp(tokens: Tok[], start: number, end: number, fn: (key: string, vStart: number, vEnd: number) => void): void {
+    if (!isP(tokens[start], '{')) return;
+    let j = start + 1;
+    while (j < end && !isP(tokens[j], '}')) {
+      const keyTok = tokens[j];
+      if ((keyTok.k === 'id' || keyTok.k === 'str') && isP(tokens[j + 1], ':')) {
+        const vEnd = this.expressionEnd(tokens, j + 2, 'argument');
+        fn(keyTok.v, j + 2, vEnd);
+        j = vEnd;
+      } else {
+        j = this.expressionEnd(tokens, j, 'argument'); // shorthand, spread or method
+      }
+      if (!isP(tokens[j], ',')) return;
+      j++;
     }
   }
 
@@ -463,7 +613,18 @@ class Scanner {
               prev.k === 'tpl');
           stack.push(call ? 'call' : 'group');
           if (call) nested++;
-        } else if (tok.v === '[' || tok.v === '{') {
+        } else if (tok.v === '[') {
+          // Indexing nests (`labels[i]`); an array literal is transparent (`['a', b]` is text).
+          const prev = j > start ? tokens[j - 1] : undefined;
+          const index =
+            prev !== undefined &&
+            ((prev.k === 'id' && !NON_CALL_KEYWORDS.has(prev.v)) ||
+              (prev.k === 'p' && (prev.v === ')' || prev.v === ']' || prev.v === '?.')) ||
+              prev.k === 'str' ||
+              prev.k === 'tpl');
+          stack.push(index ? 'other' : 'group');
+          if (index) nested++;
+        } else if (tok.v === '{') {
           stack.push('other');
           nested++;
         } else if (tok.v === ')' || tok.v === ']' || tok.v === '}') {
@@ -472,6 +633,7 @@ class Scanner {
         }
         continue;
       }
+      if ((tok.k === 'str' || tok.k === 'tpl') && isOperand(tokens[j - 1], tokens[j + 1])) continue;
       if (tok.k === 'str') {
         if (level0) this.checkText(tok.v, html, sink, tok.line, sinkLine);
         else if (html && tok.v.includes('<')) this.checkText(tok.v, true, sink, tok.line, sinkLine);
@@ -509,7 +671,7 @@ class Scanner {
 export function scanSource(source: string): ScanViolation[] {
   const tokens = new Lexer(source).tokenize();
   const scanner = new Scanner(source.split('\n'));
-  scanner.scan(tokens);
+  scanner.scanFile(tokens);
   return scanner.found.sort((a, b) => a.line - b.line);
 }
 

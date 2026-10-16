@@ -12,8 +12,10 @@ import { activeWeapon, combatAct, combatThink, manageWeapon, steerAim, wantReloa
 import { freeCapacity, lootUtility, wellEquipped, worstPrimarySlot } from './loot';
 import { INTERIOR_NONE, INTERIOR_OK, INTERIOR_PENDING, buildingInterior } from './mapinfo';
 import {
-  checkStuck, clearDest, facingMove, followPath, isAvoided, moveYaw, setDest, setDirectDest,
+  aboveGround, checkStuck, clearDest, facingMove, followPath, isAvoided, moveYaw, setDest, setDirectDest,
 } from './movement';
+import type { FloorLoc } from './floors';
+import { PATH_QUEUED, PATH_RUNNING } from './pathfind';
 import { findContact, perceive, selectTarget } from './perception';
 import type { BotGoal, BotState } from './state';
 import type { BotSystem } from './system';
@@ -26,10 +28,16 @@ const LOOT_RADIUS = 30;
 const LOOT_RADIUS_UNARMED = 55;
 const EXPLORE_RADIUS = 220;
 const REVIVE_SEARCH = 120;
+/** Revive action distance (3D, inside the sim's REVIVE_RANGE + slack) and where the bot stops. */
+const REVIVE_START_DIST = REVIVE_RANGE - 0.1;
+const REVIVE_STOP_DIST = 1.3;
 /** Items more than this above the terrain lie on an upper floor. */
 const UPPER_FLOOR = 2.4;
 /** A bot this far above the nav floor under it is on a roof / upper floor. */
 const ELEVATED = 2.2;
+/** Loot within this height of the feet can be picked up from where the bot stands. */
+const PICKUP_DY = 2.4;
+const floorLoc: FloorLoc = { building: -1, level: -1, cell: -1 };
 /** Goal stickiness (score bonus for the current goal). */
 const HYSTERESIS = 8;
 
@@ -72,8 +80,9 @@ export function brainThink(sys: BotSystem, b: BotState, p: PlayerState): void {
   bestGoal = 'idle';
   bestScore = 5 + (b.goal === 'idle' ? HYSTERESIS : 0);
 
-  // Stranded on a roof / upper floor (chute drift): get down first.
-  if (isElevated(sys, p)) offer('descend', 97);
+  // Stranded on a roof / ledge without stairs (chute drift): get down first. Positions with a
+  // stairwell are handled by the normal goals (their routes go through the stairs).
+  if (isStranded(sys, p)) offer('descend', 97);
 
   // Combat.
   if (target) {
@@ -98,7 +107,11 @@ export function brainThink(sys: BotSystem, b: BotState, p: PlayerState): void {
 
   // Revive a downed teammate.
   revivePick = findDownedTeammate(sys, p);
-  if (revivePick) offer('revive', sinceContact > 2.5 ? 88 : visible ? 0 : 46);
+  if (revivePick) {
+    // A downed human squad leader comes first; otherwise wait until the fight has paused.
+    const human = !revivePick.isBot;
+    offer('revive', p.revive ? 95 : sinceContact > 2.5 ? (human ? 92 : 88) : visible ? 0 : human ? 75 : 60);
+  }
 
   // Heal / boost.
   const heal = chooseHeal(sys, p);
@@ -129,7 +142,7 @@ export function brainThink(sys: BotSystem, b: BotState, p: PlayerState): void {
   followPick = sys.humanLeader(p);
   followHuman = followPick !== null;
   if (!followPick) followPick = botSquadLeader(sys, p);
-  if (followPick) {
+  if (followPick && followPick.life === 'alive') {
     const d = hyp(followPick.pos.x - p.pos.x, followPick.pos.z - p.pos.z);
     followScore = followHuman ? (d > 30 ? 66 : d > 16 ? 28 : 0) : d > 70 ? 36 : 0;
     offer('follow', followScore);
@@ -227,9 +240,32 @@ function setGoal(sys: BotSystem, b: BotState, g: BotGoal): void {
   clearDest(sys, b);
 }
 
-/** Standing well above the ground-level nav floor (roof, upper floor, container top). */
-function isElevated(sys: BotSystem, p: PlayerState): boolean {
-  return p.mode === 'ground' && p.pos.y - sys.grid.baseOr(p.pos.x, p.pos.z) > ELEVATED;
+/**
+ * Standing well above the ground-level nav floor (roof, upper floor, container top) somewhere the
+ * stairs navigation does not cover.
+ */
+function isStranded(sys: BotSystem, p: PlayerState): boolean {
+  if (p.mode !== 'ground' || p.pos.y - sys.grid.baseOr(p.pos.x, p.pos.z) <= ELEVATED) return false;
+  if (sys.floors.onStairs(p.pos.x, p.pos.y, p.pos.z)) return false;
+  const nav = sys.floors.locate(p.pos.x, p.pos.y, p.pos.z, floorLoc, false);
+  if (nav === undefined) return false; // building nav pending this tick: decide on a later think
+  return !nav || !nav.reachable(floorLoc);
+}
+
+/** Upper-floor position reachable from the ground through stairs (budgeted nav construction). */
+function floorReachable(sys: BotSystem, x: number, y: number, z: number): boolean {
+  const nav = sys.floors.locate(x, y, z, floorLoc, false);
+  return !!nav && nav.reachable(floorLoc);
+}
+
+/** Destination height for an item: its own when upstairs, ground level otherwise. */
+function lootY(sys: BotSystem, x: number, y: number, z: number): number {
+  return aboveGround(sys, x, y, z) ? y : NaN;
+}
+
+/** The current route has been walked to its end (or there is none). */
+function pathEnded(b: BotState): boolean {
+  return b.path.status !== PATH_QUEUED && b.path.status !== PATH_RUNNING && b.pathIdx >= b.path.count - 1;
 }
 
 /** Walk off the roof over the nearest footprint edge (the drop is survivable from one storey). */
@@ -284,8 +320,9 @@ function findDownedTeammate(sys: BotSystem, p: PlayerState): PlayerState | null 
     const q = mates[i];
     if (q.id === p.id || q.life !== 'downed') continue;
     if (q.revivedBy !== null && q.revivedBy !== p.id) continue;
-    // Ground-floor navigation: teammates on roofs / upper floors cannot be reached.
-    if (Math.abs(q.pos.y - p.pos.y) > 2.2 && q.pos.y - sys.world.heightAt(q.pos.x, q.pos.z) > UPPER_FLOOR) continue;
+    // Teammates up on floors / roofs without stairs cannot be reached.
+    if (Math.abs(q.pos.y - p.pos.y) > 2.2 && q.pos.y - sys.world.heightAt(q.pos.x, q.pos.z) > UPPER_FLOOR &&
+        !floorReachable(sys, q.pos.x, q.pos.y, q.pos.z)) continue;
     const d = hyp(q.pos.x - p.pos.x, q.pos.z - p.pos.z);
     if (d > REVIVE_SEARCH) continue;
     const s = d - (q.isBot ? 0 : 40);
@@ -331,7 +368,7 @@ function scanLoot(sys: BotSystem, b: BotState, p: PlayerState): void {
   const items = sys.sim.lootNear(p.pos.x, p.pos.z, unarmed ? LOOT_RADIUS_UNARMED : LOOT_RADIUS, sys.lootBuf);
   const free = freeCapacity(p);
   const world = sys.world;
-  const elevated = isElevated(sys, p);
+  const stranded = isStranded(sys, p);
   if (b.blacklist.size > 48) {
     for (const [id, until] of b.blacklist) if (until <= t) b.blacklist.delete(id);
   }
@@ -345,10 +382,17 @@ function scanLoot(sys: BotSystem, b: BotState, p: PlayerState): void {
     let s = u / (1 + d / 14);
     if (it.id === b.lootId) s *= 1.25;
     if (s <= lootPickScore) continue;
-    // Upper floors are skipped unless the bot is already up there (ground-floor navigation),
-    // and a bot stranded up high only takes what is on its own level.
+    // Other floors: reachable through stairs (budgeted building-nav construction), and a bot
+    // stranded up high only takes what is on its own level.
     const dy = it.pos.y - p.pos.y;
-    if (Math.abs(dy) > 1.6 && (elevated || it.pos.y - world.heightAt(it.pos.x, it.pos.z) > UPPER_FLOOR)) continue;
+    if (Math.abs(dy) > 1.6) {
+      if (stranded) continue;
+      if (it.pos.y - world.heightAt(it.pos.x, it.pos.z) > UPPER_FLOOR && !floorReachable(sys, it.pos.x, it.pos.y, it.pos.z)) continue;
+      // Stairs detour.
+      s = u / (1 + (d + Math.abs(dy) * 2.5) / 14);
+      if (it.id === b.lootId) s *= 1.25;
+      if (s <= lootPickScore) continue;
+    }
     if (isAvoided(sys, b, it.pos.x, it.pos.z)) continue;
     lootPick = it.id;
     lootPickScore = s;
@@ -375,14 +419,15 @@ function lootThink(sys: BotSystem, b: BotState, p: PlayerState): void {
     return;
   }
   const d = hyp(it.pos.x - p.pos.x, it.pos.z - p.pos.z);
-  if (d < 1.9 && Math.abs(it.pos.y - p.pos.y) >= 2) {
-    // Right above / below us on another level: not reachable from here.
+  const dy = it.pos.y - p.pos.y;
+  if (d < 1.9 && Math.abs(dy) >= PICKUP_DY && pathEnded(b)) {
+    // Above / below us on another level and the route ends here: not reachable.
     b.blacklist.set(it.id, t + 60);
     b.lootId = -1;
     clearDest(sys, b);
     return;
   }
-  if (d < 1.9) {
+  if (d < 1.9 && Math.abs(dy) < PICKUP_DY) {
     // Replacing a primary: switch to the weapon we are willing to drop first.
     if (isWeaponId(it.item) && WEAPONS[it.item].slot === 'primary') {
       const worst = worstPrimarySlot(p);
@@ -400,9 +445,9 @@ function lootThink(sys: BotSystem, b: BotState, p: PlayerState): void {
         b.lootId = -1;
       }
     }
-    setDest(sys, b, p, it.pos.x, it.pos.z, 1.0, false);
+    setDest(sys, b, p, it.pos.x, it.pos.z, 1.0, false, lootY(sys, it.pos.x, it.pos.y, it.pos.z));
   } else {
-    setDest(sys, b, p, it.pos.x, it.pos.z, 1.0, d > 8);
+    setDest(sys, b, p, it.pos.x, it.pos.z, 1.0, d > 8, lootY(sys, it.pos.x, it.pos.y, it.pos.z));
   }
 }
 
@@ -493,16 +538,23 @@ function reviveThink(sys: BotSystem, b: BotState, p: PlayerState): void {
   const q = revivePick;
   if (!q) return;
   b.reviveId = q.id;
-  const d = hyp(q.pos.x - p.pos.x, q.pos.z - p.pos.z);
-  if (d <= REVIVE_RANGE - 0.5) {
+  if (p.revive) {
+    // Reviving: stand still (INTERACT is held in brainAct) until it completes.
     clearDest(sys, b);
-    if (!p.revive && sys.now - b.reviveActionAt > 0.8) {
-      b.actions.push({ a: 'revive', id: q.id });
-      b.reviveActionAt = sys.now;
-    }
-  } else {
-    setDest(sys, b, p, q.pos.x, q.pos.z, REVIVE_RANGE - 0.8, true);
+    return;
   }
+  // Same 3D distance as the sim's check; the action is sent anywhere inside the range and the bot
+  // keeps closing in until the revive has started.
+  if (dist3(p, q) <= REVIVE_START_DIST && sys.now - b.reviveActionAt > 0.4) {
+    b.actions.push({ a: 'revive', id: q.id });
+    b.reviveActionAt = sys.now;
+  }
+  setDest(sys, b, p, q.pos.x, q.pos.z, REVIVE_STOP_DIST, true, lootY(sys, q.pos.x, q.pos.y, q.pos.z));
+}
+
+function dist3(a: PlayerState, b: PlayerState): number {
+  const dx = a.pos.x - b.pos.x, dy = a.pos.y - b.pos.y, dz = a.pos.z - b.pos.z;
+  return Math.sqrt(dx * dx + dy * dy + dz * dz);
 }
 
 function followThink(sys: BotSystem, b: BotState, p: PlayerState): void {
@@ -521,7 +573,9 @@ function followThink(sys: BotSystem, b: BotState, p: PlayerState): void {
   }
   const a = (p.id % 7) * 0.9;
   const r = followHuman ? 7 : 12;
-  setDest(sys, b, p, q.pos.x + Math.cos(a) * r, q.pos.z + Math.sin(a) * r, 4, true);
+  // Indoors upstairs: come close (same floor); outdoors keep a loose formation.
+  if (aboveGround(sys, q.pos.x, q.pos.y, q.pos.z)) setDest(sys, b, p, q.pos.x, q.pos.z, 3, true, q.pos.y);
+  else setDest(sys, b, p, q.pos.x + Math.cos(a) * r, q.pos.z + Math.sin(a) * r, 4, true);
 }
 
 function idleThink(sys: BotSystem, b: BotState, p: PlayerState): void {
@@ -577,15 +631,12 @@ export function brainAct(sys: BotSystem, b: BotState, p: PlayerState, out: ActOu
   const goal = b.goal;
   if (goal === 'revive') {
     const q = sys.sim.players.get(b.reviveId);
-    if (q && q.life === 'downed') {
-      const d = hyp(q.pos.x - p.pos.x, q.pos.z - p.pos.z);
-      if (d <= REVIVE_RANGE - 0.2) {
-        b.moveScale = 0;
-        buttons |= BTN.INTERACT;
-        steerAim(sys, b, Math.atan2(-(q.pos.x - p.pos.x), -(q.pos.z - p.pos.z)), -0.4, 0.6);
-      } else {
-        lookAround(sys, b, p);
-      }
+    if (q && q.life === 'downed' && (p.revive || dist3(p, q) <= REVIVE_START_DIST)) {
+      // In range: stand still holding INTERACT (the revive starts with the action sent on think,
+      // and the sim cancels it if the reviver moves or lets go).
+      b.moveScale = 0;
+      buttons |= BTN.INTERACT;
+      steerAim(sys, b, Math.atan2(-(q.pos.x - p.pos.x), -(q.pos.z - p.pos.z)), -0.4, 0.6);
     } else {
       lookAround(sys, b, p);
     }
@@ -655,7 +706,7 @@ export function downedThink(sys: BotSystem, b: BotState, p: PlayerState): void {
     }
   }
   if (best) {
-    setDest(sys, b, p, best.pos.x, best.pos.z, 1.2, false);
+    setDest(sys, b, p, best.pos.x, best.pos.z, 1.2, false, best.pos.y);
     return;
   }
   const c = findContact(b, b.targetId);

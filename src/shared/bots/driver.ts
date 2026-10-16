@@ -17,8 +17,8 @@ import { moveAxes } from './movement';
 import { findContact, perceive, refreshTarget, selectTarget } from './perception';
 import { createBotState, type BotGoal, type BotState } from './state';
 import {
-  BotSystem, LOS_BUDGET_PER_TICK, LOS_REFRESH_RESERVE, MAX_LOS_PER_THINK, NAV_BUDGET_PER_TICK, THINK_EVERY,
-  TILE_GEN_PER_TICK,
+  BotSystem, FLOOR_BUILD_PER_TICK, LOS_BUDGET_PER_TICK, LOS_REFRESH_RESERVE, MAX_LOS_PER_THINK, NAV_BUDGET_PER_TICK,
+  THINK_EVERY, TILE_GEN_PER_TICK,
 } from './system';
 import { vehicleTick } from './vehicle';
 import { hyp } from './util';
@@ -74,6 +74,7 @@ class Driver implements BotDriverEx {
     sys.now = sim.time;
     sys.losLeft = LOS_BUDGET_PER_TICK;
     sys.grid.genBudget = TILE_GEN_PER_TICK;
+    sys.floors.buildBudget = FLOOR_BUILD_PER_TICK;
     if (sim.phase === 'waiting' || sim.phase === 'ended') return;
     sys.rebuildTeams();
     sys.planner.step(NAV_BUDGET_PER_TICK);

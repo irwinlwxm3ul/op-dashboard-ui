@@ -83,6 +83,7 @@ let pluralRules: Intl.PluralRules | null = null;
 let numberFmt: Intl.NumberFormat | null = null;
 let minutesFmt: Intl.NumberFormat | null = null;
 let secondsFmt: Intl.NumberFormat | null = null;
+let listFmt: Intl.ListFormat | null = null;
 const customNumberFmts = new Map<string, Intl.NumberFormat>();
 
 function resetIntlCaches(): void {
@@ -90,6 +91,7 @@ function resetIntlCaches(): void {
   numberFmt = null;
   minutesFmt = null;
   secondsFmt = null;
+  listFmt = null;
   customNumberFmts.clear();
 }
 
@@ -226,6 +228,40 @@ function lookup(key: string): string {
   return dict[key] ?? EN[key] ?? key;
 }
 
+// ---------------------------------------------------------------------------
+// Bidirectional text
+// ---------------------------------------------------------------------------
+
+const FSI = '⁨'; // FIRST STRONG ISOLATE
+const PDI = '⁩'; // POP DIRECTIONAL ISOLATE
+const HAS_BIDI_CONTROL = /[‪-‮⁦-⁩]/;
+const BIDI_CONTROLS = /[‪-‮⁦-⁩]/g;
+
+/**
+ * Interpolation parameters that carry user-generated text (player and lobby names). Their string
+ * values are bidi-isolated by t(), so "[DZ] Bob!" inside an Arabic sentence (or an Arabic name
+ * inside an English one) keeps its own direction and does not reorder the text around it.
+ */
+export const USER_TEXT_PARAMS: ReadonlySet<string> = new Set([
+  'name', 'names', 'player', 'killer', 'victim', 'reviver', 'target', 'from', 'sender', 'host', 'lobby', 'winner', 'winners',
+]);
+
+/**
+ * Wraps `text` in a first-strong isolate (U+2068 … U+2069): it is laid out in its own direction
+ * and cannot reorder the sentence around it. Directional controls inside are removed so the text
+ * cannot escape the isolate. Use it when composing user text into the UI without t().
+ */
+export function bidiIsolate(text: string): string {
+  if (text === '') return text;
+  const clean = HAS_BIDI_CONTROL.test(text) ? text.replace(BIDI_CONTROLS, '') : text;
+  return FSI + clean + PDI;
+}
+
+/** True when the value was already isolated (bidiIsolate / fmtList output). */
+function isIsolated(text: string): boolean {
+  return text.length >= 2 && text.charCodeAt(0) === 0x2068 && text.charCodeAt(text.length - 1) === 0x2069;
+}
+
 const PLACEHOLDER = /\{(\w+)\}/g;
 
 function interpolate(text: string, params: TParams): string {
@@ -233,13 +269,15 @@ function interpolate(text: string, params: TParams): string {
   return text.replace(PLACEHOLDER, (match, name: string) => {
     if (!Object.hasOwn(params, name)) return match;
     const v = params[name];
-    return typeof v === 'number' ? fmtNumber(v) : v;
+    if (typeof v === 'number') return fmtNumber(v);
+    return USER_TEXT_PARAMS.has(name) && !isIsolated(v) ? bidiIsolate(v) : v;
   });
 }
 
 /**
  * Translates `key` into the current language.
- * * `{name}` placeholders are replaced from `params` (numbers formatted for the language).
+ * * `{name}` placeholders are replaced from `params` (numbers formatted for the language; user
+ *   text in USER_TEXT_PARAMS is bidi-isolated).
  * * When `params.count` is a number, the plural variant `key_<category>` is chosen with
  *   Intl.PluralRules (falling back to `key_other`, then `key`).
  */
@@ -289,6 +327,16 @@ export function fmtNumber(n: number, opts?: Intl.NumberFormatOptions): string {
     customNumberFmts.set(cacheKey, fmt);
   }
   return fmt.format(n);
+}
+
+/**
+ * Joins items into a localized list ("A, B and C", "A、B和C", "A وB وC"). Items are bidi-isolated
+ * by default (they are usually player names), so mixed-script names keep their order in RTL.
+ * The result can be passed straight to a {names} parameter.
+ */
+export function fmtList(items: readonly string[], isolate = true): string {
+  listFmt ??= new Intl.ListFormat(INTL_LOCALE[current], { style: 'long', type: 'conjunction' });
+  return listFmt.format(isolate ? items.map(bidiIsolate) : items);
 }
 
 /**

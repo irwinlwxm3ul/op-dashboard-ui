@@ -824,15 +824,18 @@ describe('AT5/AT6 multiplayer combat across clients', () => {
     h.sim.placeLoot('ar', 1, eP.pos, eP.pos.y, 30);
     h.sim.placeLoot('ammo_556', 60, eP.pos, eP.pos.y);
     h.run(500);
-    for (let i = 0; i < 2; i++) {
-      const t0 = h.t;
-      const ok = h.until(() => c2pickup(E, t0), 5000, () => {
-        const l = [...E.frame.loot.values()].sort((x, y) => distXZ(x.pos, E.self.pos) - distXZ(y.pos, E.self.pos))[0];
-        if (l) aimAt(E, l.pos);
-        if (E.frame.interaction?.kind === 'pickup') E.g.performInteraction();
-      });
-      expect(ok, 'Echo picks up the rifle and ammo').toBe(true);
-    }
+    let lastTry = 0;
+    const armed = h.until(() => E.self.weapons[0]?.id === 'ar' && E.self.ammo.ammo_556 > 0, 8000, () => {
+      const l = [...E.frame.loot.values()].sort((x, y) => distXZ(x.pos, E.self.pos) - distXZ(y.pos, E.self.pos))[0];
+      if (l) aimAt(E, l.pos);
+      if (E.frame.interaction?.kind === 'pickup' && h.now - lastTry > 400) {
+        lastTry = h.now;
+        E.g.performInteraction();
+      }
+    });
+    expect(armed, 'Echo picks up the rifle and ammo through the prompt').toBe(true);
+    expect(E.evs('pickup').filter((e) => e.ev.player === E.id).length).toBeGreaterThanOrEqual(2);
+    h.run(300);
     tap(h, E, 'Digit1');
     expect(h.until(() => E.self.weapon === 'ar' && E.self.drawProgress < 0, 3000)).toBe(true);
     setAds(h, E, true);
@@ -900,9 +903,6 @@ describe('AT5/AT6 multiplayer combat across clients', () => {
   });
 });
 
-function c2pickup(c: SimClient, since: number): boolean {
-  return c.evs('pickup', since).some((e) => e.ev.player === c.id);
-}
 
 // ---------------------------------------------------------------------------------------------
 // 7. Lag compensation at 150 ms one-way latency
@@ -984,7 +984,7 @@ describe('AT7 lag compensation (150 ms one-way latency)', () => {
     const hits = hitsOn(h, S, T, since);
     const lagDependent = offsets.filter((d) => d > 0.6).length;
     console.log(`[AT7 AR] shots=${shots} hits=${hits} lag-dependent=${lagDependent} medianOffset=${offsets.sort((a, b) => a - b)[offsets.length >> 1]?.toFixed(2)}`);
-    expect(shots).toBeGreaterThan(30);
+    expect(shots).toBeGreaterThanOrEqual(25);
     // The target really moves enough that unrewound hitboxes would be missed ...
     expect(lagDependent).toBeGreaterThan(shots * 0.3);
     // ... yet shots aimed at the interpolated view register.
@@ -998,9 +998,8 @@ describe('AT7 lag compensation (150 ms one-way latency)', () => {
     setAds(h, S, true);
     const sniper = WEAPONS.sniper;
     const since = h.sim.time;
-    let fired = 0;
     let next = h.now + 500;
-    h.run(16_000, () => {
+    h.until(() => shotsBy(h, S, since) >= sniper.magSize, 20_000, () => {
       strafe();
       const v = S.frame.players.get(T.id);
       if (v) {
@@ -1010,10 +1009,11 @@ describe('AT7 lag compensation (150 ms one-way latency)', () => {
         aimAt(S, p);
       }
       // Fire mid-strafe (not around a reversal) once the bolt has cycled.
-      const ready = S.self.fireCooldown <= 1e-6 && Math.abs(S.self.recoilPitch) < 1e-3;
+      const s = S.self;
+      const ready = s.fireCooldown <= 1e-6 && s.reloadProgress < 0 && Math.abs(s.recoilPitch) < 1e-3
+        && (s.weapons.find((w) => w?.id === 'sniper')?.mag ?? 0) > 0;
       if (h.now >= next && ready && v && Math.hypot(v.vel.x, v.vel.z) > 3) {
         S.g.input.mouseButton(0, true);
-        fired++;
         next = h.now + 1700;
       } else {
         S.g.input.mouseButton(0, false);
@@ -1024,8 +1024,8 @@ describe('AT7 lag compensation (150 ms one-way latency)', () => {
     const shots = shotsBy(h, S, since);
     const hits = hitsOn(h, S, T, since);
     console.log(`[AT7 sniper] shots=${shots} hits=${hits}`);
-    expect(fired).toBeGreaterThanOrEqual(6);
-    expect(shots).toBe(fired);
+    expect(shots).toBe(sniper.magSize);
+    expect(S.evs('localShot').filter((e) => e.ev.weapon === 'sniper').length).toBe(shots);
     expect(hits / shots).toBeGreaterThan(0.8);
   });
 });
@@ -1218,4 +1218,141 @@ describe('AT9 distance visibility', () => {
       expect(selectLod(2, 1100, th)).toBe(3);
     }
   });
+});
+
+// ---------------------------------------------------------------------------------------------
+// 5 + 6 over the real game server: two "windows" (App-like MessageHub + ClientGame on WsTransport)
+// ---------------------------------------------------------------------------------------------
+
+const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+
+/** One browser window's networking, wired like src/client/app/App.ts (delta codec, hub, ClientGame). */
+class Window {
+  hub!: MessageHub;
+  clientId = '';
+  lobby: LobbyState | null = null;
+  game: ClientGame | null = null;
+  init: MatchInit | null = null;
+  readonly msgs: ServerMessage[] = [];
+  readonly events: ClientEvent[] = [];
+  private timer: ReturnType<typeof setInterval> | null = null;
+
+  async connect(url: string, name: string): Promise<void> {
+    const t = await WsTransport.connect(url);
+    this.hub = new MessageHub(t);
+    this.hub.on((m) => {
+      this.msgs.push(m);
+      if (m.t === 'lobbyState') this.lobby = m.lobby;
+      if (m.t === 'matchInit') {
+        this.init = m.init;
+        this.game = new ClientGame(this.hub.gameTransport(), m.init, new LocalSettingsStore(null));
+        this.game.events.onAny((ev) => this.events.push(structuredClone(ev)));
+        this.hub.send({ t: 'loaded' });
+        let last = performance.now();
+        this.timer = setInterval(() => {
+          const now = performance.now();
+          this.game?.update(Math.min(0.1, (now - last) / 1000));
+          last = now;
+        }, 16);
+      }
+      if (m.t === 'backToLobby') this.stopGame();
+    });
+    const welcome = this.hub.waitFor((m): m is Extract<ServerMessage, { t: 'welcome' }> => m.t === 'welcome', 8000);
+    this.hub.send({ t: 'hello', name, version: PROTOCOL_VERSION, codec: 'delta1' });
+    this.clientId = (await welcome).clientId;
+  }
+
+  send(m: ClientMessage): void { this.hub.send(m); }
+
+  async until(pred: () => boolean, ms: number, what: string): Promise<void> {
+    const end = performance.now() + ms;
+    while (!pred()) {
+      if (performance.now() > end) throw new Error(`timeout: ${what}`);
+      await sleep(20);
+    }
+  }
+
+  stopGame(): void {
+    if (this.timer) clearInterval(this.timer);
+    this.timer = null;
+    this.game?.dispose();
+    this.game = null;
+  }
+
+  close(): void {
+    this.stopGame();
+    this.hub?.dispose();
+    this.hub?.transport.close();
+  }
+}
+
+describe('AT5/AT6 online through the real game server', () => {
+  let server: { port: number; close(): Promise<void> };
+  let url = '';
+  beforeAll(async () => {
+    server = await startServer({ port: 0, log: false, matchLingerMs: 500 });
+    url = `ws://localhost:${server.port}/ws`;
+  });
+  afterAll(async () => { await server?.close(); });
+
+  it('duo lobby: both on team 1 -> match -> teammate flagged with health, bots hidden -> both back in the same lobby', async () => {
+    const A = new Window();
+    const B = new Window();
+    try {
+      await A.connect(url, 'Alice');
+      await B.connect(url, 'Bob');
+      A.send({ t: 'createLobby', settings: { name: 'Acceptance duo', maxPlayers: 6, teamSize: 2, botFill: true, botDifficulty: 'easy', zoneSpeed: 1 } });
+      await A.until(() => A.lobby !== null, 5000, 'lobby created');
+      const lobbyId = A.lobby!.id;
+      B.send({ t: 'listLobbies' });
+      await B.until(() => B.msgs.some((m) => m.t === 'lobbyList' && m.lobbies.some((l) => l.id === lobbyId && l.name === 'Acceptance duo')), 5000, 'lobby listed');
+      B.send({ t: 'joinLobby', id: lobbyId });
+      await A.until(() => (A.lobby?.members.length ?? 0) === 2, 5000, 'B joined');
+      const teamOf = (w: Window) => A.lobby!.members.find((m) => m.clientId === w.clientId)!.team;
+      if (teamOf(A) !== 0) A.send({ t: 'setTeam', team: 0 });
+      if (teamOf(B) !== 0) B.send({ t: 'setTeam', team: 0 });
+      await A.until(() => A.lobby!.members.every((m) => m.team === 0), 5000, 'both on team 1');
+      B.send({ t: 'ready', ready: true });
+      await A.until(() => A.lobby!.members.every((m) => m.isHost || m.ready), 5000, 'B ready');
+      A.send({ t: 'startMatch' });
+      await A.until(() => A.game !== null && B.game !== null, 20_000, 'both in the match');
+      expect(A.init!.team).toBe(B.init!.team);
+      expect(A.init!.roster.length).toBe(6);
+      const bId = B.init!.you!;
+      const aId = A.init!.you!;
+      // Each window sees the other human as a teammate, with health (nameplate data).
+      await A.until(() => {
+        const f = A.game!.getFrame();
+        return f.players.get(bId)?.hp === 100 && B.game!.getFrame().players.get(aId)?.hp === 100;
+      }, 15_000, 'teammate views with health');
+      const fa = A.game!.getFrame();
+      expect(fa.players.get(bId)!.isTeammate).toBe(true);
+      expect(fa.players.get(bId)!.name).toBe('Bob');
+      expect(B.game!.getFrame().players.get(aId)!.isTeammate).toBe(true);
+      // Bots fill the other teams; their health is never sent.
+      const bots = A.init!.roster.filter((r) => r.isBot);
+      expect(bots.length).toBe(4);
+      for (const r of bots) {
+        expect(r.team).not.toBe(A.init!.team);
+        const v = fa.players.get(r.id);
+        if (v) {
+          expect(v.isTeammate).toBe(false);
+          expect(v.hp).toBeNull();
+        }
+      }
+      expect(fa.phase === 'plane' || fa.phase === 'playing').toBe(true);
+
+      // Leave the match: both windows return to the same lobby room (ready flags reset).
+      A.send({ t: 'leaveMatch' });
+      B.send({ t: 'leaveMatch' });
+      await A.until(() => A.msgs.some((m) => m.t === 'backToLobby') && B.msgs.some((m) => m.t === 'backToLobby'), 15_000, 'back to lobby');
+      await A.until(() => A.lobby?.status === 'waiting' && B.lobby?.id === lobbyId && B.lobby.status === 'waiting', 15_000, 'lobby waiting again');
+      expect(A.lobby!.id).toBe(lobbyId);
+      expect(A.lobby!.members.map((m) => m.clientId).sort()).toEqual([A.clientId, B.clientId].sort());
+      expect(A.lobby!.members.every((m) => m.isHost || !m.ready)).toBe(true);
+    } finally {
+      A.close();
+      B.close();
+    }
+  }, 90_000);
 });

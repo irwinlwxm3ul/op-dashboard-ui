@@ -588,6 +588,7 @@ export const de: LocaleDict = {
   'error.lobby.notReady': 'Noch sind nicht alle bereit.',
   'error.lobby.badSettings': 'Diese Lobby-Einstellungen sind ungültig.',
   'error.lobby.nameInvalid': 'Dieser Name ist nicht erlaubt. Bitte wähle einen anderen.',
+  'error.lobby.serverLimit': 'Der Server ist ausgelastet – zu viele Lobbys oder Matches. Versuche es gleich noch einmal.',
   'error.net.rateLimited': 'Zu viele Anfragen. Bitte etwas langsamer.',
   'error.net.badMessage': 'Der Server hat eine ungültige Nachricht abgelehnt.',
   'error.net.versionMismatch': 'Deine Spielversion passt nicht zum Server. Lade die Seite neu, um zu aktualisieren.',

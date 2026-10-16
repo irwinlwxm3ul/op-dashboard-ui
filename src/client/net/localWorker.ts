@@ -14,10 +14,12 @@ const host = new LocalMatchHost({
 
 scope.onmessage = (ev: MessageEvent) => {
   try {
+    // In-match message errors are caught and logged inside the host (the worker stays alive).
     host.receive(ev.data);
   } catch (err) {
-    // Failing to start a match is fatal for this worker: the main thread sees the error event.
-    console.error('[local] message handling failed', err);
+    // Only a failure to start the match gets here. It is fatal for this offline session: rethrow
+    // so the main thread receives the worker 'error' event and the transport reports the close.
+    console.error('[local] failed to start the offline match', err);
     host.stop();
     throw err;
   }

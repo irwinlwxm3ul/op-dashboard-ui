@@ -4,7 +4,7 @@
 // resting on y = 0 and centred on x/z so items spin in place.
 
 import * as THREE from 'three';
-import type { AmmoId, ItemCategory, ItemId } from '../../../shared/types';
+import type { AmmoId, ConsumableId, GearId, ItemCategory, ItemId, ThrowableId } from '../../../shared/types';
 import { GeoBuilder, xform } from './geometry';
 import { buildHelmet, buildPack, buildVest } from './soldierModel';
 import { buildWeapon } from './weaponModels';
@@ -16,6 +16,36 @@ const AMMO_COLOR: Record<AmmoId, number> = {
   ammo_12g: 0xa82424,
   ammo_300: 0x4b3c8f,
 };
+
+/** Non-weapon item ids that can have a real model. */
+export type ItemAssetId = AmmoId | ConsumableId | ThrowableId | GearId;
+
+export interface ItemAsset {
+  /** Vertex-coloured geometry standing on y = 0, centred on x / z, front -Z, real size. */
+  geometry: THREE.BufferGeometry;
+  /** Material colour (sRGB hex) multiplied onto the vertex colours. */
+  tint: number;
+}
+
+/**
+ * Real item models (curated glTF) registered once loaded; while an item has none the procedural
+ * shape is used. Also read by the character gear builder (worn helmets / vests / backpacks).
+ */
+const itemAssets = new Map<ItemAssetId, ItemAsset>();
+
+export function setItemAsset(id: ItemAssetId, geometry: THREE.BufferGeometry, tint: number): void {
+  itemAssets.set(id, { geometry, tint });
+}
+
+export function itemAsset(id: ItemAssetId): ItemAsset | null {
+  return itemAssets.get(id) ?? null;
+}
+
+/** Add a registered item model to `b` (vertex colours preserved). */
+export function addItemAsset(asset: ItemAsset, b: GeoBuilder, base: THREE.Matrix4, bone = 0): void {
+  const vc = asset.geometry.getAttribute('color') !== undefined;
+  b.add(asset.geometry, base, { color: asset.tint, bone, vertexColors: vc, smooth: true });
+}
 
 /** Neutral colours used to bake the gear masks (no team colour on the ground). */
 const BAKE = { accent: 0x8a8a7a, skin: 0xc99a74, cloth: 0x6b7347 };
@@ -98,7 +128,9 @@ function buildItem(id: ItemId, b: GeoBuilder): void {
 /** Build the geometry for an item: resting on y=0, centred on x/z. */
 export function buildLootGeometry(id: ItemId): THREE.BufferGeometry {
   const b = new GeoBuilder();
-  buildItem(id, b);
+  const asset = itemAssets.get(id as ItemAssetId);
+  if (asset) addItemAsset(asset, b, new THREE.Matrix4());
+  else buildItem(id, b);
   const g = b.build({ bake: BAKE });
   g.computeBoundingBox();
   const bb = g.boundingBox!;

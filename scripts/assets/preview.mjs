@@ -49,7 +49,7 @@ function frame(stage, objs, labels, { y = 0.9, dist = 0.95, rotY = 0 } = {}) {
   stage.sun.target.position.set(cx, 0, 0); stage.scene.add(stage.sun.target); stage.sun.position.set(cx + 4, 10, 8);
   const sh = stage.sun.shadow.camera; sh.left = sh.bottom = -x; sh.right = sh.top = x; sh.updateProjectionMatrix();
   stage.renderer.render(stage.scene, stage.camera);
-  addLabels(labels, proj.map((p) => p.project(stage.camera)), W, H);
+  addLabels(labels, proj.map((p) => p.clone().project(stage.camera)), W, H);
 }
 
 function pose(variantId, baseKey, overlayKey, t, weaponId) {
@@ -78,7 +78,7 @@ function pose(variantId, baseKey, overlayKey, t, weaponId) {
 {
   const stage = makeStage({ width: W, height: H });
   const objs = D.variants.map((v) => pose(v.id, 'idle', null, 0.4));
-  frame(stage, objs, D.variants.map((v) => v.id), { rotY: 0.35 });
+  frame(stage, objs, D.variants.map((v) => v.id), { rotY: Math.PI + 0.35 });
   await window.__shot(OUT + '/characters.png');
   stage.renderer.domElement.remove();
 }
@@ -101,12 +101,12 @@ if (Object.keys(weapons).length) {
     g.rotation.y = -Math.PI / 2; // barrel to +X (screen right)
     g.position.set(0, y, 0); stage.scene.add(g);
     const dot = new THREE.Mesh(new THREE.SphereGeometry(0.008), new THREE.MeshBasicMaterial({ color: 0xff0000 })); dot.position.set(0, y, 0.05); stage.scene.add(dot);
-    proj.push(new THREE.Vector3(-0.45, y - 0.08, 0)); y -= 0.3;
+    proj.push(new THREE.Vector3(-0.45, y, 0)); y -= 0.3;
   }
   stage.camera.position.set(0.1, y / 2 + 0.15, 3.1); stage.camera.lookAt(0.1, y / 2 + 0.15, 0);
   stage.renderer.render(stage.scene, stage.camera);
-  addLabels(ids, proj.map((p) => p.project(stage.camera)), W, H);
-  document.querySelectorAll('.lbl').forEach((e, i) => { e.style.top = ((1 - proj[i].clone().project(stage.camera).y) / 2 * H) + 'px'; e.style.left = '120px'; e.style.transform = 'none'; });
+  addLabels(ids, proj.map((p) => p.clone().project(stage.camera)), W, H);
+  document.querySelectorAll('.lbl').forEach((e, i) => { e.style.top = ((1 - proj[i].clone().project(stage.camera).y) / 2 * H) + 'px'; e.style.left = '520px'; e.style.transform = 'none'; });
   await window.__shot(OUT + '/weapons.png');
   stage.renderer.domElement.remove();
 }
@@ -137,7 +137,7 @@ if (Object.keys(D.items).length) {
   stage.camera.position.set(cx, 2.6, 4.6); stage.camera.lookAt(cx, 0, 0.9);
   stage.sun.target.position.set(cx, 0, 1); stage.scene.add(stage.sun.target); stage.sun.position.set(cx + 3, 8, 6);
   stage.renderer.render(stage.scene, stage.camera);
-  addLabels(ids, proj.map((p) => p.project(stage.camera)), W, H);
+  addLabels(ids, proj.map((p) => p.clone().project(stage.camera)), W, H);
   document.querySelectorAll('.lbl').forEach((e, i) => { const p = proj[i].clone().project(stage.camera); e.style.top = ((1 - p.y) / 2 * H + 6) + 'px'; });
   await window.__shot(OUT + '/items.png');
   stage.renderer.domElement.remove();

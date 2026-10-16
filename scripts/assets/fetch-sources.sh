@@ -27,13 +27,12 @@ show() {
 }
 
 # 1. Quaternius Universal Animation Library 1 + 2 (CC0) - mirror tilakpatell/tilakverse-assets
-TV=8506439d6d3c4c5f9c6f1b0a9f0e2d1c3b4a5968
-TV_REF=$(git ls-remote https://github.com/tilakpatell/tilakverse-assets.git HEAD | cut -f1)
-repo_fetch tv tilakpatell/tilakverse-assets "$TV_REF"
-show tv "$TV_REF" quaternius/universal-animation-library/Unreal-Godot/UAL1.glb "$DL/ual/UAL1.glb"
-show tv "$TV_REF" quaternius/universal-animation-library-2/Unreal-Godot/UAL2.glb "$DL/ual/UAL2.glb"
-show tv "$TV_REF" quaternius/universal-animation-library/License.txt "$DL/ual/License1.txt"
-show tv "$TV_REF" quaternius/universal-animation-library-2/License.txt "$DL/ual/License2.txt"
+TV=85064399bbdacc0e8cc50807179490314bc4ff1c
+repo_fetch tilakverse tilakpatell/tilakverse-assets "$TV"
+show tilakverse "$TV" quaternius/universal-animation-library/Unreal-Godot/UAL1.glb "$DL/ual/UAL1.glb"
+show tilakverse "$TV" quaternius/universal-animation-library-2/Unreal-Godot/UAL2.glb "$DL/ual/UAL2.glb"
+show tilakverse "$TV" quaternius/universal-animation-library/License.txt "$DL/ual/License1.txt"
+show tilakverse "$TV" quaternius/universal-animation-library-2/License.txt "$DL/ual/License2.txt"
 
 # 2. Quaternius Ultimate Modular Men / Women (CC0) - mirror agentkaerf/FreeModels
 FM=db3df04d1e4714298a09510b26fb6de6645138a2

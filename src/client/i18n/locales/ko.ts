@@ -588,6 +588,7 @@ export const ko: LocaleDict = {
   'error.lobby.notReady': '아직 모두 준비되지 않았습니다.',
   'error.lobby.badSettings': '로비 설정이 올바르지 않습니다.',
   'error.lobby.nameInvalid': '사용할 수 없는 이름입니다. 다른 이름을 선택하세요.',
+  'error.lobby.serverLimit': '서버가 혼잡합니다. 로비나 매치가 너무 많습니다. 잠시 후 다시 시도하세요.',
   'error.net.rateLimited': '요청이 너무 많습니다. 잠시 후 다시 시도하세요.',
   'error.net.badMessage': '서버가 잘못된 메시지를 거부했습니다.',
   'error.net.versionMismatch': '게임 버전이 서버와 맞지 않습니다. 페이지를 새로 고쳐 업데이트하세요.',

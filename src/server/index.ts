@@ -1,7 +1,8 @@
 // DROPZONE game server entry point.
 //
 //   tsx src/server/index.ts   PORT (default 8787), LAG_MS, LAG_JITTER_MS, HOST, NODE_ENV,
-//                             MATCH_WORKERS=0 (run matches on the main thread instead of workers)
+//                             MATCH_WORKERS=0 (run matches on the main thread instead of workers),
+//                             TRUST_PROXY=N (client address from X-Forwarded-For behind N proxies)
 //
 // When imported (tests) nothing starts; use startServer().
 
@@ -26,6 +27,15 @@ function envInt(name: string, fallback: number, min: number, max: number): numbe
   return Math.max(min, Math.min(max, Math.round(n)));
 }
 
+/** TRUST_PROXY: unset/0/false = socket address; true = 1 proxy; N = N proxies. */
+function trustProxyHops(raw: string | undefined): number {
+  if (!raw || raw === '0' || raw.toLowerCase() === 'false') return 0;
+  if (raw.toLowerCase() === 'true') return 1;
+  const n = Number(raw);
+  if (!Number.isInteger(n) || n < 0) throw new Error(`TRUST_PROXY must be true/false or a hop count (got "${raw}")`);
+  return n;
+}
+
 function isMainModule(): boolean {
   const entry = process.argv[1];
   if (!entry) return false;
@@ -42,6 +52,7 @@ async function main(): Promise<void> {
     lagMs: envInt('LAG_MS', 0, 0, 5000),
     jitterMs: envInt('LAG_JITTER_MS', 0, 0, 5000),
     matchWorkers: process.env.MATCH_WORKERS !== '0',
+    trustProxy: trustProxyHops(process.env.TRUST_PROXY),
     log: true,
   });
 

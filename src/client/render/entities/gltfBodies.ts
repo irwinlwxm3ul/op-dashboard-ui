@@ -15,16 +15,17 @@
 
 import * as THREE from 'three';
 import {
-  CHARACTER_BONES, CHARACTER_CLIPS, CHARACTER_VARIANT_IDS, CHARACTER_VARIANTS, createCharacterInstance,
+  CHARACTER_BONES, CHARACTER_CLIPS, CHARACTER_VARIANT_IDS, CHARACTER_VARIANTS, GEAR_WEAR, createCharacterInstance,
   getCharacterClip, loadCharacter, type CharacterAnimKey, type CharacterAsset, type CharacterInstance,
   type CharacterVariantId,
 } from '../../assets';
 import { dirFromAngles } from '../../../shared/math';
 import { hash32 } from '../../../shared/rng';
-import type { Vec3, WeaponId } from '../../../shared/types';
+import type { GearId, Vec3, WeaponId } from '../../../shared/types';
 import type { LogicalAnimState } from './animState';
 import type { BodyFrame, NearBody, NearBodyProvider } from './bodies';
-import { GeoBuilder } from './geometry';
+import { GeoBuilder, M_ACCENT, xform } from './geometry';
+import { addItemAsset, itemAsset } from './lootModels';
 import { type EntityUniforms, applyEntityShader, createEntityUniforms } from './materials';
 import { P } from './pose';
 import { slungLongGunMatrix } from './rig';
@@ -41,13 +42,49 @@ const G_PACK1 = 6; // 6..8 pack level 1..3 (Chest)
 const G_WEAPON0 = 9; // 9..14 weapons in WEAPON_IDS order (weapon holder)
 const G_COUNT = G_WEAPON0 + WEAPON_IDS.length;
 
-/** Gear (all helmet / vest / pack levels) + ONE weapon (null = none); swapped when the weapon changes. */
-function buildGearGeometry(weapon: WeaponId | null): THREE.BufferGeometry {
+/** Gear ids of the 9 gear slots (G_HELMET1 .. G_PACK1 + 2). */
+const GEAR_SLOTS: readonly GearId[] = ['helmet1', 'helmet2', 'helmet3', 'vest1', 'vest2', 'vest3', 'pack1', 'pack2', 'pack3'];
+
+const ACCENT = { color: 0xffffff, mask: M_ACCENT };
+
+/**
+ * Team-colour marks on real gear models (they carry none): a band around helmets and a vertical
+ * stripe on the outer face of backpacks, sized from the model's bounds (item space: standing on
+ * y = 0, centred, front -Z; a worn pack's outer face is +Z).
+ */
+function addTeamMarks(g: THREE.BufferGeometry, slot: number, b: GeoBuilder): void {
+  if (!g.boundingBox) g.computeBoundingBox();
+  const bb = g.boundingBox!;
+  const sx = bb.max.x - bb.min.x, sy = bb.max.y - bb.min.y, sz = bb.max.z - bb.min.z;
+  const cx = (bb.min.x + bb.max.x) / 2, cz = (bb.min.z + bb.max.z) / 2;
+  if (slot < G_VEST1) {
+    const r = sx / 2 + 0.003;
+    b.ring(r, 0.012, 4, 20, xform(cx, bb.min.y + sy * 0.3, cz, 0, 0, 0, 1, 1, sz / sx), { ...ACCENT, bone: slot });
+  } else if (slot >= G_PACK1) {
+    b.box(Math.min(0.07, sx * 0.16), sy * 0.72, 0.012, xform(cx, bb.min.y + sy * 0.5, bb.max.z + 0.004), { ...ACCENT, bone: slot });
+  }
+}
+
+/**
+ * Gear (all helmet / vest / pack levels) + ONE weapon (null = none); swapped when the weapon
+ * changes. Gear slots with a real item model use it (worn via GEAR_WEAR, model at the proxy origin);
+ * the others use the procedural gear (fitted to the character in fitVariant).
+ */
+function buildGearGeometry(weapon: WeaponId | null, fromAsset: readonly boolean[]): THREE.BufferGeometry {
   const b = new GeoBuilder();
   const I = new THREE.Matrix4();
-  for (let l = 1; l <= 3; l++) buildHelmet(l, b, I, G_HELMET1 + l - 1);
-  for (let l = 1; l <= 3; l++) buildVest(l, b, I, G_VEST1 + l - 1);
-  for (let l = 1; l <= 3; l++) buildPack(l, b, I, G_PACK1 + l - 1);
+  for (let i = 0; i < GEAR_SLOTS.length; i++) {
+    const asset = fromAsset[i] ? itemAsset(GEAR_SLOTS[i]) : null;
+    if (asset) {
+      addItemAsset(asset, b, I, i);
+      addTeamMarks(asset.geometry, i, b);
+    } else {
+      const lvl = (i % 3) + 1;
+      if (i < G_VEST1) buildHelmet(lvl, b, I, i);
+      else if (i < G_PACK1) buildVest(lvl, b, I, i);
+      else buildPack(lvl, b, I, i);
+    }
+  }
   if (weapon) buildWeapon(weapon, b, I, G_WEAPON0 + WEAPON_IDS.indexOf(weapon));
   return b.build({ mask: true, skin: true });
 }
@@ -70,9 +107,9 @@ export interface VariantData {
   id: CharacterVariantId;
   asset: CharacterAsset;
   /** Gear proxy local matrices: helmet under Head, vest / pack under Chest. */
-  helmetLocal: THREE.Matrix4;
-  torsoLocal: THREE.Matrix4;
-  packLocal: THREE.Matrix4;
+  /** Per gear slot: bone the proxy hangs under and its local matrix. */
+  gearParent: string[];
+  gearLocal: THREE.Matrix4[];
   /** Slung long gun under Chest, per backpack level 0..3. */
   slungLocal: THREE.Matrix4[];
   /** Average outfit colours (linear) for tinting the procedural mid LOD. */
@@ -97,7 +134,7 @@ function findBodyMesh(root: THREE.Object3D, teamMesh: string): THREE.SkinnedMesh
   return body;
 }
 
-function fitVariant(id: CharacterVariantId, asset: CharacterAsset): VariantData | null {
+function fitVariant(id: CharacterVariantId, asset: CharacterAsset, fromAsset: readonly boolean[]): VariantData | null {
   const inst = createCharacterInstance(asset);
   try {
     inst.root.updateMatrixWorld(true);
@@ -161,17 +198,50 @@ function fitVariant(id: CharacterVariantId, asset: CharacterAsset): VariantData 
     const backZ = new THREE.Vector3(0, PROC_TORSO_CENTER.y, PROC_TORSO_CENTER.z + PROC_TORSO_HALF.z).applyMatrix4(torsoFit).z;
     const packFit = new THREE.Matrix4().makeTranslation(tc.x, tc.y - PROC_TORSO_CENTER.y, backZ - (PROC_TORSO_CENTER.z + PROC_TORSO_HALF.z));
     const packLocal = new THREE.Matrix4().copy(chestInv).multiply(packFit);
-    // Slung rifle: position through the torso fit, rigid orientation.
+    // Gear slots: real models are worn exactly as GEAR_WEAR says; procedural ones use the fit.
+    const gearParent: string[] = [];
+    const gearLocal: THREE.Matrix4[] = [];
+    const packBackZ: number[] = [backZ, backZ, backZ, backZ];
+    const wear = GEAR_WEAR[asset.rig.id];
+    for (let i = 0; i < GEAR_SLOTS.length; i++) {
+      const w = wear[GEAR_SLOTS[i]];
+      const item = fromAsset[i] ? itemAsset(GEAR_SLOTS[i]) : null;
+      const bone = item && w ? inst.root.getObjectByName(w.bone) : null;
+      if (item && w && bone) {
+        gearParent.push(w.bone);
+        const local = new THREE.Matrix4().compose(
+          new THREE.Vector3().fromArray(w.position), new THREE.Quaternion().fromArray(w.quaternion), new THREE.Vector3().fromArray(w.scale),
+        );
+        gearLocal.push(local);
+        if (i >= G_PACK1) {
+          // Outer (rear-most) surface of the worn pack, model space.
+          const g = item.geometry;
+          if (!g.boundingBox) g.computeBoundingBox();
+          const world = new THREE.Matrix4().multiplyMatrices(bone.matrixWorld, local);
+          const bb = g.boundingBox!;
+          let maxZ = -Infinity;
+          const c = new THREE.Vector3();
+          for (let k = 0; k < 8; k++) {
+            c.set(k & 1 ? bb.max.x : bb.min.x, k & 2 ? bb.max.y : bb.min.y, k & 4 ? bb.max.z : bb.min.z).applyMatrix4(world);
+            maxZ = Math.max(maxZ, c.z);
+          }
+          packBackZ[i - G_PACK1 + 1] = maxZ;
+        }
+      } else {
+        gearParent.push(i < G_VEST1 ? CHARACTER_BONES.head : CHARACTER_BONES.chest);
+        gearLocal.push(i < G_VEST1 ? helmetLocal : i < G_PACK1 ? torsoLocal : packLocal);
+        if (i >= G_PACK1) packBackZ[i - G_PACK1 + 1] = backZ + SLUNG_DEPTH[i - G_PACK1 + 1] - SLUNG_DEPTH[0];
+      }
+    }
+    // Slung rifle: x / y through the torso fit, against the outer surface of the back (or pack).
     const slungLocal: THREE.Matrix4[] = [];
     const s = new THREE.Matrix4(), p = new THREE.Vector3(), q = new THREE.Quaternion(), sc = new THREE.Vector3();
     for (let lvl = 0; lvl < 4; lvl++) {
       slungLongGunMatrix(SLUNG_DEPTH[lvl], s);
       s.decompose(p, q, sc);
-      // x / y through the torso fit; depth = back surface + the procedural pack thickness.
-      const extra = SLUNG_DEPTH[lvl] - SLUNG_DEPTH[0];
       p.z = PROC_TORSO_CENTER.z;
       p.applyMatrix4(torsoFit);
-      p.z = backZ + 0.02 + extra * 0.9;
+      p.z = packBackZ[lvl] + 0.03;
       const world = new THREE.Matrix4().compose(p, q, new THREE.Vector3(1, 1, 1));
       slungLocal.push(new THREE.Matrix4().copy(chestInv).multiply(world));
     }
@@ -180,7 +250,7 @@ function fitVariant(id: CharacterVariantId, asset: CharacterAsset): VariantData 
     // The procedural mid parts' cloth base colours are light greys: compensate so the tint matches.
     up.multiplyScalar(1.15);
     lo.multiplyScalar(1.4);
-    return { id, asset, helmetLocal, torsoLocal, packLocal, slungLocal, upper: up, lower: lo };
+    return { id, asset, gearParent, gearLocal, slungLocal, upper: up, lower: lo };
   } finally {
     inst.dispose();
   }
@@ -190,19 +260,22 @@ function fitVariant(id: CharacterVariantId, asset: CharacterAsset): VariantData 
 export class CharacterLibrary {
   private readonly gear = new Map<WeaponId | 'none', THREE.BufferGeometry>();
   private readonly loaded: VariantData[] = [];
+  /** Which gear slots use real item models (snapshot taken when the library was built). */
+  private readonly gearFromAsset: readonly boolean[];
 
   /** Gear + weapon geometry for a held weapon (built on demand, shared by every body). */
   gearGeometryFor(weapon: WeaponId | null): THREE.BufferGeometry {
     const key = weapon ?? 'none';
     let g = this.gear.get(key);
     if (!g) {
-      g = buildGearGeometry(weapon);
+      g = buildGearGeometry(weapon, this.gearFromAsset);
       this.gear.set(key, g);
     }
     return g;
   }
 
-  private constructor(readonly variants: ReadonlyMap<CharacterVariantId, VariantData>) {
+  private constructor(readonly variants: ReadonlyMap<CharacterVariantId, VariantData>, gearFromAsset: readonly boolean[]) {
+    this.gearFromAsset = gearFromAsset;
     variants.forEach((v) => this.loaded.push(v));
   }
 
@@ -210,17 +283,18 @@ export class CharacterLibrary {
   static async load(): Promise<CharacterLibrary | null> {
     const map = new Map<CharacterVariantId, VariantData>();
     const assets = await Promise.all(CHARACTER_VARIANT_IDS.map((id) => loadCharacter(id).catch(() => null)));
+    const fromAsset = GEAR_SLOTS.map((g) => itemAsset(g) !== null);
     CHARACTER_VARIANT_IDS.forEach((id, i) => {
       const a = assets[i];
       if (!a) return;
       try {
-        const v = fitVariant(id, a);
+        const v = fitVariant(id, a, fromAsset);
         if (v) map.set(id, v);
       } catch (err) {
         console.warn(`[entities] character ${id} unusable:`, err);
       }
     });
-    return map.size ? new CharacterLibrary(map) : null;
+    return map.size ? new CharacterLibrary(map, fromAsset) : null;
   }
 
   /** Variant for a player (deterministic; falls back to a loaded one of the same rig, then any). */
@@ -379,7 +453,7 @@ class GltfNearBody implements NearBody {
       b.name = 'dz_gear_' + i;
       b.matrixAutoUpdate = false;
       b.matrix.copy(ZERO);
-      const parent = i < G_VEST1 ? head : i < G_WEAPON0 ? chest : this.holder;
+      const parent = i < G_WEAPON0 ? root.getObjectByName(variant.gearParent[i]) ?? (i < G_VEST1 ? head : chest) : this.holder;
       (parent ?? root).add(b);
       this.proxies.push(b);
       inverses.push(new THREE.Matrix4());
@@ -481,9 +555,10 @@ class GltfNearBody implements NearBody {
     this.gear.castShadow = shadows;
     const helmet = look.gear[0], vest = look.gear[1], pack = look.gear[2];
     for (let l = 1; l <= 3; l++) {
-      this.proxies[G_HELMET1 + l - 1].matrix.copy(l === helmet ? this.variant.helmetLocal : ZERO);
-      this.proxies[G_VEST1 + l - 1].matrix.copy(l === vest ? this.variant.torsoLocal : ZERO);
-      this.proxies[G_PACK1 + l - 1].matrix.copy(l === pack ? this.variant.packLocal : ZERO);
+      const gl = this.variant.gearLocal;
+      this.proxies[G_HELMET1 + l - 1].matrix.copy(l === helmet ? gl[G_HELMET1 + l - 1] : ZERO);
+      this.proxies[G_VEST1 + l - 1].matrix.copy(l === vest ? gl[G_VEST1 + l - 1] : ZERO);
+      this.proxies[G_PACK1 + l - 1].matrix.copy(l === pack ? gl[G_PACK1 + l - 1] : ZERO);
     }
 
     // --- Animation -------------------------------------------------------------------------------

@@ -47,11 +47,24 @@ export class LocalMatchHost {
     return this.runner;
   }
 
-  /** Handle a raw message from the client (validated exactly like the network server does). */
+  /**
+   * Handle a raw message from the client (validated exactly like the network server does).
+   * Errors while handling in-match traffic are logged and swallowed so one bad message never kills
+   * the match; a failure to START a match is rethrown (fatal: the transport reports it).
+   */
   receive(data: unknown): void {
     if (typeof data === 'string' && data.length > MAX_MESSAGE_BYTES) return;
     const msg = validateClientMessage(data);
-    if (msg) this.handle(msg);
+    if (!msg) return;
+    if (msg.t === 'startLocal') {
+      this.handle(msg);
+      return;
+    }
+    try {
+      this.handle(msg);
+    } catch (err) {
+      this.logError(`handling '${msg.t}' failed`, err);
+    }
   }
 
   /** Advance the match to the current time (called by the loop). */
@@ -63,13 +76,18 @@ export class LocalMatchHost {
       r.update(now);
     } catch (err) {
       // A sim bug must not silently freeze the match; log (rate limited) and keep going.
-      if (now - this.lastErrorLog > 1000) {
-        this.lastErrorLog = now;
-        console.error('[local] match update failed', err);
-      }
+      this.logError('match update failed', err);
     }
     if (this.endedAt < 0 && r.isOver()) this.endedAt = now;
     if (this.endedAt >= 0 && now - this.endedAt > POST_MATCH_MS) this.stop();
+  }
+
+  /** Rate-limited error log (at most one per second). */
+  private logError(what: string, err: unknown): void {
+    const now = this.now();
+    if (now - this.lastErrorLog < 1000) return;
+    this.lastErrorLog = now;
+    console.error(`[local] ${what}`, err);
   }
 
   stop(): void {

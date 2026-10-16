@@ -5,10 +5,15 @@ import type {
   LobbyErrorCode, LobbyMember, LobbySettings, LobbyState, LobbyStatus, LobbySummary, ServerMessage,
 } from '../shared/protocol';
 import type { MatchResults, TeamId } from '../shared/types';
+import type { TokenBucket } from './limits';
 import type { MatchRunnerLike } from './runner';
 
 export interface LobbyClient {
   readonly id: string;
+  /** Address key for per-address limits. */
+  readonly ip: string;
+  /** Per-connection match start budget. */
+  readonly matchStarts: TokenBucket;
   readonly name: string | null;
   readonly pingMs: number;
   lobbyId: string | null;
@@ -26,6 +31,8 @@ interface Member {
 /** A running (or lingering, after it ended) match of a lobby. */
 export interface MatchSession {
   readonly lobby: Lobby;
+  /** Address key of the host that started it (per-address concurrent match limit). */
+  readonly ip: string;
   runner: MatchRunnerLike | null;
   readonly startedAt: number;
   /** performance.now() when the match ended (results known), or -1 while running. */
@@ -42,6 +49,10 @@ export class Lobby {
   hostId: string;
   status: LobbyStatus = 'waiting';
   match: MatchSession | null = null;
+  readonly createdAt = performance.now();
+  /** While status is 'starting': performance.now() when the deferred start fires. */
+  startAt = -1;
+  startTimer: ReturnType<typeof setTimeout> | null = null;
   /** Member pings at the last state broadcast (to push ping refreshes only when they change). */
   private pingSig = '';
   /** Insertion ordered: the first entry is the oldest member (host migration order). */
@@ -74,6 +85,19 @@ export class Lobby {
 
   isHost(clientId: string): boolean {
     return this.hostId === clientId;
+  }
+
+  /** The host's connection. */
+  host(): LobbyClient | null {
+    return this.members.get(this.hostId)?.client ?? null;
+  }
+
+  /** Cancel a deferred start (status back to waiting). */
+  cancelStart(): void {
+    if (this.startTimer !== null) clearTimeout(this.startTimer);
+    this.startTimer = null;
+    this.startAt = -1;
+    if (this.status === 'starting') this.status = 'waiting';
   }
 
   clients(): LobbyClient[] {
@@ -193,7 +217,9 @@ export class Lobby {
       settings: { ...this.settings },
       members,
       status: this.status,
-      countdown: -1,
+      countdown: this.status === 'starting' && this.startAt >= 0
+        ? Math.max(0, Math.ceil((this.startAt - performance.now()) / 100) / 10)
+        : -1,
       teamCount: this.teamCount,
     };
   }

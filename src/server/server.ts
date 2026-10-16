@@ -7,8 +7,9 @@ import type { AddressInfo } from 'node:net';
 import { fileURLToPath } from 'node:url';
 import { WebSocketServer, type WebSocket } from 'ws';
 import { DEFAULT_SERVER_PORT, MAX_MESSAGE_BYTES, PROTOCOL_VERSION } from '../shared/constants';
-import type { ClientMessage } from '../shared/protocol';
+import type { ClientMessage, ServerMessage } from '../shared/protocol';
 import { CLOSE_CODES, ClientConnection } from './Connection';
+import { addressKey, clientAddress } from './ip';
 import { DEFAULT_LIMITS, type ServerLimits } from './limits';
 import { createLogger, type Logger } from './log';
 import { LobbyManager } from './LobbyManager';
@@ -35,6 +36,11 @@ export interface StartServerOptions {
   runnerFactory?: RunnerFactory;
   /** Run default matches in worker threads (default true; MATCH_WORKERS=0 disables it in main). */
   matchWorkers?: boolean;
+  /**
+   * Number of trusted reverse proxies in front of the server (TRUST_PROXY env in main). 0 (default)
+   * uses the socket address; N > 0 takes the client address from X-Forwarded-For.
+   */
+  trustProxy?: number;
   /**
    * Directory with the built client. Default: dist/ when NODE_ENV=production, otherwise static
    * serving is off (Vite serves the client in development). null disables it explicitly.
@@ -82,6 +88,9 @@ export async function startServer(opts: StartServerOptions = {}): Promise<Server
   const startedAt = performance.now();
 
   const conns = new Set<ClientConnection>();
+  /** Open connections per address key (per-address connection cap). */
+  const perIp = new Map<string, number>();
+  const trustProxy = Math.max(0, Math.floor(opts.trustProxy ?? 0));
   const manager = new LobbyManager({
     limits,
     log,
@@ -170,7 +179,10 @@ export async function startServer(opts: StartServerOptions = {}): Promise<Server
   };
 
   const onClose = (conn: ClientConnection): void => {
-    conns.delete(conn);
+    if (!conns.delete(conn)) return;
+    const n = (perIp.get(conn.ip) ?? 1) - 1;
+    if (n > 0) perIp.set(conn.ip, n);
+    else perIp.delete(conn.ip);
     if (conn.lobbyId) manager.leave(conn, true);
     log.info('client disconnected', { client: conn.id, clients: conns.size });
   };
@@ -222,20 +234,29 @@ export async function startServer(opts: StartServerOptions = {}): Promise<Server
   wss.on('error', (err) => log.error('websocket server error', { err }));
 
   wss.on('connection', (ws: WebSocket, req: IncomingMessage) => {
-    const ip = req.socket.remoteAddress ?? 'unknown';
-    if (conns.size >= limits.maxConnections) {
+    const addr = clientAddress(req, trustProxy);
+    const ip = addressKey(addr);
+    const fromIp = perIp.get(ip) ?? 0;
+    if (conns.size >= limits.maxConnections || fromIp >= limits.maxConnectionsPerIp) {
+      ws.on('error', () => undefined);
+      ws.send(JSON.stringify({ t: 'error', code: 'lobby.serverLimit' } satisfies ServerMessage));
       ws.close(CLOSE_CODES.serverFull, 'server full');
+      log.warn('connection refused (limit)', { ip, total: conns.size, fromIp });
       return;
     }
     const conn = new ClientConnection(ws, ip, { lagMs, jitterMs, limits, log, onMessage, onClose });
     conns.add(conn);
-    log.info('client connected', { client: conn.id, ip, clients: conns.size });
+    perIp.set(ip, fromIp + 1);
+    log.info('client connected', { client: conn.id, ip: addr, clients: conns.size });
+    // Early RTT sample so lobby member pings are meaningful before the first heartbeat.
+    conn.heartbeat(performance.now());
   });
 
   const heartbeat = setInterval(() => {
     const now = performance.now();
     for (const c of conns) c.heartbeat(now);
     manager.refreshPings();
+    manager.pruneLimiters();
   }, limits.heartbeatMs);
 
   await new Promise<void>((resolve, reject) => {

@@ -132,7 +132,13 @@ export function followPath(sys: BotSystem, b: BotState, p: PlayerState): void {
       // final one only counts on the destination's floor.
       const last = i === path.count - 1;
       const reach = last ? b.arrive : indoor || sys.grid.flagsAt(wx, wz, false) & NF_NEAR ? 0.45 : 0.75;
-      if (d > reach || (last && !sameLevel)) break;
+      if (last && !sameLevel) {
+        // Right above / below the destination on another floor: the route was stale or
+        // partial, plan again (through the stairs).
+        if (d <= reach && sys.now - b.pathTime > 2) requestPath(sys, b, p);
+        break;
+      }
+      if (d > reach) break;
       i++;
     }
     b.pathIdx = i;

@@ -11,7 +11,7 @@ import { BTN } from '../types';
 import {
   WEAPON_RANGE, bestSlotForRange, bestSlotOverall, holdOver, rangeSuitability, slotRounds, timeOfFlight, weaponAt,
 } from './aim';
-import { clearDest, setDest } from './movement';
+import { aboveGround, clearDest, setDest } from './movement';
 import { NF_BLOCKED } from './nav';
 import { chestHeight, findContact, headHeight } from './perception';
 import { MAX_CONTACTS, type BotState, type Contact } from './state';
@@ -115,6 +115,11 @@ function standingEnemyVisible(b: BotState): boolean {
     if (c.id >= 0 && c.visible && !c.downed) return true;
   }
   return false;
+}
+
+/** Destination height for chasing a contact (its floor when it is upstairs). */
+function contactY(sys: BotSystem, c: Contact): number {
+  return aboveGround(sys, c.x, c.y, c.z) ? c.y : NaN;
 }
 
 /** Choose the active weapon slot (by range in combat, by quality otherwise). */
@@ -228,7 +233,8 @@ export function combatThink(sys: BotSystem, b: BotState, p: PlayerState): void {
   const lostFor = t - c.lastSeen;
 
   // Cover when hurt.
-  if (c.visible && armed && p.health < sk.coverHealth && t - b.coverDecided > 5) {
+  const upstairs = aboveGround(sys, p.pos.x, p.pos.y, p.pos.z);
+  if (c.visible && armed && !upstairs && p.health < sk.coverHealth && t - b.coverDecided > 5) {
     b.coverDecided = t;
     if (b.rng.chance(sk.useCover) && findCover(sys, b, p, c.x, c.z)) {
       b.coverValid = true;
@@ -241,7 +247,7 @@ export function combatThink(sys: BotSystem, b: BotState, p: PlayerState): void {
 
   let mode = CM_HOLD;
   if (b.coverValid) mode = CM_COVER;
-  else if (!armed) mode = CM_RETREAT;
+  else if (!armed) mode = upstairs ? CM_HOLD : CM_RETREAT;
   else if (c.visible) {
     if (c.downed && !standingEnemyVisible(b) ? d > 10 : d > Math.max(ideal * 2.2, 30)) mode = CM_ADVANCE;
     else if ((w!.id === 'sniper' || w!.id === 'dmr') && d < ideal * 0.3 && bestSlotForRange(p, d) === p.activeSlot) mode = CM_RETREAT;
@@ -273,10 +279,10 @@ export function combatThink(sys: BotSystem, b: BotState, p: PlayerState): void {
       setDest(sys, b, p, b.coverX, b.coverZ, 0.6, true);
       break;
     case CM_ADVANCE:
-      setDest(sys, b, p, c.x, c.z, c.downed ? 2.5 : Math.max(4, ideal * 0.8), false);
+      setDest(sys, b, p, c.x, c.z, c.downed ? 2.5 : Math.max(4, ideal * 0.8), false, contactY(sys, c));
       break;
     case CM_PUSH:
-      setDest(sys, b, p, c.x, c.z, 3, false);
+      setDest(sys, b, p, c.x, c.z, 3, false, contactY(sys, c));
       b.walk = true;
       break;
     case CM_RETREAT: {
@@ -329,7 +335,8 @@ export function combatAct(sys: BotSystem, b: BotState, p: PlayerState): number {
 
   // Strafe while shooting at close / mid range (lateral to the target bearing); at range bots
   // stand (or crouch) still because moving blooms the spread.
-  if (c.visible && b.combatMode !== CM_COVER && b.strafeDir !== 0 && t >= b.crouchUntil && dist < STRAFE_MAX_DIST) {
+  if (c.visible && b.combatMode !== CM_COVER && b.strafeDir !== 0 && t >= b.crouchUntil && dist < STRAFE_MAX_DIST &&
+      !aboveGround(sys, p.pos.x, p.pos.y, p.pos.z)) {
     const rx = Math.cos(bearing) * b.strafeDir, rz = -Math.sin(bearing) * b.strafeDir;
     let mx = rx, mz = rz;
     if (b.moveScale > 0) {

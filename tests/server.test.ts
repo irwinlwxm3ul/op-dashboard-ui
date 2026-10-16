@@ -12,6 +12,7 @@ import type { MatchResults, PlayerInput } from '../src/shared/types';
 import type { Worker } from 'node:worker_threads';
 import {
   createWorkerRunnerFactory, startServer, type MatchRunnerLike, type RunnerOptions, type ServerHandle,
+  type ServerLimits,
 } from '../src/server';
 
 // ---------------------------------------------------------------------------
@@ -39,14 +40,15 @@ class TestClient {
     ws.on('error', () => undefined);
   }
 
-  static async connect(port: number): Promise<TestClient> {
-    const ws = new WebSocket(`ws://127.0.0.1:${port}/ws`);
+  static async connect(port: number, headers?: Record<string, string>): Promise<TestClient> {
+    const ws = new WebSocket(`ws://127.0.0.1:${port}/ws`, { headers });
+    // Listen before 'open' so messages sent right on connect (e.g. a refusal) are not lost.
+    const c = new TestClient(ws);
+    clients.push(c);
     await new Promise<void>((resolve, reject) => {
       ws.once('open', () => resolve());
       ws.once('error', reject);
     });
-    const c = new TestClient(ws);
-    clients.push(c);
     return c;
   }
 
@@ -229,11 +231,22 @@ async function startedMatch(host: TestClient, others: TestClient[], over: Partia
   return runners[runners.length - 1];
 }
 
+/** Limits out of the way for tests that are not about them (all clients share 127.0.0.1). */
+const RELAXED = {
+  minLobbyAgeMs: 0,
+  matchStartBurst: 1000,
+  matchStartBurstPerIp: 1000,
+  maxMatchesPerIp: 1000,
+  maxLobbiesPerIp: 1000,
+  maxConnectionsPerIp: 1000,
+};
+
 beforeAll(async () => {
   server = await startServer({
     port: 0,
     log: false,
     matchLingerMs: 150,
+    limits: RELAXED,
     runnerFactory: (opts) => {
       const r = new FakeRunner(opts);
       runners.push(r);
@@ -687,6 +700,7 @@ describe('real MatchRunner', () => {
       port: 0,
       log: false,
       matchLingerMs: 200,
+      limits: RELAXED,
       runnerFactory: (o) => {
         const r = workers(o);
         created.push(r);
@@ -741,4 +755,204 @@ describe('real MatchRunner', () => {
       await workers.dispose();
     }
   }, 60_000);
+});
+
+describe('server limits', () => {
+  /** A server with fake runners and the given limits. */
+  async function limited(limits: Partial<ServerLimits>, extra: { trustProxy?: number } = {}) {
+    const made: FakeRunner[] = [];
+    const s = await startServer({
+      port: 0,
+      log: false,
+      matchLingerMs: 50,
+      limits,
+      trustProxy: extra.trustProxy,
+      runnerFactory: (o) => {
+        const r = new FakeRunner(o);
+        made.push(r);
+        return r;
+      },
+    });
+    return { s, made };
+  }
+
+  async function startSolo(c: TestClient): Promise<void> {
+    c.send({ t: 'createLobby', settings: settings({ botFill: true }) });
+    await c.next('lobbyState');
+    c.send({ t: 'startMatch' });
+  }
+
+  it('closes sockets that never say hello', async () => {
+    const { s } = await limited({ helloTimeoutMs: 200 });
+    try {
+      const idle = await TestClient.connect(s.port);
+      const good = await TestClient.hello(s.port, 'Good');
+      expect((await idle.closed(2000)).code).toBe(4004);
+      await sleep(150);
+      expect(good.closeInfo).toBeNull();
+    } finally {
+      await s.close();
+    }
+  });
+
+  it('caps connections per address (and honours X-Forwarded-For only behind a trusted proxy)', async () => {
+    const { s } = await limited({ maxConnectionsPerIp: 3 });
+    try {
+      const open = [await TestClient.connect(s.port), await TestClient.connect(s.port), await TestClient.connect(s.port)];
+      // X-Forwarded-For is ignored without trustProxy: still 127.0.0.1.
+      const refused = await TestClient.connect(s.port, { 'X-Forwarded-For': '203.0.113.9' });
+      await refused.error('lobby.serverLimit');
+      expect((await refused.closed()).code).toBe(4002);
+      open[0].close();
+      await open[0].closed();
+      await sleep(50);
+      const again = await TestClient.hello(s.port, 'Again');
+      expect(again.closeInfo).toBeNull();
+    } finally {
+      await s.close();
+    }
+
+    const p = await limited({ maxConnectionsPerIp: 1 }, { trustProxy: 1 });
+    try {
+      const a = await TestClient.hello(p.s.port, 'A');
+      // Behind one trusted proxy the right-most X-Forwarded-For entry is the client.
+      const b = await TestClient.connect(p.s.port, { 'X-Forwarded-For': '198.51.100.7, 203.0.113.1' });
+      const c = await TestClient.connect(p.s.port, { 'X-Forwarded-For': '203.0.113.2' });
+      const spoof = await TestClient.connect(p.s.port, { 'X-Forwarded-For': '203.0.113.2, 203.0.113.1' });
+      await spoof.error('lobby.serverLimit');
+      expect((await spoof.closed()).code).toBe(4002);
+      await sleep(50);
+      expect(a.closeInfo).toBeNull();
+      expect(b.closeInfo).toBeNull();
+      expect(c.closeInfo).toBeNull();
+    } finally {
+      await p.s.close();
+    }
+  });
+
+  it('caps lobbies per address and globally with lobby.serverLimit', async () => {
+    const { s } = await limited({ maxLobbiesPerIp: 2, maxConnectionsPerIp: 50 });
+    try {
+      const [a, b, c] = [await TestClient.hello(s.port, 'A'), await TestClient.hello(s.port, 'B'), await TestClient.hello(s.port, 'C')];
+      a.send({ t: 'createLobby', settings: settings({ name: 'a' }) });
+      await a.next('lobbyState');
+      b.send({ t: 'createLobby', settings: settings({ name: 'b' }) });
+      await b.next('lobbyState');
+      c.send({ t: 'createLobby', settings: settings({ name: 'c' }) });
+      await c.error('lobby.serverLimit');
+      // Re-creating replaces the host's own lobby, so it does not count against the cap.
+      a.send({ t: 'createLobby', settings: settings({ name: 'a2' }) });
+      expect((await a.next('lobbyState', (m) => m.lobby.settings.name === 'a2')).lobby.hostId).toBe(a.clientId);
+    } finally {
+      await s.close();
+    }
+
+    const g = await limited({ maxLobbies: 1, maxLobbiesPerIp: 10 });
+    try {
+      const a = await TestClient.hello(g.s.port, 'A');
+      const b = await TestClient.hello(g.s.port, 'B');
+      a.send({ t: 'createLobby', settings: settings() });
+      await a.next('lobbyState');
+      b.send({ t: 'createLobby', settings: settings() });
+      await b.error('lobby.serverLimit');
+    } finally {
+      await g.s.close();
+    }
+  });
+
+  it('caps concurrent matches per address and globally', async () => {
+    const variants: Partial<ServerLimits>[] = [{ maxMatchesPerIp: 1 }, { maxMatches: 1, maxMatchesPerIp: 10 }];
+    for (const limits of variants) {
+      const { s, made } = await limited({ ...RELAXED, ...limits });
+      try {
+        const a = await TestClient.hello(s.port, 'A');
+        const b = await TestClient.hello(s.port, 'B');
+        await startSolo(a);
+        await a.next('matchInit');
+        await startSolo(b);
+        await b.error('lobby.serverLimit');
+        expect(made).toHaveLength(1);
+        // Once the first match is over, the next one may start.
+        a.send({ t: 'leaveMatch' });
+        await a.next('lobbyState', (m) => m.lobby.status === 'waiting');
+        b.send({ t: 'startMatch' });
+        await b.next('matchInit');
+        expect(made).toHaveLength(2);
+      } finally {
+        await s.close();
+      }
+    }
+  });
+
+  it('limits the match start rate per connection and per address', async () => {
+    const perConn = await limited({ ...RELAXED, matchStartBurst: 2, matchStartIntervalMs: 60_000 });
+    try {
+      const a = await TestClient.hello(perConn.s.port, 'A');
+      await startSolo(a);
+      for (let i = 0; i < 2; i++) {
+        if (i > 0) a.send({ t: 'startMatch' });
+        await a.next('matchInit');
+        a.send({ t: 'leaveMatch' });
+        await a.next('lobbyState', (m) => m.lobby.status === 'waiting');
+      }
+      a.send({ t: 'startMatch' });
+      await a.error('net.rateLimited');
+      expect(perConn.made).toHaveLength(2);
+    } finally {
+      await perConn.s.close();
+    }
+
+    const perIp = await limited({ ...RELAXED, matchStartBurst: 10, matchStartBurstPerIp: 2, matchStartIntervalMs: 60_000 });
+    try {
+      for (const name of ['A', 'B']) {
+        const c = await TestClient.hello(perIp.s.port, name);
+        await startSolo(c);
+        await c.next('matchInit');
+        c.send({ t: 'leaveMatch' });
+        await c.next('lobbyState', (m) => m.lobby.status === 'waiting');
+      }
+      const c = await TestClient.hello(perIp.s.port, 'C');
+      await startSolo(c);
+      await c.error('net.rateLimited');
+      expect(perIp.made).toHaveLength(2);
+    } finally {
+      await perIp.s.close();
+    }
+  });
+
+  it('defers starts of brand-new lobbies with a countdown (and cancels if the host leaves)', async () => {
+    const { s, made } = await limited({ ...RELAXED, minLobbyAgeMs: 500 });
+    try {
+      const a = await TestClient.hello(s.port, 'A');
+      const t0 = Date.now();
+      await startSolo(a);
+      const starting = (await a.next('lobbyState', (m) => m.lobby.status === 'starting')).lobby;
+      expect(starting.countdown).toBeGreaterThan(0);
+      expect(starting.countdown).toBeLessThanOrEqual(0.5);
+      expect(made).toHaveLength(0);
+      // Lobby changes are frozen during the countdown and the lobby is hidden from the list.
+      a.send({ t: 'ready', ready: true });
+      await a.error('lobby.inGame');
+      await a.next('matchInit', () => true, 3000);
+      expect(Date.now() - t0).toBeGreaterThanOrEqual(400);
+      expect(made).toHaveLength(1);
+
+      // Cancel: the host leaves during the countdown -> no match, the room is waiting again.
+      const h = await TestClient.hello(s.port, 'H');
+      const m = await TestClient.hello(s.port, 'M');
+      const st = await lobbyWith(h, [m], { botFill: true });
+      m.send({ t: 'ready', ready: true });
+      await h.next('lobbyState', (x) => x.lobby.members.some((y) => y.clientId === m.clientId && y.ready));
+      h.send({ t: 'startMatch' });
+      await m.next('lobbyState', (x) => x.lobby.status === 'starting');
+      h.send({ t: 'leaveLobby' });
+      await sleep(700);
+      expect(made).toHaveLength(1);
+      const after = (await m.next('lobbyState', (x) => x.lobby.status === 'waiting' && x.lobby.hostId === m.clientId)).lobby;
+      expect(after.id).toBe(st.id);
+      expect(after.countdown).toBe(-1);
+    } finally {
+      await s.close();
+    }
+  });
 });

@@ -18,6 +18,7 @@ export const CLOSE_CODES = {
   kicked: 4001,
   serverFull: 4002,
   slowConsumer: 4003,
+  helloTimeout: 4004,
   shutdown: 1001,
 } as const;
 
@@ -69,6 +70,8 @@ export class ClientConnection {
   /** Smoothed round trip time in ms (WebSocket ping/pong incl. artificial latency). */
   ping = 0;
   readonly connectedAt = performance.now();
+  /** Match start budget of this connection (see ServerLimits.matchStartBurst). */
+  readonly matchStarts: TokenBucket;
 
   private encoder: SnapshotEncoder | null = null;
   private closing = false;
@@ -83,7 +86,11 @@ export class ClientConnection {
   private readonly abuse: WindowCounter;
   private readonly outQ: LagQueue<Outbound> | null;
   private readonly inQ: LagQueue<ClientMessage> | null;
+  private helloTimer: ReturnType<typeof setTimeout> | null;
 
+  /**
+   * @param ip Address key used for per-address limits (see ip.ts addressKey).
+   */
   constructor(
     private readonly ws: WebSocket,
     readonly ip: string,
@@ -97,6 +104,14 @@ export class ClientConnection {
     this.chatBucket = new TokenBucket(l.chatRate, l.chatBurst, now);
     this.invalid = new WindowCounter(l.invalidMessages, l.invalidWindowMs);
     this.abuse = new WindowCounter(l.abuseDrops, l.abuseWindowMs);
+    this.matchStarts = new TokenBucket(1000 / l.matchStartIntervalMs, l.matchStartBurst, now);
+    // Sockets that never identify themselves would otherwise hold a slot forever (ws answers
+    // protocol pings automatically, so heartbeats do not evict them).
+    this.helloTimer = setTimeout(() => {
+      this.helloTimer = null;
+      if (this.name === null) this.close(CLOSE_CODES.helloTimeout, 'hello timeout');
+    }, l.helloTimeoutMs);
+    this.helloTimer.unref();
     if (opts.lagMs > 0 || opts.jitterMs > 0) {
       this.outQ = new LagQueue<Outbound>(opts.lagMs, opts.jitterMs, (o) => this.writeNow(o));
       this.inQ = new LagQueue<ClientMessage>(opts.lagMs, opts.jitterMs, (m) => this.dispatch(m));
@@ -118,8 +133,6 @@ export class ClientConnection {
     ws.on('close', () => this.handleClosed());
     // Errors (e.g. maxPayload exceeded, protocol violations) are followed by 'close'.
     ws.on('error', (err) => opts.log.warn('socket error', { client: this.id, err: err.message }));
-    // Early RTT sample so lobby member pings are meaningful before the first heartbeat.
-    this.heartbeat(now);
   }
 
   get isOpen(): boolean {
@@ -257,6 +270,10 @@ export class ClientConnection {
 
   private dispatch(msg: ClientMessage): void {
     if (!this.isOpen) return;
+    if (msg.t === 'hello' && this.helloTimer !== null) {
+      clearTimeout(this.helloTimer);
+      this.helloTimer = null;
+    }
     try {
       this.opts.onMessage(this, msg);
     } catch (err) {
@@ -294,6 +311,8 @@ export class ClientConnection {
     if (this.closed) return;
     this.closed = true;
     this.closing = true;
+    if (this.helloTimer !== null) clearTimeout(this.helloTimer);
+    this.helloTimer = null;
     this.inQ?.dispose();
     this.outQ?.dispose();
     try {

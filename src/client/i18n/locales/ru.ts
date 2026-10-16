@@ -588,6 +588,7 @@ export const ru: LocaleDict = {
   'error.lobby.notReady': 'Ещё не все готовы.',
   'error.lobby.badSettings': 'Недопустимые настройки лобби.',
   'error.lobby.nameInvalid': 'Это имя использовать нельзя. Выберите другое.',
+  'error.lobby.serverLimit': 'Сервер перегружен — слишком много лобби или матчей. Попробуйте чуть позже.',
   'error.net.rateLimited': 'Слишком много запросов. Не так быстро.',
   'error.net.badMessage': 'Сервер отклонил некорректное сообщение.',
   'error.net.versionMismatch': 'Версия игры не совпадает с версией сервера. Перезагрузите страницу.',

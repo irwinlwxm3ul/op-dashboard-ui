@@ -24,6 +24,8 @@ export const LOS_REFRESH_RESERVE = 6;
 export const NAV_BUDGET_PER_TICK = 1600;
 /** Nav tiles that may be generated per tick (lazy grid). */
 export const TILE_GEN_PER_TICK = 2;
+/** Building floor navs that may be built per tick outside path planning. */
+export const FLOOR_BUILD_PER_TICK = 1;
 
 const EMPTY_TEAM: readonly PlayerState[] = [];
 

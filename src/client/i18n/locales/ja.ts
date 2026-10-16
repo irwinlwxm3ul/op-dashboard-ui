@@ -588,6 +588,7 @@ export const ja: LocaleDict = {
   'error.lobby.notReady': 'まだ全員の準備ができていません。',
   'error.lobby.badSettings': 'ロビー設定が無効です。',
   'error.lobby.nameInvalid': 'その名前は使用できません。別の名前を選んでください。',
+  'error.lobby.serverLimit': 'サーバーが混み合っています（ロビーまたはマッチが多すぎます）。しばらくしてから再度お試しください。',
   'error.net.rateLimited': 'リクエストが多すぎます。少し待ってください。',
   'error.net.badMessage': 'サーバーが無効なメッセージを拒否しました。',
   'error.net.versionMismatch': 'ゲームのバージョンがサーバーと一致しません。ページを再読み込みして更新してください。',

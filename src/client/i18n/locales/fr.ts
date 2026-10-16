@@ -588,6 +588,7 @@ export const fr: LocaleDict = {
   'error.lobby.notReady': "Tout le monde n'est pas encore prêt.",
   'error.lobby.badSettings': 'Ces paramètres de salon ne sont pas valides.',
   'error.lobby.nameInvalid': "Ce nom n'est pas autorisé. Veuillez en choisir un autre.",
+  'error.lobby.serverLimit': 'Le serveur est surchargé : trop de salons ou de parties en cours. Réessayez dans un instant.',
   'error.net.rateLimited': 'Trop de requêtes. Veuillez ralentir.',
   'error.net.badMessage': 'Le serveur a rejeté un message invalide.',
   'error.net.versionMismatch': 'Votre version du jeu ne correspond pas à celle du serveur. Rechargez la page pour la mettre à jour.',

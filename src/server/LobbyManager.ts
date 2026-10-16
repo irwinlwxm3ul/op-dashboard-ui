@@ -6,7 +6,7 @@ import { randomBytes, randomInt } from 'node:crypto';
 import type { ClientMessage, LobbySettings, LobbySummary, ServerMessage } from '../shared/protocol';
 import type { MatchConfig, MatchResults, TeamId } from '../shared/types';
 import { Lobby, type LobbyClient, type MatchSession } from './Lobby';
-import type { ServerLimits } from './limits';
+import { TokenBucket, type ServerLimits } from './limits';
 import type { Logger } from './log';
 import { MatchLoop, type MatchLoopHost } from './MatchLoop';
 import type { RunnerClient, RunnerFactory } from './runner';
@@ -27,6 +27,8 @@ const MAX_RUNNER_ERRORS = 20;
 
 export class LobbyManager implements MatchLoopHost {
   private readonly lobbies = new Map<string, Lobby>();
+  /** Match start budget per address (idle buckets are pruned). */
+  private readonly ipStarts = new Map<string, TokenBucket>();
   private readonly loop: MatchLoop;
   private seq = 0;
   private listTimer: ReturnType<typeof setTimeout> | null = null;
@@ -99,8 +101,14 @@ export class LobbyManager implements MatchLoopHost {
   // ---------------------------------------------------------------------------
 
   create(client: LobbyClient, settings: LobbySettings): void {
-    if (this.lobbies.size >= this.opts.limits.maxLobbies) {
-      client.send({ t: 'error', code: 'lobby.full' });
+    const limits = this.opts.limits;
+    // The lobby this client hosts now is left below, so it does not count against the limits.
+    const own = this.lobbyOf(client);
+    const ownHosted = own && own.isHost(client.id) ? own : null;
+    let fromIp = 0;
+    for (const l of this.lobbies.values()) if (l !== ownHosted && l.host()?.ip === client.ip) fromIp++;
+    if (this.lobbies.size - (ownHosted ? 1 : 0) >= limits.maxLobbies || fromIp >= limits.maxLobbiesPerIp) {
+      client.send({ t: 'error', code: 'lobby.serverLimit' });
       return;
     }
     if (client.lobbyId) this.leave(client, false);
@@ -229,6 +237,11 @@ export class LobbyManager implements MatchLoopHost {
   // Match lifecycle
   // ---------------------------------------------------------------------------
 
+  /**
+   * Host request to start. Abuse limits (each match is a worker thread generating a world):
+   * concurrent matches globally and per address, a start budget per connection and per address,
+   * and a minimum lobby age - younger lobbies get a short 'starting' countdown instead of an error.
+   */
   startMatch(client: LobbyClient): void {
     const lobby = this.requireLobby(client);
     if (!lobby) return;
@@ -237,6 +250,83 @@ export class LobbyManager implements MatchLoopHost {
       client.send({ t: 'error', code: err });
       return;
     }
+    if (this.matchCapReached(client.ip)) {
+      client.send({ t: 'error', code: 'lobby.serverLimit' });
+      return;
+    }
+    const now = performance.now();
+    const ipBudget = this.ipStartBudget(client.ip, now);
+    if (!client.matchStarts.has(now) || !ipBudget.has(now)) {
+      client.send({ t: 'error', code: 'net.rateLimited' });
+      return;
+    }
+    client.matchStarts.take(now);
+    ipBudget.take(now);
+
+    const wait = lobby.createdAt + this.opts.limits.minLobbyAgeMs - now;
+    if (wait <= 0) {
+      this.launch(lobby, client);
+      return;
+    }
+    lobby.status = 'starting';
+    lobby.startAt = now + wait;
+    lobby.startTimer = setTimeout(() => this.fireDeferredStart(lobby, client.id), Math.ceil(wait));
+    lobby.startTimer.unref();
+    lobby.broadcastState();
+    this.markListDirty();
+  }
+
+  private fireDeferredStart(lobby: Lobby, requesterId: string): void {
+    lobby.startTimer = null;
+    if (this.lobbies.get(lobby.id) !== lobby || lobby.status !== 'starting') return;
+    lobby.cancelStart();
+    const host = lobby.host();
+    // The host left (or changed) during the countdown: the start is cancelled.
+    if (!host || host.id !== requesterId) {
+      lobby.broadcastState();
+      this.markListDirty();
+      return;
+    }
+    const err = lobby.canStart(host.id) ?? (this.matchCapReached(host.ip) ? 'lobby.serverLimit' : null);
+    if (err) {
+      host.send({ t: 'error', code: err });
+      lobby.broadcastState();
+      this.markListDirty();
+      return;
+    }
+    this.launch(lobby, host);
+  }
+
+  private matchCapReached(ip: string): boolean {
+    let total = 0;
+    let fromIp = 0;
+    for (const l of this.lobbies.values()) {
+      const m = l.match;
+      if (!m || m.disposed) continue;
+      total++;
+      if (m.ip === ip) fromIp++;
+    }
+    return total >= this.opts.limits.maxMatches || fromIp >= this.opts.limits.maxMatchesPerIp;
+  }
+
+  private ipStartBudget(ip: string, now: number): TokenBucket {
+    let b = this.ipStarts.get(ip);
+    if (!b) {
+      const l = this.opts.limits;
+      b = new TokenBucket(1000 / l.matchStartIntervalMs, l.matchStartBurstPerIp, now);
+      this.ipStarts.set(ip, b);
+    }
+    return b;
+  }
+
+  /** Drop per-address start budgets that refilled completely (bounded memory). */
+  pruneLimiters(): void {
+    const now = performance.now();
+    for (const [ip, b] of this.ipStarts) if (b.isFull(now)) this.ipStarts.delete(ip);
+  }
+
+  /** Create the runner and switch the lobby into the match. */
+  private launch(lobby: Lobby, client: LobbyClient): void {
     const s = lobby.settings;
     const config: MatchConfig = {
       mode: 'br',
@@ -250,6 +340,7 @@ export class LobbyManager implements MatchLoopHost {
     };
     const session: MatchSession = {
       lobby,
+      ip: client.ip,
       runner: null,
       startedAt: performance.now(),
       endedAt: -1,
@@ -421,6 +512,7 @@ export class LobbyManager implements MatchLoopHost {
   }
 
   private deleteLobby(lobby: Lobby): void {
+    lobby.cancelStart();
     if (lobby.match) this.disposeSession(lobby.match);
     this.lobbies.delete(lobby.id);
     this.opts.log.info('lobby closed', { lobby: lobby.id });
@@ -434,7 +526,11 @@ export class LobbyManager implements MatchLoopHost {
 
   /** Stop all matches and timers (server shutdown). */
   dispose(): void {
-    for (const lobby of this.lobbies.values()) if (lobby.match) this.disposeSession(lobby.match);
+    for (const lobby of this.lobbies.values()) {
+      lobby.cancelStart();
+      if (lobby.match) this.disposeSession(lobby.match);
+    }
+    this.ipStarts.clear();
     this.lobbies.clear();
     this.loop.dispose();
     if (this.listTimer !== null) clearTimeout(this.listTimer);
