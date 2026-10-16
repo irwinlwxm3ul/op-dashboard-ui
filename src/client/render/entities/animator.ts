@@ -453,7 +453,10 @@ function seatHand(p: Pose, left: boolean, c: Float32Array, at: number, sx: numbe
 function legSolve(t: THREE.Vector3, pole: THREE.Vector3): number {
   const a = DIM.thigh, b = DIM.shin;
   let d = t.length();
-  if (d < 1e-4) t.set(0, -1e-4, 0), (d = 1e-4);
+  if (d < 1e-4) {
+    t.set(0, -1e-4, 0);
+    d = 1e-4;
+  }
   _ln.copy(t).multiplyScalar(1 / d);
   d = Math.min(a + b - 1e-3, Math.max(Math.abs(a - b) + 0.02, d));
   const along = (a * a - b * b + d * d) / (2 * d);

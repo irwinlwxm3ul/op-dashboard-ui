@@ -33,6 +33,19 @@ const STALE_MS = 4000;
 const REF_FOV = 65;
 /** Minimum on-screen height (device px) of far silhouettes. */
 const MIN_FAR_PX = 2.5;
+/** Rank penalty for players outside the view frustum (they give up near bodies first). */
+const OFFSCREEN_RANK = 1e4;
+/** A player takes a near body only from a holder ranking at least this much lower (no thrash). */
+const RANK_MARGIN = 2;
+
+const byRankDesc = (a: PlayerEntry, b: PlayerEntry): number => b.rank - a.rank;
+
+/** Leave the near LOD for mid at once, keeping the crossfade state consistent. */
+function dropToMid(f: LodFade): void {
+  if (f.cur === 0) f.cur = 1;
+  if (f.prev === 0) f.prev = 1;
+  if (f.prev === f.cur) f.t = 1;
+}
 
 const _e = new THREE.Euler(0, 0, 0, 'YXZ');
 const _one = new THREE.Vector3(1, 1, 1);
@@ -105,6 +118,12 @@ export class PlayerEntry {
   moveX = 0;
   moveZ = 0;
   readonly seat: SeatInfo = createSeatInfo();
+  /** Bounding sphere in the view frustum this frame. */
+  onScreen = true;
+  /** Near-body priority (lower = more important): zoom-adjusted distance, off-screen last. */
+  rank = 0;
+  /** Fraction of the body's pixels drawn this frame over all LODs (1 = fully visible; diagnostics / tests). */
+  coverage = 0;
 
   reset(id: EntityId): void {
     this.id = id;
@@ -187,6 +206,8 @@ export class PlayersRenderer {
 
   setNearCapacity(n: number): void {
     this.nearCapacity = n;
+    // Shrinking: hand back the lowest-priority holders' bodies first so the providers can trim.
+    this.enforceNearCapacity();
     this.nearPool.setCapacity(n);
     if (this.nearPool !== this.procNear) this.procNear.setCapacity(n);
   }
@@ -296,25 +317,50 @@ export class PlayersRenderer {
     return e;
   }
 
-  /** Acquire a near soldier for `e`, stealing from a farther holder when the pool is full. */
-  private acquireNear(e: PlayerEntry): NearBody | null {
+  /**
+   * Give `e` a near body: from the pool, or taken from the lowest-priority holder (see
+   * PlayerEntry.rank) when the pool is full and that holder ranks clearly below `e`. Returns
+   * whether `e` now has one.
+   */
+  private takeNear(e: PlayerEntry): boolean {
     let s = this.nearPool.acquire(e.id);
-    if (s) return s;
-    let victim: PlayerEntry | null = null;
+    if (!s) {
+      let victim: PlayerEntry | null = null;
+      this.nearHolders.length = 0;
+      this.entries.forEach(this.collectNearHolder);
+      for (const h of this.nearHolders) {
+        if (h === e || h.view?.isSelf) continue;
+        if (h.rank > e.rank + RANK_MARGIN && (!victim || h.rank > victim.rank)) victim = h;
+      }
+      if (!victim) return false;
+      this.demoteNear(victim);
+      s = this.nearPool.acquire(e.id);
+      if (!s) return false;
+    }
+    e.near = s;
+    e.nearOwner = this.nearPool;
+    return true;
+  }
+
+  /** Take a holder's near body away; it continues on the mid LOD at once (consistent fade state). */
+  private demoteNear(h: PlayerEntry): void {
+    this.releaseNear(h);
+    dropToMid(h.fade);
+  }
+
+  /** Release near bodies of the lowest-priority holders above the current capacity. */
+  private enforceNearCapacity(): void {
     this.nearHolders.length = 0;
     this.entries.forEach(this.collectNearHolder);
-    for (const h of this.nearHolders) {
-      if (h === e || h.view?.isSelf) continue;
-      if (h.dist > e.dist + 2 && (!victim || h.dist > victim.dist)) victim = h;
+    const excess = this.nearHolders.length - this.nearCapacity;
+    if (excess <= 0) return;
+    this.nearHolders.sort(byRankDesc);
+    for (let i = 0, n = 0; i < this.nearHolders.length && n < excess; i++) {
+      const h = this.nearHolders[i];
+      if (h.view?.isSelf) continue;
+      this.demoteNear(h);
+      n++;
     }
-    if (!victim || !victim.near) return null;
-    this.releaseNear(victim);
-    // The victim drops to mid immediately.
-    victim.fade.cur = 1;
-    if (victim.fade.prev === 0) victim.fade.prev = 1;
-    victim.fade.t = 1;
-    s = this.nearPool.acquire(e.id);
-    return s;
   }
 
   private readonly collectNearHolder = (h: PlayerEntry): void => {
@@ -379,30 +425,36 @@ export class PlayersRenderer {
     const gone = v.mode === 'plane' || v.age > STALE_MS || (deadFor >= 0 && deadFor > DEATH_FADE_START + DEATH_FADE_TIME);
     const bodyHidden = gone || (v.isSelf && ctx.cam.hideLocalBody);
     e.dist = e.rootPos.distanceTo(ctx.camPos);
+    _sphere.center.set(e.rootPos.x, e.rootPos.y + 0.8, e.rootPos.z);
+    e.onScreen = ctx.frustum.intersectsSphere(_sphere);
+    const eff = effectiveLodDistance(e.dist, ctx.cam.fov, REF_FOV);
+    // Near-body priority: on-screen size (zoom-adjusted distance); off-screen players rank last and
+    // the local player first.
+    e.rank = v.isSelf ? -1 : e.onScreen ? eff : eff + OFFSCREEN_RANK;
     if (gone) {
       // Leaving the world (boarding the plane, stale, fully faded corpse): hide at once.
       if (e.fade.cur !== LOD_HIDDEN_IDX || e.fade.t < 1) e.fade = createLodFade(LOD_HIDDEN_IDX);
     } else if (v.isSelf) {
-      if (e.fade.cur !== 0) e.fade = createLodFade(0);
+      if (!bodyHidden && !e.near) this.takeNear(e);
+      const lvl: LodLevel = e.near || bodyHidden ? 0 : 1;
+      if (e.fade.cur !== lvl || e.fade.t < 1) e.fade = createLodFade(lvl);
     } else {
-      const eff = effectiveLodDistance(e.dist, ctx.cam.fov, REF_FOV);
       let target: LodLevel = selectLod(e.fade.cur, eff, ctx.lod);
       // Never fade in beyond the render distance (true distance, not zoom adjusted).
       if (e.dist > ctx.lod.far + ctx.lod.hysteresis) target = LOD_HIDDEN_IDX;
+      // Only head for the near LOD with a near body in hand; otherwise stay on mid (fully visible)
+      // instead of restarting a fade toward a level that can never be reached.
+      if (target === 0 && !e.near && (bodyHidden || !this.takeNear(e))) target = 1;
       stepLodFade(e.fade, target, dt, LOD_FADE_TIME);
     }
     e.tracked = !gone;
 
-    // Near soldier assignment.
+    // Near body bookkeeping: keep it while the near LOD is (still) drawn.
     const wantsNear = !bodyHidden && (e.fade.cur === 0 || (e.fade.prev === 0 && e.fade.t < 1));
-    if (wantsNear && !e.near) {
-      e.near = this.acquireNear(e);
-      e.nearOwner = e.near ? this.nearPool : null;
-      if (!e.near) {
-        // Pool exhausted: stay on the mid LOD.
-        if (e.fade.cur === 0) e.fade.cur = 1;
-        if (e.fade.prev === 0) e.fade.prev = 1;
-      }
+    if (wantsNear && !e.near && !this.takeNear(e)) {
+      // The fade still involves the near LOD but no body is available (it was handed to a
+      // higher-priority player): continue from the mid LOD in a consistent fade state.
+      dropToMid(e.fade);
     } else if (!wantsNear && e.near) {
       this.releaseNear(e);
     }
@@ -456,8 +508,7 @@ export class PlayersRenderer {
       _body.look = e.look;
       _body.showWeapon = v.weapon !== null && v.life !== 'dead';
       _body.shadows = ctx.shadows;
-      _sphere.center.set(e.rootPos.x, e.rootPos.y + 0.8, e.rootPos.z);
-      _body.onScreen = ctx.frustum.intersectsSphere(_sphere);
+      _body.onScreen = e.onScreen;
       _body.view = v;
       _body.logical = e.logical;
       _body.anim = e.anim;
@@ -469,10 +520,12 @@ export class PlayersRenderer {
       _body.dt = dt;
       _body.time = ctx.time;
     }
+    let coverage = 0;
     if (e.near) {
       if (codeNear !== 0 && e.rigValid) {
         _body.fade = codeNear;
         e.near.apply(_body);
+        coverage += Math.abs(codeNear);
       } else {
         e.near.hide();
       }
@@ -480,9 +533,15 @@ export class PlayersRenderer {
     if (codeMid !== 0 && e.rigValid) {
       _body.fade = codeMid;
       this.mid.add(_body);
+      coverage += Math.abs(codeMid);
     }
-    if (codeFar !== 0) this.drawFar(e, v, codeFar, ctx, dt);
-    else this.trackFarShape(e, v, dt);
+    if (codeFar !== 0) {
+      this.drawFar(e, v, codeFar, ctx, dt);
+      coverage += Math.abs(codeFar);
+    } else {
+      this.trackFarShape(e, v, dt);
+    }
+    e.coverage = coverage;
 
     // --- Parachute --------------------------------------------------------------------------------
     const chute = v.mode === 'parachute' && v.life !== 'dead' && !gone;
