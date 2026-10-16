@@ -1,9 +1,10 @@
-// Procedural items held in first person: healing items (bandage, first aid kit, medkit, energy
-// drink, jerry can), a frag grenade for throws and a shotgun shell for shell-by-shell reloads.
-// Item-local origin is where the holding hand sits.
+// Items held in first person: healing items (bandage, first aid kit, medkit, energy drink, jerry
+// can), a frag grenade for throws and a shotgun shell for shell-by-shell reloads. The imported
+// item models replace the procedural stand-ins once loaded. Item-local origin = holding point.
 
 import * as THREE from 'three';
 import type { ConsumableId } from '../../../../shared/types';
+import { ITEM_MODELS, loadMeshParts } from '../../../assets';
 import { createGrenadeGeometry } from '../../fx/frags';
 import { PartBuilder, type MatKey } from './parts';
 
@@ -49,22 +50,50 @@ function shell(b: PartBuilder): void {
   b.cylY('brass', 0.0102, 0.0102, 0.016, 0, 0, 0.032, Math.PI / 2, 0, 0, 10);
 }
 
-/** Build every held item once; show/hide by id. */
+/**
+ * How the imported item models (ITEM_MODELS: standing on y = 0, centred, front -Z) sit in the
+ * hand relative to the procedural stand-ins (centred at the holding point): uniform scale (first
+ * person keeps items a little smaller than life so they don't fill the view) and a yaw so the
+ * printed face (cross, label) looks at the camera.
+ */
+const REAL_FIT: Record<RealItemId, { scale: number; yaw: number }> = {
+  bandage: { scale: 0.75, yaw: 0 },
+  firstaid: { scale: 0.48, yaw: Math.PI },
+  medkit: { scale: 0.45, yaw: Math.PI },
+  energy: { scale: 0.85, yaw: Math.PI },
+  fuel: { scale: 0.5, yaw: Math.PI / 2 },
+  frag: { scale: 0.72, yaw: 0 },
+};
+type RealItemId = Exclude<HeldItemId, 'shell'>;
+const REAL_IDS = Object.keys(REAL_FIT) as RealItemId[];
+
+/**
+ * Every held item: a container per id holding the procedural stand-in, replaced by the imported
+ * model (src/client/assets ITEM_MODELS via loadMeshParts) as soon as it loads. show/hide by id.
+ */
 export class HeldItems {
   readonly group = new THREE.Group();
   private readonly items = new Map<HeldItemId, THREE.Object3D>();
+  private readonly procedural = new Map<HeldItemId, THREE.Object3D>();
   private readonly ownGeoms: THREE.BufferGeometry[] = [];
   private current: HeldItemId | null = null;
+  private disposed = false;
 
   constructor(mats: Record<MatKey, THREE.Material>) {
     this.group.name = 'vm-held-items';
+    const container = (id: HeldItemId, child: THREE.Object3D) => {
+      const c = new THREE.Group();
+      c.name = `held-${id}`;
+      c.visible = false;
+      c.add(child);
+      this.group.add(c);
+      this.items.set(id, c);
+      this.procedural.set(id, child);
+    };
     const make = (id: HeldItemId, fill: (b: PartBuilder) => void) => {
       const b = new PartBuilder(mats);
       fill(b);
-      const g = b.build(`held-${id}`);
-      g.visible = false;
-      this.group.add(g);
-      this.items.set(id, g);
+      container(id, b.build(`held-${id}-proc`));
     };
     make('bandage', bandage);
     make('firstaid', firstAid);
@@ -76,10 +105,30 @@ export class HeldItems {
     this.ownGeoms.push(gg);
     const grenade = new THREE.Mesh(gg, mats.grenade);
     grenade.frustumCulled = false;
-    grenade.visible = false;
     grenade.scale.setScalar(1.05);
-    this.group.add(grenade);
-    this.items.set('frag', grenade);
+    container('frag', grenade);
+    for (const id of REAL_IDS) {
+      loadMeshParts(ITEM_MODELS[id].file).then((parts) => { if (parts) this.useReal(id, parts.geometry, parts.material); }, () => { /* keep procedural */ });
+    }
+  }
+
+  /** Swap an item's procedural stand-in for the imported model (geometry/material shared). */
+  private useReal(id: RealItemId, geometry: THREE.BufferGeometry, material: THREE.Material): void {
+    if (this.disposed) return;
+    const fit = REAL_FIT[id];
+    const size = ITEM_MODELS[id].size;
+    const mesh = new THREE.Mesh(geometry, material);
+    mesh.name = `held-${id}-model`;
+    mesh.frustumCulled = false;
+    mesh.userData.shared = true;
+    // Centre the model (it stands on y = 0) on the holding point.
+    mesh.position.set(0, -size[1] / 2, 0);
+    const fitGroup = new THREE.Group();
+    fitGroup.rotation.y = fit.yaw;
+    fitGroup.scale.setScalar(fit.scale);
+    fitGroup.add(mesh);
+    this.items.get(id)!.add(fitGroup);
+    this.procedural.get(id)!.visible = false;
   }
 
   /** Show one item (or none). Returns the item's object for posing. */
@@ -97,9 +146,10 @@ export class HeldItems {
   }
 
   dispose(): void {
+    this.disposed = true;
     this.group.traverse((o) => {
       const m = o as THREE.Mesh;
-      if (m.isMesh && !this.ownGeoms.includes(m.geometry)) m.geometry.dispose();
+      if (m.isMesh && !m.userData.shared && !this.ownGeoms.includes(m.geometry)) m.geometry.dispose();
     });
     for (const g of this.ownGeoms) g.dispose();
     this.group.removeFromParent();

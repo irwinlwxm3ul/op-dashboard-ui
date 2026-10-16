@@ -44,6 +44,8 @@ export interface InputContext {
   stance: Stance;
   /** Seat in a vehicle (0 = driver) or -1 on foot. */
   seat: number;
+  /** Seated in a seat that can shoot (VehicleDef.seatCanShoot); false on foot. */
+  seatCanShoot: boolean;
   weapons: readonly (WeaponInstance | null)[];
   activeSlot: -1 | 0 | 1 | 2;
   frags: number;
@@ -54,8 +56,8 @@ export interface InputContext {
 }
 
 const DEFAULT_CONTEXT: InputContext = {
-  mode: 'ground', life: 'alive', stance: 'stand', seat: -1, weapons: [null, null, null], activeSlot: -1,
-  frags: 0, ads: 0, adsZoom: 1, scoped: false,
+  mode: 'ground', life: 'alive', stance: 'stand', seat: -1, seatCanShoot: false, weapons: [null, null, null],
+  activeSlot: -1, frags: 0, ads: 0, adsZoom: 1, scoped: false,
 };
 
 const QUICK_USE: Partial<Record<KeyAction, ConsumableId>> = {
@@ -66,6 +68,14 @@ const QUICK_USE: Partial<Record<KeyAction, ConsumableId>> = {
   refuel: 'fuel',
 };
 const SLOT_KEYS: Partial<Record<KeyAction, number>> = { slot1: 0, slot2: 1, slot3: 2, slot4: 3 };
+/**
+ * Seat change from a seat that can shoot, where 1-4 keep selecting weapons: Shift + the slot key of
+ * the seat (Shift+1 = driver). PUBG uses Ctrl+1..4, but browsers reserve Ctrl+1..8 for tab switching
+ * and pages cannot intercept it. The modifier is fixed (either Shift; the keymap has no chords); the
+ * number keys follow the slot1-slot4 bindings. In seats that cannot shoot (the driver's), the plain
+ * slot keys change seats.
+ */
+const SEAT_MODIFIER_CODES: ReadonlySet<string> = new Set(['ShiftLeft', 'ShiftRight']);
 
 export class InputController implements InputApi {
   /** Base aim (radians). Yaw is continuous (not wrapped) so cameras never see a 2π jump. */
@@ -85,6 +95,8 @@ export class InputController implements InputApi {
   private settingsValue: Settings;
   private codeToAction = new Map<string, KeyAction>();
   private readonly held = new Set<KeyAction>();
+  /** Shift keys held (seat-change modifier), tracked by code so unbound Right Shift counts too. */
+  private readonly shiftCodes = new Set<string>();
   private ctx: InputContext = DEFAULT_CONTEXT;
   private wasMounted = false;
   private enabledFlag = true;
@@ -171,7 +183,7 @@ export class InputController implements InputApi {
     listen(win, 'keydown', (ev) => {
       const e = ev as KeyboardEvent;
       if (isTypingTarget(e.target)) return;
-      if (this.keyDown(e.code, e.repeat)) e.preventDefault();
+      if (this.keyDown(e.code, e.repeat, e.shiftKey)) e.preventDefault();
     });
     listen(win, 'keyup', (ev) => {
       const e = ev as KeyboardEvent;
@@ -278,8 +290,12 @@ export class InputController implements InputApi {
   // Raw handlers
   // ---------------------------------------------------------------------------
 
-  /** Returns true when the key is bound (caller may preventDefault). */
-  keyDown(code: string, repeat = false): boolean {
+  /**
+   * Returns true when the key is bound (caller may preventDefault). `shift`: the event's Shift
+   * modifier state (a Shift key pressed through this handler counts as well).
+   */
+  keyDown(code: string, repeat = false, shift = false): boolean {
+    if (SEAT_MODIFIER_CODES.has(code)) this.shiftCodes.add(code);
     const action = this.codeToAction.get(code);
     if (!action) return false;
     if (repeat) return true;
@@ -302,11 +318,12 @@ export class InputController implements InputApi {
     }
     if (!playing) return false;
     this.held.add(action);
-    this.onPress(action);
+    this.onPress(action, shift || this.shiftCodes.size > 0);
     return true;
   }
 
   keyUp(code: string): boolean {
+    this.shiftCodes.delete(code);
     const action = this.codeToAction.get(code);
     if (!action) return false;
     const was = this.held.delete(action);
@@ -367,7 +384,7 @@ export class InputController implements InputApi {
 
   /** Wheel cycles through the weapons that are present (deltaY > 0 = next). */
   wheel(deltaY: number): void {
-    if (!this.enabledFlag || deltaY === 0 || this.ctx.seat >= 0) return;
+    if (!this.enabledFlag || deltaY === 0 || !this.weaponKeysLive()) return;
     const w = this.ctx.weapons;
     const dir = deltaY > 0 ? 1 : -1;
     let cur: number = this.slot < 0 ? (dir > 0 ? -1 : 3) : this.slot;
@@ -383,6 +400,7 @@ export class InputController implements InputApi {
   /** Release every held key / button (focus loss, menus). */
   releaseAll(): void {
     this.held.clear();
+    this.shiftCodes.clear();
     this.fireHeld = false;
     this.fireLatch = false;
     this.adsHeld = false;
@@ -413,7 +431,8 @@ export class InputController implements InputApi {
       this.adsToggled = false;
       this.grenadeArmed = false;
     }
-    if (this.grenadeArmed && ctx.frags <= 0) this.cancelGrenade();
+    // Out of frags, or moved to a seat that cannot shoot (passenger -> driver): disarm.
+    if (this.grenadeArmed && (ctx.frags <= 0 || !this.weaponKeysLive())) this.cancelGrenade();
   }
 
   /**
@@ -637,13 +656,21 @@ export class InputController implements InputApi {
     }
   }
 
-  private onPress(action: KeyAction): void {
+  /** Weapon keys apply: on foot, or seated in a seat that can shoot (passengers draw, swap, throw). */
+  private weaponKeysLive(): boolean {
+    const c = this.ctx;
+    return !(c.seat >= 0 || c.mode === 'vehicle') || c.seatCanShoot;
+  }
+
+  private onPress(action: KeyAction, shift: boolean): void {
     const c = this.ctx;
     const inVehicle = c.seat >= 0 || c.mode === 'vehicle';
     const onFoot = !inVehicle && (c.mode === 'ground' || c.mode === 'swim');
+    const weapons = this.weaponKeysLive();
     const slotKey = SLOT_KEYS[action];
     if (slotKey !== undefined) {
-      if (inVehicle) this.queueAction({ a: 'seat', seat: slotKey });
+      // Seats: plain 1-4 where the seat cannot shoot (driver), Shift + 1-4 from any seat.
+      if (inVehicle && (!weapons || shift)) this.queueAction({ a: 'seat', seat: slotKey });
       else if (slotKey === 3) this.toggleGrenade();
       else if (c.weapons[slotKey]) this.selectSlot(slotKey as 0 | 1 | 2);
       return;
@@ -686,13 +713,13 @@ export class InputController implements InputApi {
         this.onInteract?.();
         return;
       case 'throw':
-        if (onFoot && c.frags > 0) this.queueAction({ a: 'throw' });
+        if ((onFoot || (inVehicle && weapons)) && c.frags > 0) this.queueAction({ a: 'throw' });
         return;
       case 'holster':
-        if (!inVehicle) this.selectSlot(-1);
+        if (weapons) this.selectSlot(-1);
         return;
       case 'swapWeapons':
-        if (!inVehicle) this.queueAction({ a: 'swapWeapons' });
+        if (weapons) this.queueAction({ a: 'swapWeapons' });
         return;
       case 'cameraToggle':
         this.cameraMode = this.cameraMode === 'tpp' ? 'fpp' : 'tpp';
