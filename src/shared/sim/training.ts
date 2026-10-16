@@ -12,7 +12,7 @@ import type { TraceHit, TraceScratch } from './combat';
 import type { GameSim } from './GameSim';
 import { createPose } from './lagcomp';
 import type { PlayerRt } from './players';
-import { GIVE_AMMO, GIVE_COOLDOWN, GIVE_COUNTS, TARGET_HEAD_FRAC, TRAINING_SPAWN_SPACING } from './tuning';
+import { GIVE_AMMO, GIVE_COUNTS, TARGET_HEAD_FRAC, TRAINING_SPAWN_SPACING } from './tuning';
 
 /**
  * Height of a training target's aim point above its base. The world places TrainingTarget.pos (and
@@ -196,11 +196,15 @@ export function respawnPlayer(sim: GameSim, rt: PlayerRt): void {
   sim.emit({ type: 'spawned', player: p.id });
 }
 
-/** Action `give` (training only, rate limited): add an item like a weapon rack would. */
+/**
+ * Action `give` (training only, rate limited by a small token bucket): add an item exactly like
+ * picking it up from a rack — weapons with a full magazine, ammo / consumable stacks, gear is
+ * equipped (a replaced lower / other level is dropped at the player's feet).
+ */
 export function giveItem(sim: GameSim, rt: PlayerRt, item: ItemId): void {
   const p = rt.p;
-  if (sim.config.mode !== 'training' || p.life !== 'alive' || rt.giveCooldown > 0) return;
-  rt.giveCooldown = GIVE_COOLDOWN;
+  if (sim.config.mode !== 'training' || p.life !== 'alive' || rt.giveTokens < 1) return;
+  rt.giveTokens -= 1;
   let count = 1;
   let mag: number | undefined;
   if (isWeaponId(item)) mag = WEAPONS[item].magSize;

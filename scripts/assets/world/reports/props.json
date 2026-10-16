@@ -1,0 +1,162 @@
+[
+  [
+    {
+      "id": "crate_wood",
+      "file": "/home/user/op-dashboard-ui/public/assets/models/props/crate_wood.glb",
+      "bytes": 163092,
+      "tris": 230,
+      "size": [
+        1,
+        0.978,
+        1
+      ],
+      "meshes": [
+        "crate_wood"
+      ]
+    },
+    {
+      "id": "crate_military",
+      "file": "/home/user/op-dashboard-ui/public/assets/models/props/crate_military.glb",
+      "bytes": 322168,
+      "tris": 1576,
+      "size": [
+        1,
+        1.105,
+        1.078
+      ],
+      "meshes": [
+        "crate_military_0",
+        "crate_military_1"
+      ]
+    },
+    {
+      "id": "barrel_oil",
+      "file": "/home/user/op-dashboard-ui/public/assets/models/props/barrel_oil.glb",
+      "bytes": 169448,
+      "tris": 1100,
+      "size": [
+        0.634,
+        0.928,
+        0.639
+      ],
+      "meshes": [
+        "barrel_oil"
+      ]
+    },
+    {
+      "id": "barrel_red",
+      "file": "/home/user/op-dashboard-ui/public/assets/models/props/barrel_red.glb",
+      "bytes": 204584,
+      "tris": 1100,
+      "size": [
+        0.563,
+        0.88,
+        0.563
+      ],
+      "meshes": [
+        "barrel_red"
+      ]
+    },
+    {
+      "id": "jerrycan",
+      "file": "/home/user/op-dashboard-ui/public/assets/models/props/jerrycan.glb",
+      "bytes": 198572,
+      "tris": 895,
+      "size": [
+        0.35,
+        0.455,
+        0.169
+      ],
+      "meshes": [
+        "jerrycan"
+      ]
+    },
+    {
+      "id": "barrier_concrete",
+      "file": "/home/user/op-dashboard-ui/public/assets/models/props/barrier_concrete.glb",
+      "bytes": 207760,
+      "tris": 1400,
+      "size": [
+        3.096,
+        0.826,
+        0.63
+      ],
+      "meshes": [
+        "barrier_concrete"
+      ]
+    },
+    {
+      "id": "container_green",
+      "file": "/home/user/op-dashboard-ui/public/assets/models/props/container_green.glb",
+      "bytes": 104020,
+      "tris": 1336,
+      "size": [
+        6.06,
+        2.59,
+        2.44
+      ],
+      "meshes": [
+        "container_green"
+      ]
+    },
+    {
+      "id": "container_red",
+      "file": "/home/user/op-dashboard-ui/public/assets/models/props/container_red.glb",
+      "bytes": 81868,
+      "tris": 1032,
+      "size": [
+        6.06,
+        2.59,
+        2.44
+      ],
+      "meshes": [
+        "container_red"
+      ]
+    },
+    {
+      "id": "fence_wood",
+      "file": "/home/user/op-dashboard-ui/public/assets/models/props/fence_wood.glb",
+      "bytes": 148724,
+      "tris": 40,
+      "size": [
+        2.064,
+        0.838,
+        0.12
+      ],
+      "meshes": [
+        "fence_wood"
+      ]
+    },
+    {
+      "id": "fence_chainlink",
+      "file": "/home/user/op-dashboard-ui/public/assets/models/props/fence_chainlink.glb",
+      "bytes": 576352,
+      "tris": 1470,
+      "size": [
+        1.985,
+        2.522,
+        0.147
+      ],
+      "meshes": [
+        "fence_chainlink_frame",
+        "fence_chainlink_wire"
+      ]
+    },
+    {
+      "id": "sandbag_wall",
+      "file": "/home/user/op-dashboard-ui/public/assets/models/props/sandbag_wall.glb",
+      "bytes": 82988,
+      "tris": 1932,
+      "size": [
+        2.075,
+        1.156,
+        0.66
+      ],
+      "meshes": [
+        "sandbag_wall"
+      ],
+      "bags": 42,
+      "bagTris": 46
+    }
+  ]
+]

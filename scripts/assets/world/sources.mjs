@@ -20,6 +20,14 @@ export const SOURCES = {
       '/Zombie Apocalypse Kit - March 2024/Environment/glTF/*',
       '/Zombie Apocalypse Kit - March 2024/License.txt',
       '/Zombie Apocalypse Kit - March 2024/Zombie_Atlas.png',
+      '/Fantasy Props MegaKit[[]Standard]/License_Standard.txt',
+      '/Fantasy Props MegaKit[[]Standard]/Exports/glTF/Crate_Wooden.*',
+      '/Fantasy Props MegaKit[[]Standard]/Exports/glTF/T_Trim_Furniture_*',
+      '/Fantasy Props MegaKit[[]Standard]/Exports/glTF/T_Trim_Metal_*',
+      '/Medieval Village MegaKit[[]Standard]/License_Standard.txt',
+      '/Medieval Village MegaKit[[]Standard]/glTF/Prop_Crate.*',
+      '/Medieval Village MegaKit[[]Standard]/glTF/Prop_WoodenFence_Single.*',
+      '/Medieval Village MegaKit[[]Standard]/glTF/T_WoodTrim_*',
     ],
   },
   /** Poly Haven models (CC0), 1k glTF exports as published on polyhaven.com, mirror #1. */
@@ -64,6 +72,8 @@ const Q = SOURCES.quaternius.dir;
 export const MEGAKIT = `${Q}/Stylized Nature MegaKit[Standard]/glTF`;
 export const ULTNAT = `${Q}/Ultimate Stylized Nature - May 2022/glTF`;
 export const ZOMBIE = `${Q}/Zombie Apocalypse Kit - March 2024/Environment/glTF`;
+export const FANTASY = `${Q}/Fantasy Props MegaKit[Standard]/Exports/glTF`;
+export const MEDIEVAL = `${Q}/Medieval Village MegaKit[Standard]/glTF`;
 export const PHA = `${SOURCES.polyhavenA.dir}/assets/polyhaven/models`;
 export const PHB = `${SOURCES.polyhavenB.dir}/assets/ph/models`;
 export const LUAZ = `${SOURCES.luaz.dir}/assets/models/vehicle/scene.gltf`;

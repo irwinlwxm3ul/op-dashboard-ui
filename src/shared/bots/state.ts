@@ -163,6 +163,8 @@ export interface BotState {
 
   // ---- vehicles ----
   vehicleId: EntityId;
+  /** Vehicle the bot currently sits in (-1 on foot): per-ride state resets when it changes. */
+  rideId: EntityId;
   vehicleSince: number;
   vehicleActionAt: number;
   /** Vehicles this bot gave up on (id -> until time). */
@@ -173,6 +175,8 @@ export interface BotState {
   driveStuckCount: number;
   driveWaitUntil: number;
   driveThrottle: number;
+  /** Speed the driver aims for (m/s), from the obstacle / turn / terrain probes at think time. */
+  driveTargetSpeed: number;
   exitWanted: boolean;
 
   // ---- zone / idle ----
@@ -296,6 +300,7 @@ export function createBotState(p: PlayerState, seed: number, thinkSlot: number, 
     jumpDelayUntil: -1,
     planeActionAt: -1e9,
     vehicleId: -1,
+    rideId: -1,
     vehicleSince: 0,
     vehicleActionAt: -1e9,
     vehicleBlacklist: new Map(),
@@ -305,6 +310,7 @@ export function createBotState(p: PlayerState, seed: number, thinkSlot: number, 
     driveStuckCount: 0,
     driveWaitUntil: 0,
     driveThrottle: 0,
+    driveTargetSpeed: 0,
     exitWanted: false,
     zoneKey: -1,
     zoneX: 0,

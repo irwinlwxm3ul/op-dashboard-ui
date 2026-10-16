@@ -56,11 +56,16 @@ export interface DzWindow {
     session?: { game: GameLike; feel?: { state?: { kick?: { pitch: number } } } } | null;
     core?: { stats(): { fps: number; drawCalls: number } } | null;
   };
-  __dzTap?: { events: TapEvent[]; game: unknown };
+  __dzTap?: { events: TapEvent[]; game: unknown; seq: number; snaps: number };
 }
 
-/** A client event as recorded in the page (performance.now() of the frame that dispatched it). */
-export interface TapEvent { at: number; ev: ClientEvent }
+/**
+ * A client event as recorded in the page: `at` = performance.now() of the frame that dispatched it,
+ * `seq` = position in the stream and `snap` = number of snapshots received before it (the client
+ * emits a `localSnapshot` event after each snapshot's events, so `snap` measures server time in
+ * 50 ms snapshot steps independently of the frame rate).
+ */
+export interface TapEvent { at: number; seq: number; snap: number; ev: ClientEvent }
 
 /**
  * Records every client event (server GameEvents and locally predicted events) of whichever match
@@ -69,15 +74,19 @@ export interface TapEvent { at: number; ev: ClientEvent }
 async function installEventTap(page: Page): Promise<void> {
   await page.addInitScript(() => {
     const w = window as unknown as DzWindow;
-    const tap = { events: [] as TapEvent[], game: null as unknown };
+    const tap = { events: [] as TapEvent[], game: null as unknown, seq: 0, snaps: 0 };
     w.__dzTap = tap;
     setInterval(() => {
       const g = w.__dz?.session?.game;
       if (!g || g === tap.game) return;
       tap.game = g;
       g.events.onAny((ev) => {
+        if (ev.type === 'localSnapshot') {
+          tap.snaps++;
+          return;
+        }
         // Matches can end with large results payloads; everything here is plain JSON data.
-        tap.events.push({ at: performance.now(), ev: JSON.parse(JSON.stringify(ev)) as ClientEvent });
+        tap.events.push({ at: performance.now(), seq: tap.seq++, snap: tap.snaps, ev: JSON.parse(JSON.stringify(ev)) as ClientEvent });
         if (tap.events.length > 6000) tap.events.splice(0, 1000);
       });
     }, 50);
@@ -87,11 +96,11 @@ async function installEventTap(page: Page): Promise<void> {
 type EvOf<T extends ClientEvent['type']> = Extract<GameEvent | LocalEvent, { type: T }>;
 
 /** Recorded events of the given types (oldest first), optionally after page time `since`. */
-export async function events<T extends ClientEvent['type']>(page: Page, types: T[], since = 0): Promise<{ at: number; ev: EvOf<T> }[]> {
+export async function events<T extends ClientEvent['type']>(page: Page, types: T[], since = 0): Promise<{ at: number; seq: number; snap: number; ev: EvOf<T> }[]> {
   return page.evaluate(({ types, since }) => {
     const tap = (window as unknown as DzWindow).__dzTap;
     return (tap?.events ?? []).filter((e) => e.at >= since && (types as string[]).includes(e.ev.type));
-  }, { types, since }) as Promise<{ at: number; ev: EvOf<T> }[]>;
+  }, { types, since }) as Promise<{ at: number; seq: number; snap: number; ev: EvOf<T> }[]>;
 }
 
 export async function pageNow(page: Page): Promise<number> {

@@ -169,8 +169,9 @@ export const SPILL_RADIUS = 0.75;
 // ---- Training ----------------------------------------------------------------------------------
 
 export const TRAINING_RESPAWN_DELAY = 3;
-/** Minimum seconds between two `give` actions. */
-export const GIVE_COOLDOWN = 0.2;
+/** `give` rate limit: token bucket of GIVE_BURST actions refilled at GIVE_RATE per second. */
+export const GIVE_BURST = 8;
+export const GIVE_RATE = 4;
 export const GIVE_AMMO = 60;
 export const GIVE_COUNTS: Record<string, number> = {
   bandage: 5, firstaid: 3, medkit: 1, energy: 3, fuel: 1, frag: 3,

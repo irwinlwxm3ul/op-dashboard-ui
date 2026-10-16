@@ -126,6 +126,11 @@ class Driver implements BotDriverEx {
     out.buttons = 0;
     out.stance = 0;
     let footAxes = false;
+    if (p.mode !== 'vehicle') {
+      // Out of any vehicle: the next boarding starts a fresh ride.
+      b.rideId = -1;
+      b.exitWanted = false;
+    }
     switch (p.mode) {
       case 'plane':
         b.goal = 'plane';

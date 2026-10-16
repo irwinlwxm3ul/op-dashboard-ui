@@ -10,7 +10,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { tsImport } from 'tsx/esm/api';
 import { runInPage, MODELS_DIR, REPO_ROOT } from '../harness.mjs';
-import { DL, MEGAKIT, ULTNAT, ZOMBIE, PHA, PHB, LUAZ, DIRTBIKE, SANDBAG } from './sources.mjs';
+import { DL, MEGAKIT, ULTNAT, ZOMBIE, FANTASY, MEDIEVAL, PHA, PHB, LUAZ, DIRTBIKE, SANDBAG } from './sources.mjs';
 
 const { VEHICLES } = await tsImport('../../../src/shared/vehicles/defs.ts', import.meta.url);
 const rideHeight = (t) => VEHICLES[t].groundClearance + VEHICLES[t].halfExtents.y;
@@ -37,7 +37,7 @@ const JOBS = {
   },
   props: {
     module: '/scripts/world/props.page.js',
-    calls: [['buildProps', { PHA, PHB, ZOMBIE, SANDBAG, outDir: path.join(MODELS_DIR, 'props') }]],
+    calls: [['buildProps', { PHA, ZOMBIE, SANDBAG, FANTASY, MEDIEVAL, outDir: path.join(MODELS_DIR, 'props') }]],
   },
   nature: {
     module: '/scripts/world/nature.page.js',

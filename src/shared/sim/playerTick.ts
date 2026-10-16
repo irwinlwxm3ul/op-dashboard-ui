@@ -27,7 +27,8 @@ import { planePosition } from './plane';
 import type { PlayerRt } from './players';
 import { LAG_BUCKETS, LAG_BUCKET_TICKS, neutralize, popInput } from './players';
 import {
-  ADS_MOVE_MUL, CATCHUP_DELAY_TICKS, CATCHUP_DEPTH, EVENT_RANGE, INPUT_CREDIT_DECAY, INPUT_CREDIT_MAX,
+  ADS_MOVE_MUL, CATCHUP_DELAY_TICKS, CATCHUP_DEPTH, EVENT_RANGE, GIVE_BURST, GIVE_RATE, INPUT_CREDIT_DECAY,
+  INPUT_CREDIT_MAX,
   INPUT_DRIFT_CREDIT, INPUT_PAUSE_MAX_TICKS, MOVE_DEADZONE, NOISE_FOOTSTEP_INTERVAL, NOISE_FOOTSTEP_RADIUS,
   PITCH_LIMIT, REVIVE_HEALTH, REVIVE_KEEP_SLACK, SPRINT_MIN_FORWARD,
 } from './tuning';
@@ -66,7 +67,7 @@ function onLanded(sim: GameSim, p: PlayerState, ev: MoveEvents, fromDrop: boolea
 export function updatePlayer(sim: GameSim, rt: PlayerRt, dt: number): void {
   const p = rt.p;
   if (rt.runOverCooldown > 0) rt.runOverCooldown -= dt;
-  if (rt.giveCooldown > 0) rt.giveCooldown -= dt;
+  if (rt.giveTokens < GIVE_BURST) rt.giveTokens = Math.min(GIVE_BURST, rt.giveTokens + GIVE_RATE * dt);
   advanceLagBuckets(rt);
   if (sim.phase === 'ended') {
     // Match over: inputs are still consumed (acks) but only the aim follows them.

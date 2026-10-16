@@ -12,7 +12,7 @@ import type { MoveEvents, MoveIntent } from '../physics';
 import type { VehicleControls } from '../vehicles';
 import type { ClientAction, EntityId, PlayerInput, PlayerState, TeamId, Vec3 } from '../types';
 import { BTN } from '../types';
-import { FLAG_HS_WINDOW, FLAG_SNAP_COUNT, FLAG_SNAP_WINDOW, INPUT_QUEUE_CAPACITY } from './tuning';
+import { FLAG_HS_WINDOW, FLAG_SNAP_COUNT, FLAG_SNAP_WINDOW, GIVE_BURST, INPUT_QUEUE_CAPACITY } from './tuning';
 
 /** Buttons that act on their press only (kept when an input's movement part has to be merged away). */
 export const EDGE_BUTTONS = BTN.JUMP | BTN.RELOAD;
@@ -79,7 +79,8 @@ export interface PlayerRt {
   runOverCooldown: number;
   /** Training: seconds until auto-respawn after death (<= 0 = inactive). */
   respawnTimer: number;
-  giveCooldown: number;
+  /** Training `give` token bucket. */
+  giveTokens: number;
   /** Distance / headshot of the knock (credited when the player bleeds out). */
   knockDistance: number;
   knockHeadshot: boolean;
@@ -198,7 +199,7 @@ export function createPlayerRt(p: PlayerState, spawnIndex: number): PlayerRt {
     stepNoiseTimer: 0,
     runOverCooldown: 0,
     respawnTimer: 0,
-    giveCooldown: 0,
+    giveTokens: GIVE_BURST,
     knockDistance: 0,
     knockHeadshot: false,
     spawnIndex,

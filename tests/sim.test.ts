@@ -3,8 +3,8 @@
 // world generation is tuned.
 import { describe, expect, it } from 'vitest';
 import {
-  DOWNED_BLEED_PER_SEC, DOWNED_HEALTH, FALL_DAMAGE_PER_MS, FALL_DAMAGE_SPEED, HITBOX_HISTORY_MS, MAX_REWIND_MS,
-  MIN_CHUTE_DROP, REVIVE_TIME, TICK_DT,
+  DOWNED_BLEED_PER_SEC, DOWNED_HEALTH, FALL_DAMAGE_PER_MS, FALL_DAMAGE_SPEED, HITBOX_HISTORY_MS, INTERP_DELAY_MS,
+  MAX_REWIND_MS, MIN_CHUTE_DROP, REVIVE_TIME, TICK_DT, TICK_MS,
 } from '../src/shared/constants';
 import { GEAR, THROWABLES, WEAPONS, computeDamage, fireInterval, sightDrop, simulateTrajectory } from '../src/shared/items';
 import { lineOfSight } from '../src/shared/physics';
@@ -12,6 +12,7 @@ import { Rng } from '../src/shared/rng';
 import { GameSim, TRAINING_TARGET_CENTER_HEIGHT, ZONE_PHASES, ZONE_PRE_TIME, trainingTargetPosition } from '../src/shared/sim';
 import type { SimEvent } from '../src/shared/sim';
 import { damageInfo, damagePlayer } from '../src/shared/sim/combat';
+import type { CheatFlag } from '../src/shared/sim';
 import { VEHICLES, exitPosition } from '../src/shared/vehicles';
 import type {
   GameEvent, MatchConfig, PlayerInput, PlayerState, RockDef, TreeDef, Vec3, WeaponId, World, WorldBox,
@@ -45,14 +46,18 @@ class Harness {
   }
   p(id: number): PlayerState { return this.sim.players.get(id)!; }
   /** Teleport a player onto the ground (test setup). */
-  place(id: number, x: number, z: number, yaw = 0): void {
+  place(id: number, x: number, z: number, yaw = 0, refY?: number): void {
     const p = this.p(id);
     p.mode = 'ground';
-    p.pos.x = x; p.pos.z = z; p.pos.y = this.world.groundAt(x, z);
+    p.pos.x = x; p.pos.z = z; p.pos.y = refY === undefined ? this.world.groundAt(x, z) : this.world.groundAt(x, z, refY + 0.5);
     p.vel.x = 0; p.vel.y = 0; p.vel.z = 0;
     p.onGround = true; p.airTime = 0; p.fallSpeed = 0; p.parachuteOpen = false; p.stance = 'stand';
     p.yaw = yaw;
     this.idle.set(id, { ...(this.idle.get(id) ?? {}), yaw, pitch: 0 });
+  }
+  /** Stop sending idle inputs for a player (the test feeds it explicitly). */
+  manual(id: number): void {
+    this.idle.delete(id);
   }
   /** Let a player's input queue drain (no inputs sent for it until empty). */
   drain(id: number): void {
@@ -924,13 +929,29 @@ describe('training ground', () => {
     const layout = h.world.training!;
     expect(Math.hypot(p.pos.x - layout.spawn.x, p.pos.z - layout.spawn.z)).toBeLessThan(20);
     h.setIdle(a, { yaw: layout.spawnYaw });
-    // Give, rate limited (two in one tick -> one).
-    h.step(1, () => ({ [a]: { actions: [{ a: 'give', item: 'ar' }, { a: 'give', item: 'ammo_556' }] } }));
+    // Give: several items in one input all arrive; gear is equipped (a replaced level is dropped).
+    h.step(1, () => ({ [a]: { actions: [{ a: 'give', item: 'ar' }, { a: 'give', item: 'ammo_556' }, { a: 'give', item: 'helmet2' }, { a: 'give', item: 'vest1' }] } }));
     expect(p.weapons[0]).toEqual({ id: 'ar', mag: 30 });
-    expect(p.ammo.ammo_556).toBe(0);
-    h.step(10);
-    h.step(1, () => ({ [a]: { actions: [{ a: 'give', item: 'ammo_556' }] } }));
     expect(p.ammo.ammo_556).toBe(60);
+    expect(p.armor.helmet).toBe(2);
+    expect(p.armor.vest).toBe(1);
+    const lootBefore = h.sim.loot.size;
+    h.step(1, () => ({ [a]: { actions: [{ a: 'give', item: 'vest3' }, { a: 'give', item: 'pack2' }] } }));
+    expect(p.armor.vest).toBe(3);
+    expect(p.armor.vestHp).toBe(GEAR.vest3.durability);
+    expect(p.armor.pack).toBe(2);
+    expect([...h.sim.loot.values()].some((l) => l.item === 'vest1')).toBe(true);
+    expect(h.sim.loot.size).toBe(lootBefore + 1);
+    // Rate limited: a burst beyond the bucket is ignored, it refills over time.
+    p.items.bandage = 0;
+    h.step(1, () => ({ [a]: { actions: [{ a: 'give', item: 'bandage' }, { a: 'give', item: 'bandage' }, { a: 'give', item: 'bandage' }, { a: 'give', item: 'bandage' }] } }));
+    h.step(1, () => ({ [a]: { actions: [{ a: 'give', item: 'bandage' }, { a: 'give', item: 'bandage' }, { a: 'give', item: 'bandage' }, { a: 'give', item: 'bandage' }] } }));
+    expect(p.items.bandage).toBeLessThan(8 * 5);
+    expect(p.items.bandage).toBeGreaterThan(0);
+    h.step(60);
+    const nb = p.items.bandage;
+    h.step(1, () => ({ [a]: { actions: [{ a: 'give', item: 'bandage' }] } }));
+    expect(p.items.bandage).toBeGreaterThan(nb);
     // Infinite ammo: reload refills the mag without consuming the reserve.
     h.setIdle(a, { slot: 0 });
     h.step(30);
@@ -1008,6 +1029,291 @@ describe('training ground', () => {
     const mh = h.of('targetHit');
     expect(mh.length).toBe(1);
     expect(mh[0].target).toBe(moving.id);
+  });
+});
+
+/** No collider overlaps a standing body (0.4 m radius, 0.3..1.8 m above `y`) at (x, z). */
+function bodyClear(w: World, x: number, z: number, y: number): boolean {
+  const boxes: WorldBox[] = [];
+  w.queryBoxes(x - 0.4, z - 0.4, x + 0.4, z + 0.4, boxes);
+  return !boxes.some((b) => b.max.y > y + 0.3 && b.min.y < y + 1.8);
+}
+
+/**
+ * A thin bullet-blocking wall with walkable floor at its base on both sides: s1 / s2 just either
+ * side of it, `out` a point 2.6 m beyond s2's side that s2 can see but s1 cannot.
+ */
+function findWall(w: World): { s1: { x: number; z: number }; s2: { x: number; z: number }; out: { x: number; z: number }; y: number } {
+  const blocked = (a: { x: number; z: number }, b: { x: number; z: number }, y: number) =>
+    [0.4, 1.0, 1.6].every((dy) => !lineOfSight(w, { x: a.x, y: y + dy, z: a.z }, { x: b.x, y: y + dy, z: b.z }));
+  for (const b of w.boxes) {
+    if (b.kind !== 'wall' || !b.blocksBullets || b.max.y - b.min.y < 2.4) continue;
+    const tx = b.max.x - b.min.x, tz = b.max.z - b.min.z;
+    if (Math.min(tx, tz) > 0.4 || Math.max(tx, tz) < 3) continue;
+    const cx = (b.min.x + b.max.x) / 2, cz = (b.min.z + b.max.z) / 2;
+    const alongX = tx < tz;
+    const s1 = alongX ? { x: b.min.x - 0.8, z: cz } : { x: cx, z: b.min.z - 0.8 };
+    const s2 = alongX ? { x: b.max.x + 0.8, z: cz } : { x: cx, z: b.max.z + 0.8 };
+    const out = alongX ? { x: b.max.x + 2.6, z: cz } : { x: cx, z: b.max.z + 2.6 };
+    const y = b.min.y;
+    const g1 = w.groundAt(s1.x, s1.z, y + 0.5), g2 = w.groundAt(s2.x, s2.z, y + 0.5);
+    if (Math.abs(g1 - y) > 0.3 || Math.abs(g2 - y) > 0.3) continue;
+    if (!bodyClear(w, s1.x, s1.z, y) || !bodyClear(w, s2.x, s2.z, y)) continue;
+    if (!blocked(s1, s2, y) || !blocked(s1, out, y)) continue;
+    if (!lineOfSight(w, { x: s2.x, y: y + 1.0, z: s2.z }, { x: out.x, y: y + 1.0, z: out.z })) continue;
+    return { s1, s2, out, y };
+  }
+  throw new Error('no wall found');
+}
+
+describe('netcode hardening', () => {
+  /** Scripted run: 120 inputs (sprint, turning, a jump); optional delivery stall of inputs 30..41. */
+  function pacingRun(stall: boolean) {
+    const h = new Harness({ mode: 'training', maxPlayers: 2 });
+    const a = h.add('Runner');
+    const o = findOpen(h.world, 40, 16, 16);
+    startOnGround(h, { [a]: [o.x, o.z, 0] });
+    h.manual(a);
+    const p = h.p(a);
+    const mk = (k: number): Partial<PlayerInput> => ({
+      seq: 1000 + k, mz: 1, yaw: Math.sin(k * 0.05) * 0.6, buttons: (k % 40 < 30 ? BTN.SPRINT : 0) | (k === 70 ? BTN.JUMP : 0),
+    });
+    const seqLog: number[] = [];
+    let maxDepthLate = 0;
+    const rt = h.sim.rtById.get(a)!;
+    for (let k = 0; k < 120; k++) {
+      if (!stall || k < 30) h.input(a, mk(k));
+      else if (k === 42) for (let j = 30; j <= 42; j++) h.input(a, mk(j));
+      else if (k > 42) h.input(a, mk(k));
+      h.step(1);
+      seqLog.push(p.lastSeq);
+      if (k > 42 + 15 + 15) maxDepthLate = Math.max(maxDepthLate, rt.qLen);
+    }
+    h.drain(a);
+    return { p, seqLog, maxDepthLate };
+  }
+
+  it('a delivery stall never drops or invents input, and the backlog is caught up', () => {
+    const ref = pacingRun(false);
+    const st = pacingRun(true);
+    // Every input applied exactly once: acks advance by at most 2 per tick and end at the last seq.
+    for (let i = 1; i < st.seqLog.length; i++) {
+      const d = st.seqLog[i] - st.seqLog[i - 1];
+      expect(d).toBeGreaterThanOrEqual(0);
+      expect(d).toBeLessThanOrEqual(2);
+    }
+    expect(st.p.lastSeq).toBe(1119);
+    // The backlog is gone ~0.5 s after the stall (latency does not ratchet up).
+    expect(st.maxDepthLate).toBeLessThanOrEqual(1);
+    // Same inputs => same result as without the stall (client prediction parity).
+    expect(st.p.pos.x).toBeCloseTo(ref.p.pos.x, 9);
+    expect(st.p.pos.z).toBeCloseTo(ref.p.pos.z, 9);
+    expect(st.p.pos.y).toBeCloseTo(ref.p.pos.y, 9);
+  });
+
+  it('flooding inputs never moves a player faster than sprinting', () => {
+    const h = new Harness({ mode: 'training', maxPlayers: 2 });
+    const a = h.add('Flooder');
+    const o = findOpen(h.world, 40, 4, 4);
+    startOnGround(h, { [a]: [o.x, o.z, 0] });
+    h.manual(a);
+    const p = h.p(a);
+    const start = { x: p.pos.x, z: p.pos.z };
+    const t0 = h.sim.time;
+    let seq = 5000;
+    let mid = { x: 0, z: 0 };
+    for (let k = 0; k < 150; k++) {
+      // 3 inputs per tick, every tick.
+      for (let j = 0; j < 3; j++) h.input(a, { seq: ++seq, mz: 1, yaw: 0, buttons: BTN.SPRINT });
+      h.step(1);
+      if (k === 59) mid = { x: p.pos.x, z: p.pos.z };
+    }
+    const total = Math.hypot(p.pos.x - start.x, p.pos.z - start.z);
+    expect(total).toBeLessThanOrEqual(6.3 * (h.sim.time - t0) + 0.3);
+    const late = Math.hypot(p.pos.x - mid.x, p.pos.z - mid.z);
+    expect(late).toBeLessThanOrEqual(6.3 * 90 * TICK_DT * 1.02);
+    expect(late).toBeGreaterThan(6.3 * 90 * TICK_DT * 0.8);
+  });
+
+  it('bounds the rewind by the measured latency (no free 250 ms backtrack)', () => {
+    const h = new Harness({ mode: 'training', maxPlayers: 2 });
+    const a = h.add('Shooter');
+    const b = h.add('Runner');
+    const o = findOpen(h.world, 26, 4, 60);
+    // The target sprints along +X (side-on to the shooter).
+    startOnGround(h, { [a]: [o.x, o.z, Math.PI], [b]: [o.x, o.z - 20, -Math.PI / 2] });
+    h.arm(a, 'ar');
+    h.setIdle(a, { buttons: BTN.ADS });
+    h.setIdle(b, { mz: 1, buttons: BTN.SPRINT });
+    h.step(20);
+    const shotAt = (back: number, rtBack: number) => {
+      h.step(15);
+      const now = h.sim.time;
+      const aim = h.aimAt(a, h.torso(b, now - back));
+      h.clearEvents();
+      h.step(1, () => ({ [a]: { ...aim, buttons: BTN.ADS | BTN.FIRE, rt: (now - rtBack) * 1000 } }));
+      expect(h.of('shot').length).toBe(1);
+      return h.of('hit').filter((e) => e.victim === b).length;
+    };
+    // LAN cheater: 2 ms transport RTT but claims to see the world 245 ms ago.
+    h.sim.setPlayerLatency(a, 2);
+    const allowed = (2 + INTERP_DELAY_MS + 2 * TICK_MS) / 1000;
+    expect(shotAt(0.245, 0.245)).toBe(0);
+    expect(shotAt(allowed, 0.245)).toBe(1);
+    // Honest 150 ms client: fully compensated up to MAX_REWIND_MS.
+    h.sim.setPlayerLatency(a, 150);
+    expect(shotAt(0.245, 0.245)).toBe(1);
+    // No transport RTT: bounded by the client's own recent view lag (here ~20 ms).
+    h.sim.setPlayerLatency(a, null);
+    h.setIdle(a, { buttons: BTN.ADS, rt: undefined });
+    for (let i = 0; i < 100; i++) h.step(1, () => ({ [a]: { buttons: BTN.ADS, rt: (h.sim.time - 0.02) * 1000 } }));
+    const shotAt2 = (back: number, rtBack: number) => {
+      const now = h.sim.time;
+      const aim = h.aimAt(a, h.torso(b, now - back));
+      h.clearEvents();
+      h.step(1, () => ({ [a]: { ...aim, buttons: BTN.ADS | BTN.FIRE, rt: (now - rtBack) * 1000 } }));
+      const n = h.of('hit').filter((e) => e.victim === b).length;
+      h.step(15, () => ({ [a]: { buttons: BTN.ADS, rt: (h.sim.time - 0.02) * 1000 } }));
+      return n;
+    };
+    expect(shotAt2(0.245, 0.245)).toBe(0);
+    expect(shotAt2(0.02 + 2 * TICK_MS / 1000, 0.245)).toBe(1);
+  });
+
+  it('vehicle hulls are lag compensated like players', () => {
+    const h = new Harness({ mode: 'training', maxPlayers: 2 });
+    const a = h.add('Shooter');
+    h.sim.start();
+    const o = findOpen(h.world, 26, 34, 34);
+    const v = [...h.sim.vehicles.values()].find((veh) => VEHICLES[veh.type].halfExtents.z < 2.4)!;
+    // Park it on the line z0 - 20 heading along -X (length along X), then slide it manually.
+    const vrt = h.sim.vrtById.get(v.id)!;
+    const rideH = v.pos.y - h.world.groundAt(v.pos.x, v.pos.z, v.pos.y);
+    const z = o.z - 20;
+    const put = (x: number) => {
+      v.pos.x = x; v.pos.z = z; v.pos.y = h.world.groundAt(x, z) + rideH;
+      v.yaw = Math.PI / 2; v.pitch = 0; v.roll = 0;
+      v.vel.x = 0; v.vel.y = 0; v.vel.z = 0;
+      vrt.asleep = true;
+    };
+    let x = o.x - 30;
+    put(x);
+    h.place(a, o.x, o.z, Math.PI);
+    h.sim.setPlayerLatency(a, 150);
+    h.arm(a, 'ar');
+    h.setIdle(a, { buttons: BTN.ADS });
+    const speed = 20;
+    const move = () => { x += speed * TICK_DT; put(x); return {}; };
+    // Drive until the hull passes in front of the shooter.
+    while (x < o.x - 6) h.step(1, move);
+    const shoot = (rtBack: number) => {
+      const now = h.sim.time;
+      // Aim at the hull centre as it was 150 ms ago.
+      const seen = { x: x - speed * 0.15, y: v.pos.y, z };
+      const aim = h.aimAt(a, seen);
+      const hp = v.health;
+      h.step(1, () => { move(); return { [a]: { ...aim, buttons: BTN.ADS | BTN.FIRE, rt: (now - rtBack) * 1000 } }; });
+      h.step(8, move);
+      return hp - v.health;
+    };
+    expect(shoot(0.15)).toBeGreaterThan(0);
+    expect(shoot(0)).toBe(0);
+  });
+
+  it('vehicle entry and revive need line of sight (no interacting through walls)', () => {
+    const h = new Harness({ maxPlayers: 4, teamSize: 2 });
+    const a = h.add('A', 0);
+    const b = h.add('B', 0);
+    h.add('Enemy', 1);
+    const wall = findWall(h.world);
+    h.sim.start();
+    h.place(a, wall.s1.x, wall.s1.z, 0, wall.y);
+    h.place(b, wall.s2.x, wall.s2.z, 0, wall.y);
+    h.step(3);
+    // Downed teammate on the other side of the wall: revive refused.
+    const pb = h.p(b);
+    damagePlayer(h.sim, pb, 150, damageInfo(null, 'zone'));
+    expect(pb.life).toBe('downed');
+    h.step(1, () => ({ [a]: { buttons: BTN.INTERACT, actions: [{ a: 'revive', id: b }] } }));
+    expect(h.p(a).revive).toBeNull();
+    // Same side: accepted.
+    h.place(a, wall.s2.x + 0.3, wall.s2.z + 0.3, 0, wall.y);
+    h.step(1, () => ({ [a]: { buttons: BTN.INTERACT, actions: [{ a: 'revive', id: b }] } }));
+    expect(h.p(a).revive?.target).toBe(b);
+    // A vehicle parked behind the wall cannot be entered from the other side.
+    const v = [...h.sim.vehicles.values()][0];
+    const vrt = h.sim.vrtById.get(v.id)!;
+    v.pos.x = wall.out.x; v.pos.z = wall.out.z; v.pos.y = wall.y + 1.1;
+    v.vel.x = 0; v.vel.y = 0; v.vel.z = 0;
+    vrt.asleep = true;
+    h.place(a, wall.s1.x, wall.s1.z, 0, wall.y);
+    h.step(1, () => ({ [a]: { actions: [{ a: 'enter', id: v.id }] } }));
+    expect(h.p(a).vehicleId).toBeNull();
+    h.place(a, wall.s2.x, wall.s2.z, 0, wall.y);
+    vrt.asleep = true;
+    h.step(1, () => ({ [a]: { actions: [{ a: 'enter', id: v.id }] } }));
+    expect(h.p(a).vehicleId).toBe(v.id);
+  });
+
+  it('raises aim flags for snap hits and an extreme headshot ratio (no gameplay effect)', () => {
+    const h = new Harness({ maxPlayers: 2 });
+    const a = h.add('Aimbot');
+    const b = h.add('Victim');
+    const flags: CheatFlag[] = [];
+    h.sim.onFlag = (f) => flags.push(f);
+    const o = findOpen(h.world, 26, 4, 4);
+    startOnGround(h, { [a]: [o.x, o.z, Math.PI], [b]: [o.x, o.z - 20, 0] });
+    h.arm(a, 'ar');
+    h.setIdle(a, { buttons: BTN.ADS });
+    h.step(10);
+    const head = () => {
+      const hb = h.sim.rewindHitboxes(b, h.sim.time);
+      const hd = hb.find((x) => x.part === 'head')!;
+      return { x: hd.a.x, y: hd.a.y, z: hd.a.z };
+    };
+    for (let i = 0; i < 24; i++) {
+      h.p(b).health = 100;
+      const aim = h.aimAt(a, head());
+      // Snap: look 90 degrees away, then straight onto the head and fire in the next input.
+      h.step(1, () => ({ [a]: { yaw: aim.yaw + 1.6, pitch: aim.pitch, buttons: BTN.ADS } }));
+      h.step(1, () => ({ [a]: { ...aim, buttons: BTN.ADS | BTN.FIRE } }));
+      h.step(8, () => ({ [a]: { ...aim, buttons: BTN.ADS } }));
+    }
+    expect(h.p(a).stats.headshots).toBeGreaterThanOrEqual(20);
+    expect(flags.some((f) => f.kind === 'aimSnap' && f.player === a)).toBe(true);
+    expect(flags.some((f) => f.kind === 'headshotRatio' && f.player === a && f.value >= 0.6)).toBe(true);
+    // Rate limited: at most one flag of each kind per FLAG_COOLDOWN.
+    expect(flags.filter((f) => f.kind === 'aimSnap').length).toBe(1);
+    expect(h.p(b).life).toBe('alive');
+  });
+
+  it('after the match ended nothing changes life state and controls freeze', () => {
+    const h = new Harness({ maxPlayers: 4, teamSize: 2 });
+    const a0 = h.add('A0', 0), a1 = h.add('A1', 0);
+    const b0 = h.add('B0', 1), b1 = h.add('B1', 1);
+    const o = findOpen(h.world, 26, 4, 10);
+    startOnGround(h, { [a0]: [o.x, o.z], [a1]: [o.x + 2, o.z], [b0]: [o.x + 4, o.z], [b1]: [o.x + 6, o.z] });
+    h.p(a1).weapons[0] = { id: 'ar', mag: 30 };
+    h.setIdle(a1, { slot: 0 });
+    h.step(30);
+    const kill = (v: number, by: number) => damagePlayer(h.sim, h.p(v), 500, damageInfo(h.p(by), 'ar'));
+    expect(kill(a0, b0)).toBe('knock');
+    kill(b0, a1);
+    kill(b1, a1);
+    expect(h.sim.phase).toBe('ended');
+    expect(h.p(a0).life).toBe('downed');
+    const pos = { ...h.p(a1).pos };
+    const fired = h.p(a1).stats.shotsFired;
+    h.clearEvents();
+    // Bleed time passes, the winner holds fire and runs.
+    h.step(Math.ceil(30 / TICK_DT), () => ({ [a1]: { slot: 0, mz: 1, yaw: 1, buttons: BTN.FIRE | BTN.SPRINT } }));
+    expect(h.p(a0).life).toBe('downed');
+    expect(h.p(a1).stats.shotsFired).toBe(fired);
+    expect(Math.hypot(h.p(a1).pos.x - pos.x, h.p(a1).pos.z - pos.z)).toBeLessThan(0.01);
+    expect(h.p(a1).yaw).toBeCloseTo(1, 6);
+    expect(h.of('kill').length).toBe(0);
+    expect(h.of('shot').length).toBe(0);
+    expect(h.sim.results().players.find((r) => r.id === b0)!.kills).toBe(0);
   });
 });
 
