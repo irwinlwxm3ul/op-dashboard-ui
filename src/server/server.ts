@@ -96,6 +96,7 @@ export async function startServer(opts: StartServerOptions = {}): Promise<Server
     if (msg.t === 'hello') {
       const renamed = conn.name !== null && conn.name !== msg.name;
       conn.name = msg.name;
+      conn.setCodec(msg.codec === 'delta1');
       conn.send({ t: 'welcome', clientId: conn.id, version: PROTOCOL_VERSION });
       const lobby = manager.lobbyOf(conn);
       if (lobby) {
@@ -197,7 +198,13 @@ export async function startServer(opts: StartServerOptions = {}): Promise<Server
     server: httpServer,
     path: '/ws',
     maxPayload: MAX_MESSAGE_BYTES,
-    perMessageDeflate: false,
+    // Compress large messages (snapshots, match init). Context takeover lets consecutive snapshots
+    // share a dictionary, which together with the delta codec keeps bandwidth within budget.
+    perMessageDeflate: {
+      zlibDeflateOptions: { level: 3, memLevel: 8 },
+      threshold: 256,
+      concurrencyLimit: 16,
+    },
   });
   wss.on('error', (err) => log.error('websocket server error', { err }));
 

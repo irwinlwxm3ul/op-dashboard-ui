@@ -226,7 +226,7 @@ export class App implements AppActions {
     const welcome = hub.waitFor((m): m is Extract<ServerMessage, { t: 'welcome' }> => m.t === 'welcome', CONNECT_TIMEOUT_MS);
     const failure = hub.waitFor((m): m is Extract<ServerMessage, { t: 'error' }> => m.t === 'error', CONNECT_TIMEOUT_MS)
       .then((e) => { throw e.code; }, () => new Promise<never>(() => {}));
-    hub.send({ t: 'hello', name, version: PROTOCOL_VERSION });
+    hub.send({ t: 'hello', name, version: PROTOCOL_VERSION, codec: 'delta1' });
     try {
       const w = await Promise.race([welcome, failure]);
       this.clientId = w.clientId;

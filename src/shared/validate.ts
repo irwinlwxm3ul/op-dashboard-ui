@@ -170,7 +170,11 @@ export function validateClientMessage(raw: unknown): ClientMessage | null {
   switch (raw.t) {
     case 'hello': {
       const name = sanitizeName(raw.name);
-      return name && raw.version === PROTOCOL_VERSION ? { t: 'hello', name, version: PROTOCOL_VERSION } : null;
+      if (!name || raw.version !== PROTOCOL_VERSION) return null;
+      if (raw.codec !== undefined && raw.codec !== 'delta1') return null;
+      return raw.codec === 'delta1'
+        ? { t: 'hello', name, version: PROTOCOL_VERSION, codec: 'delta1' }
+        : { t: 'hello', name, version: PROTOCOL_VERSION };
     }
     case 'listLobbies':
     case 'leaveLobby':

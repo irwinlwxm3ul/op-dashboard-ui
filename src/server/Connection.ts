@@ -3,6 +3,7 @@
 // back-pressure protection. Game/lobby semantics live in GameServer / LobbyManager.
 
 import { randomUUID } from 'node:crypto';
+import { SnapshotEncoder } from '../shared/netcodec';
 import type { RawData, WebSocket } from 'ws';
 import { PROTOCOL_VERSION } from '../shared/constants';
 import type { ClientMessage, LobbyErrorCode, ServerMessage } from '../shared/protocol';
@@ -69,6 +70,7 @@ export class ClientConnection {
   ping = 0;
   readonly connectedAt = performance.now();
 
+  private encoder: SnapshotEncoder | null = null;
   private closing = false;
   private closed = false;
   private lastPong: number;
@@ -129,8 +131,20 @@ export class ClientConnection {
     return Math.round(this.ping);
   }
 
+  /** Enable/disable delta-encoded snapshots (client announced codec 'delta1' in hello). */
+  setCodec(delta: boolean): void {
+    this.encoder = delta ? new SnapshotEncoder() : null;
+  }
+
   send(msg: ServerMessage): void {
     if (!this.isOpen) return;
+    if (this.encoder) {
+      if (msg.t === 'matchInit') this.encoder.reset();
+      else if (msg.t === 'snap') {
+        this.sendRaw(JSON.stringify({ t: 'snapd', d: this.encoder.encode(msg.s) } satisfies ServerMessage));
+        return;
+      }
+    }
     // Serialise immediately: callers may mutate/reuse the object after send returns.
     this.sendRaw(JSON.stringify(msg));
   }

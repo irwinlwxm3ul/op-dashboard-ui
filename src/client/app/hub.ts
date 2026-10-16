@@ -3,6 +3,7 @@
 // `matchInit` so nothing is lost while the world is being generated and the scene is built.
 
 import type { ClientMessage, ServerMessage } from '../../shared/protocol';
+import { SnapshotDecoder } from '../../shared/netcodec';
 import type { Transport } from '../net';
 
 const GAME_MESSAGES: ReadonlySet<ServerMessage['t']> = new Set(['snap', 'pong', 'matchOver']);
@@ -24,8 +25,15 @@ export class MessageHub {
     });
   }
 
+  private decoder = new SnapshotDecoder();
+
   private dispatch(msg: ServerMessage): void {
+    if (msg.t === 'snapd') {
+      // Delta-encoded snapshot from the game server: rebuild the full snapshot.
+      msg = { t: 'snap', s: this.decoder.decode(msg.d) };
+    }
     if (msg.t === 'matchInit') {
+      this.decoder.reset();
       // Start buffering game traffic for the ClientGame that is about to be created.
       this.buffer.length = 0;
       this.buffering = true;

@@ -9,6 +9,7 @@ import type {
   LootItem, MatchConfig, MatchPhase, MatchResults, PlaneState, PlayerInput, PlayerStats, ReviveState,
   TeamId, TeamSize, ThrowableId, UseState, VehicleType, WeaponId, WeaponInstance, ZoneState,
 } from './types';
+import type { SnapDelta } from './netcodec';
 
 // ---------------------------------------------------------------------------
 // Lobby
@@ -252,7 +253,8 @@ export interface MatchInit {
 // ---------------------------------------------------------------------------
 
 export type ClientMessage =
-  | { t: 'hello'; name: string; version: number }
+  /** codec 'delta1': the server sends snapshots as `snapd` deltas (see netcodec.ts). */
+  | { t: 'hello'; name: string; version: number; codec?: 'delta1' }
   | { t: 'listLobbies' }
   | { t: 'createLobby'; settings: LobbySettings }
   | { t: 'joinLobby'; id: string }
@@ -278,6 +280,8 @@ export type ServerMessage =
   | { t: 'chat'; from: string; text: string }
   | { t: 'matchInit'; init: MatchInit }
   | { t: 'snap'; s: Snapshot }
+  /** Delta-encoded snapshot (only to clients that announced codec 'delta1'). */
+  | { t: 'snapd'; d: SnapDelta }
   | { t: 'pong'; c: number; s: number }
   | { t: 'matchOver'; results: MatchResults }
   /** Server returned this client to the lobby room after the match. */
