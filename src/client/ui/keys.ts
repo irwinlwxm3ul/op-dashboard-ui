@@ -39,19 +39,13 @@ export function onKeyboardLayout(cb: () => void): () => void {
 }
 
 const NAMED: Record<string, TKey> = {
-  Space: 'ui.key.space',
-  Tab: 'ui.key.tab',
-  Escape: 'ui.key.escape',
-  Enter: 'ui.key.enter',
-  NumpadEnter: 'ui.key.enter',
-  Backspace: 'ui.key.backspace',
-  ShiftLeft: 'ui.key.shiftLeft',
-  ShiftRight: 'ui.key.shiftRight',
-  ControlLeft: 'ui.key.ctrlLeft',
-  ControlRight: 'ui.key.ctrlRight',
-  AltLeft: 'ui.key.altLeft',
-  AltRight: 'ui.key.altRight',
-  CapsLock: 'ui.key.capsLock',
+  Space: 'key.space',
+  Tab: 'key.tab',
+  Escape: 'key.escape',
+  Enter: 'key.enter',
+  NumpadEnter: 'key.enter',
+  Backspace: 'key.backspace',
+  CapsLock: 'key.capsLock',
   Delete: 'ui.key.delete',
   Insert: 'ui.key.insert',
   Home: 'ui.key.home',
@@ -60,6 +54,25 @@ const NAMED: Record<string, TKey> = {
   PageDown: 'ui.key.pageDown',
   ContextMenu: 'ui.key.menu',
 };
+
+/** Left / right modifier keys: [side template, key name]. */
+const MODIFIERS: Record<string, [TKey, TKey]> = {
+  ShiftLeft: ['key.leftMod', 'key.shift'],
+  ShiftRight: ['key.rightMod', 'key.shift'],
+  ControlLeft: ['key.leftMod', 'key.ctrl'],
+  ControlRight: ['key.rightMod', 'key.ctrl'],
+  AltLeft: ['key.leftMod', 'key.alt'],
+  AltRight: ['key.rightMod', 'key.alt'],
+};
+
+/** Short cap label for modifier keys on HUD key caps (no side prefix). */
+export function keyCapLabel(code: string | undefined | null): string {
+  if (code) {
+    const mod = MODIFIERS[code];
+    if (mod) return t(mod[1]);
+  }
+  return keyLabel(code);
+}
 
 const SYMBOLS: Record<string, string> = {
   ArrowUp: '↑',
@@ -87,9 +100,11 @@ const SYMBOLS: Record<string, string> = {
 
 /** Label for a KeyboardEvent.code. Empty / unknown codes give the "unbound" label. */
 export function keyLabel(code: string | undefined | null): string {
-  if (!code) return t('ui.key.unbound');
+  if (!code) return t('controls.unbound');
   const named = NAMED[code];
   if (named) return t(named);
+  const mod = MODIFIERS[code];
+  if (mod) return t(mod[0], { key: t(mod[1]) });
   const fromLayout = layout?.get(code);
   if (fromLayout && fromLayout.trim().length === 1) return fromLayout.toUpperCase();
   if (code.startsWith('Key') && code.length === 4) return code.slice(3);
@@ -97,7 +112,7 @@ export function keyLabel(code: string | undefined | null): string {
   if (code.startsWith('Numpad')) {
     const rest = code.slice(6);
     const sym = SYMBOLS[code];
-    return t('ui.key.numpad', { key: sym ?? rest });
+    return t('key.numpad', { key: sym ?? rest });
   }
   if (/^F\d{1,2}$/.test(code)) return code;
   const sym = SYMBOLS[code];

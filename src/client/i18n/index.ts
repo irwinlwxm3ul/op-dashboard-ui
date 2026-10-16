@@ -46,7 +46,8 @@ export type PluralCategory = 'zero' | 'one' | 'two' | 'few' | 'many' | 'other';
  * Base keys of plural families: `hud.alive` for `hud.alive_one` / `hud.alive_other` / ....
  * Every family has an `_other` variant, so the stems are derived from those.
  */
-export type PluralKey = TKey extends `${infer B}_other` ? B : never;
+export type PluralKey = PluralStem<TKey>;
+type PluralStem<K> = K extends `${infer B}_other` ? B : never; // distributive over the key union
 
 /** Parameters for interpolation. `count` (number) also selects the plural variant. */
 export type TParams = Record<string, string | number>;
@@ -58,6 +59,9 @@ type Dict = Readonly<Partial<Record<string, string>>>;
 
 const DICTS: Record<Lang, Dict> = { en, ru, zh, es, fr, de, pt, ja, ko, ar };
 const EN: Dict = en;
+
+/** Every language's dictionary (read-only; used by scripts/check-i18n.ts and tests). */
+export const DICTIONARIES: Readonly<Record<Lang, Dict>> = DICTS;
 
 /** BCP 47 locale handed to Intl for each language (zh is Simplified Chinese). */
 const INTL_LOCALE: Record<Lang, string> = {

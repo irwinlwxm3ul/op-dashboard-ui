@@ -5,7 +5,7 @@
 import { INTERACT_RANGE, MIN_CHUTE_DROP, REVIVE_RANGE, VEHICLE_ENTER_RANGE } from '../../shared/constants';
 import { DEG } from '../../shared/math';
 import type {
-  ClientAction, ConsumableId, EntityId, ItemId, LifeState, LootItem, MovementMode, ThrowableId, TrainingLayout,
+  ClientAction, ConsumableId, EntityId, ItemId, LifeState, LootItem, MovementMode, Stance, ThrowableId, TrainingLayout,
   Vec3, World,
 } from '../../shared/types';
 import type { Interaction, PlayerView, VehicleView } from './types';
@@ -23,6 +23,7 @@ export interface InteractionSelf {
   id: EntityId;
   team: number;
   pos: Vec3;
+  stance: Stance;
   mode: MovementMode;
   life: LifeState;
   vehicleId: EntityId | null;
@@ -48,17 +49,31 @@ export interface InteractionEnv {
   training: TrainingLayout | null;
   /** Line of sight test (eye -> point); omit to skip occlusion checks. */
   lineOfSight?: (a: Vec3, b: Vec3) => boolean;
+  /** Precise "close enough to enter" test (vehicle OBB); defaults to a centre distance check. */
+  vehicleNear?: (v: VehicleView, center: Vec3) => boolean;
 }
 
-/** Interaction ranges used by the prompt (server range minus a safety margin). */
+/**
+ * Interaction ranges used by the prompt. The server accepts slightly more (latency slack), so a
+ * prompt that is shown is always accepted.
+ */
 export const PROMPT_RANGE = {
-  loot: INTERACT_RANGE - 0.1,
-  vehicle: VEHICLE_ENTER_RANGE - 0.15,
-  revive: REVIVE_RANGE - 0.1,
-  rack: INTERACT_RANGE - 0.1,
+  loot: INTERACT_RANGE,
+  vehicle: VEHICLE_ENTER_RANGE + 0.25,
+  revive: REVIVE_RANGE + 0.1,
+  rack: INTERACT_RANGE,
 } as const;
 
 const scratchTarget: Vec3 = { x: 0, y: 0, z: 0 };
+const center: Vec3 = { x: 0, y: 0, z: 0 };
+
+/** Body centre used by the server for interaction distances. */
+export function bodyCenterOf(s: { pos: Vec3; mode: MovementMode; stance: Stance; life: LifeState }, out: Vec3): Vec3 {
+  out.x = s.pos.x;
+  out.z = s.pos.z;
+  out.y = s.pos.y + (s.mode === 'vehicle' ? 0.8 : s.stance === 'prone' || s.life === 'downed' ? 0.25 : s.stance === 'crouch' ? 0.6 : 0.9);
+  return out;
+}
 
 function reset(out: Interaction, kind: Interaction['kind'], hold: boolean): Interaction {
   out.kind = kind;
@@ -89,12 +104,13 @@ function dist3(a: Vec3, b: Vec3): number {
   return Math.hypot(a.x - b.x, a.y - b.y, a.z - b.z);
 }
 
+/** Server rule: the item (+0.15 m) must be visible from the eye or from the body centre. */
 function visible(env: InteractionEnv, p: Vec3): boolean {
   if (!env.lineOfSight) return true;
   scratchTarget.x = p.x;
   scratchTarget.y = p.y + 0.15;
   scratchTarget.z = p.z;
-  return env.lineOfSight(env.eye, scratchTarget);
+  return env.lineOfSight(env.eye, scratchTarget) || env.lineOfSight(center, scratchTarget);
 }
 
 /** First free seat of a vehicle (driver preferred), or -1. */
@@ -120,6 +136,7 @@ export function resolveInteraction(env: InteractionEnv, out: Interaction): Inter
     return !s.parachuteOpen && s.jumpY - s.pos.y >= MIN_CHUTE_DROP ? reset(out, 'chute', false) : null;
   }
   if (s.mode === 'parachute') return null;
+  bodyCenterOf(s, center);
 
   if (s.vehicleId !== null || s.mode === 'vehicle') {
     const r = reset(out, 'exit', false);
@@ -155,7 +172,7 @@ export function resolveInteraction(env: InteractionEnv, out: Interaction): Inter
   let viewBest: LootItem | null = null;
   let viewScore = Infinity;
   for (const l of env.nearbyLoot) {
-    if (dist3(l.pos, s.pos) > PROMPT_RANGE.loot) continue;
+    if (Math.min(dist3(l.pos, s.pos), dist3(l.pos, center)) > PROMPT_RANGE.loot) continue;
     const angle = angleTo(env.eye, env.look, l.pos);
     const dist = lastDist;
     if (angle <= aimedAngle) {
@@ -174,11 +191,11 @@ export function resolveInteraction(env: InteractionEnv, out: Interaction): Inter
 
   // Vehicles: nearest usable one in range.
   let veh: VehicleView | null = null;
-  let vehDist = PROMPT_RANGE.vehicle;
+  let vehDist = Infinity;
   for (const v of env.vehicles.values()) {
     if (v.destroyed) continue;
-    const d = Math.hypot(v.pos.x - s.pos.x, v.pos.z - s.pos.z);
-    if (d <= vehDist && Math.abs(v.pos.y - s.pos.y) < 3) {
+    const d = dist3(v.pos, center);
+    if (d < vehDist && (d <= PROMPT_RANGE.vehicle || (env.vehicleNear !== undefined && env.vehicleNear(v, center)))) {
       vehDist = d;
       veh = v;
     }

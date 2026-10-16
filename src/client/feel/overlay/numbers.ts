@@ -95,7 +95,7 @@ export class DamageNumbers {
     slot.wz = pos.z;
     // Alternate small horizontal offsets so consecutive numbers fan out.
     const k = this.spawnCount++ % 5;
-    slot.offsetX = (k - 2) * 11 + (Math.random() - 0.5) * 8;
+    slot.offsetX = (k - 2) * 12 + (Math.random() - 0.5) * 8;
     slot.lastOpacity = -1;
     this.render(slot);
   }
@@ -124,7 +124,8 @@ export class DamageNumbers {
         continue;
       }
       const u = age / LIFE;
-      const rise = RISE_PX * (1 - (1 - u) * (1 - u)) + 14;
+      // Start above the hitmarker X (which sits on the crosshair) and drift up with an ease-out.
+      const rise = RISE_PX * (1 - (1 - u) * (1 - u)) + 30;
       const x = Math.round(p.x + n.offsetX);
       const y = Math.round(p.y - rise);
       n.root.style.transform = `translate3d(${x}px,${y}px,0)`;

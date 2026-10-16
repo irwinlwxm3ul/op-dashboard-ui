@@ -71,6 +71,7 @@ export class InputController implements InputApi {
   private codeToAction = new Map<string, KeyAction>();
   private readonly held = new Set<KeyAction>();
   private ctx: InputContext = DEFAULT_CONTEXT;
+  private wasMounted = false;
   private enabledFlag = true;
   private target: HTMLElement | null = null;
   private lockedFlag = false;
@@ -358,11 +359,12 @@ export class InputController implements InputApi {
   // Game side
   // ---------------------------------------------------------------------------
 
+  /** Refresh the game context (the same object may be passed every tick). */
   setContext(ctx: InputContext): void {
-    const prev = this.ctx;
     this.ctx = ctx;
-    const wasMounted = prev.seat >= 0 || prev.mode !== 'ground';
     const mounted = ctx.seat >= 0 || (ctx.mode !== 'ground' && ctx.mode !== 'swim');
+    const wasMounted = this.wasMounted;
+    this.wasMounted = mounted;
     if (mounted && !wasMounted) {
       // Entering a vehicle / the drop resets on-foot toggles.
       this.adsToggled = false;

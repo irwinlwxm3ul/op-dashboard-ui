@@ -114,7 +114,7 @@ export class Modal {
     this.panel.setAttribute('aria-labelledby', title.id);
     if (closable) {
       const x = button({ cls: 'dz-btn-icon-only dz-modal-close', icon: ICONS.close, parent: this.header, onClick: () => this.escape() });
-      ariaTx(x, 'ui.common.close');
+      ariaTx(x, 'common.close');
     }
     this.body = h('div', 'dz-modal-body', this.panel);
     this.footer = h('div', 'dz-modal-footer', this.panel);

@@ -1,15 +1,15 @@
 // Single-player setup: player count, team size, bot difficulty, zone speed → actions.startSinglePlayer.
 
-import { fmtNumber } from '../../i18n';
+import { fmtNumber, t } from '../../i18n';
 import { MAX_PLAYERS, MIN_PLAYERS } from '../../../shared/constants';
 import type { SinglePlayerOptions } from '../contracts';
 import type { ScreenView, UiCtx } from '../context';
-import { fieldRow, Segmented, Slider } from '../controls';
+import { fieldRow, Segmented, Select, Slider } from '../controls';
 import { button, h, tx, txp } from '../dom';
 import { ICONS } from '../icons';
 import {
-  DIFFICULTY_OPTIONS, difficultyDescKey, isDifficulty, isTeamSize, loadJson, nearestZoneSpeed, saveJson,
-  TEAM_SIZE_OPTIONS, ZONE_SPEED_OPTIONS,
+  DIFFICULTY_OPTIONS, difficultyDescKey, difficultyKey, isDifficulty, isTeamSize, loadJson, nearestZoneSpeed, saveJson,
+  TEAM_SIZE_OPTIONS, teamSizeKey, ZONE_SPEED_OPTIONS,
 } from '../options';
 import { menuBackdrop } from './mainMenu';
 
@@ -35,7 +35,7 @@ export function loadSpOptions(): SinglePlayerOptions {
 export class SinglePlayerScreen implements ScreenView {
   readonly el: HTMLElement;
   private readonly players: Slider;
-  private readonly teamSize: Segmented<1 | 2 | 4>;
+  private readonly teamSize: Select<1 | 2 | 4>;
   private readonly difficulty: Segmented<'easy' | 'normal' | 'hard'>;
   private readonly zone: Segmented<number>;
   private readonly diffHint: HTMLElement;
@@ -48,40 +48,44 @@ export class SinglePlayerScreen implements ScreenView {
     menuBackdrop(this.el);
     const wrap = h('div', 'dz-screen-wrap dz-narrow', this.el);
     const header = h('header', 'dz-screen-header', wrap);
-    button({ cls: 'dz-btn-ghost dz-back', label: 'ui.common.back', parent: header, onClick: () => ctx.show('main') });
-    tx(h('h2', 'dz-screen-title', header), 'ui.sp.title');
+    button({ cls: 'dz-btn-ghost dz-back', label: 'common.back', parent: header, onClick: () => ctx.show('main') });
+    tx(h('h2', 'dz-screen-title', header), 'sp.title');
 
     const panel = h('div', 'dz-panel dz-form', wrap);
-    tx(h('p', 'dz-lead', panel), 'ui.sp.description');
+    tx(h('p', 'dz-lead', panel), 'sp.description');
 
     this.players = new Slider({
       min: MIN_PLAYERS, max: MAX_PLAYERS, step: 1, value: this.opts.maxPlayers,
       format: (v) => fmtNumber(v),
       onInput: (v) => { this.opts.maxPlayers = v; this.refreshSummary(); },
     });
-    fieldRow(panel, 'ui.sp.players', this.players, 'ui.sp.playersHint');
+    fieldRow(panel, 'sp.players', this.players, 'sp.playersHint');
 
-    this.teamSize = new Segmented(TEAM_SIZE_OPTIONS, this.opts.teamSize, (v) => {
+    this.players.input.dataset.testid = 'sp-players';
+
+    this.teamSize = new Select(TEAM_SIZE_OPTIONS, this.opts.teamSize, (v) => {
       this.opts.teamSize = v;
       this.refreshSummary();
-    }, 'ui.sp.teamSize');
-    fieldRow(panel, 'ui.sp.teamSize', this.teamSize);
+    });
+    this.teamSize.el.dataset.testid = 'sp-teamsize';
+    fieldRow(panel, 'sp.teamSize', this.teamSize, 'sp.teamSizeHint');
 
     this.difficulty = new Segmented(DIFFICULTY_OPTIONS, this.opts.botDifficulty, (v) => {
       this.opts.botDifficulty = v;
       this.refreshSummary();
-    }, 'ui.sp.difficulty');
-    const diffRow = fieldRow(panel, 'ui.sp.difficulty', this.difficulty);
+    }, 'sp.botDifficulty');
+    const diffRow = fieldRow(panel, 'sp.botDifficulty', this.difficulty);
     this.diffHint = h('div', 'dz-field-hint', diffRow.querySelector('.dz-field-text') as HTMLElement);
 
-    this.zone = new Segmented(ZONE_SPEED_OPTIONS, this.opts.zoneSpeed, (v) => { this.opts.zoneSpeed = v; }, 'ui.sp.zoneSpeed');
-    fieldRow(panel, 'ui.sp.zoneSpeed', this.zone, 'ui.sp.zoneSpeedHint');
+    this.zone = new Segmented(ZONE_SPEED_OPTIONS, this.opts.zoneSpeed, (v) => { this.opts.zoneSpeed = v; }, 'sp.zoneSpeed');
+    fieldRow(panel, 'sp.zoneSpeed', this.zone, 'sp.zoneSpeedHint');
 
     this.summary = h('p', 'dz-sp-summary', panel);
 
     const footer = h('footer', 'dz-screen-footer', wrap);
-    button({ cls: 'dz-btn-primary dz-btn-xl', label: 'ui.sp.start', icon: ICONS.play, parent: footer, onClick: () => this.start() })
-      .dataset.autofocus = '';
+    const start = button({ cls: 'dz-btn-primary dz-btn-xl', label: 'sp.startMatch', icon: ICONS.play, parent: footer, onClick: () => this.start() });
+    start.dataset.autofocus = '';
+    start.dataset.testid = 'sp-start';
 
     ctx.onLanguage(() => {
       this.players.relabel();
@@ -106,11 +110,10 @@ export class SinglePlayerScreen implements ScreenView {
 
   private refreshSummary(): void {
     tx(this.diffHint, difficultyDescKey(this.opts.botDifficulty));
-    const teams = Math.ceil(this.opts.maxPlayers / this.opts.teamSize);
-    txp(this.summary, 'ui.sp.summary', {
-      players: fmtNumber(this.opts.maxPlayers),
-      teams: fmtNumber(teams),
-      bots: fmtNumber(Math.max(0, this.opts.maxPlayers - 1)),
+    txp(this.summary, 'sp.summary', {
+      players: this.opts.maxPlayers,
+      teamSize: t(teamSizeKey(this.opts.teamSize)),
+      difficulty: t(difficultyKey(this.opts.botDifficulty)),
     });
   }
 

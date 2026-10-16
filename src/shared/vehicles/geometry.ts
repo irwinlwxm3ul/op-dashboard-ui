@@ -141,9 +141,12 @@ export function vehicleHitsPoint(v: VehicleState, p: Vec3, radius: number): bool
 // Exit position
 // ---------------------------------------------------------------------------
 
-const exitBoxes: WorldBox[] = [];
-const exitTrees: TreeDef[] = [];
-const exitRocks: RockDef[] = [];
+const exitBoxBuf: WorldBox[] = [];
+const exitTreeBuf: TreeDef[] = [];
+const exitRockBuf: RockDef[] = [];
+let exitBoxes: WorldBox[] = exitBoxBuf;
+let exitTrees: TreeDef[] = exitTreeBuf;
+let exitRocks: RockDef[] = exitRockBuf;
 const segBoxes: WorldBox[] = [];
 const rayO: Vec3 = { x: 0, y: 0, z: 0 };
 const rayD: Vec3 = { x: 0, y: 0, z: 0 };
@@ -222,12 +225,12 @@ export function exitPosition(v: VehicleState, seat: number, world: World): Vec3 
 }
 
 function gatherExit(world: World, x: number, z: number, m: number): void {
-  exitBoxes.length = 0;
-  exitTrees.length = 0;
-  exitRocks.length = 0;
-  world.queryBoxes(x - m, z - m, x + m, z + m, exitBoxes);
-  world.queryTrees(x - m, z - m, x + m, z + m, exitTrees);
-  world.queryRocks(x - m, z - m, x + m, z + m, exitRocks);
+  exitBoxBuf.length = 0;
+  exitTreeBuf.length = 0;
+  exitRockBuf.length = 0;
+  exitBoxes = world.queryBoxes(x - m, z - m, x + m, z + m, exitBoxBuf);
+  exitTrees = world.queryTrees(x - m, z - m, x + m, z + m, exitTreeBuf);
+  exitRocks = world.queryRocks(x - m, z - m, x + m, z + m, exitRockBuf);
 }
 
 /** Highest terrain / box top under (x, z) at or below refY. */

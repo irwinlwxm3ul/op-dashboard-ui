@@ -22,7 +22,9 @@ const CSS = /* css */ `
 .dzf-flash{background:radial-gradient(ellipse at 50% 50%,rgba(255,0,0,0) 48%,rgba(220,12,0,.40) 80%,rgba(190,0,0,.78) 100%);will-change:opacity;}
 .dzf-dir{position:absolute;left:50%;top:50%;width:30vmin;height:30vmin;margin:-15vmin 0 0 -15vmin;border-radius:50%;
   border:1.1vmin solid transparent;border-top-color:rgba(255,38,26,.95);opacity:0;display:none;will-change:transform,opacity;
-  filter:drop-shadow(0 0 .7vmin rgba(255,0,0,.6));}
+  filter:drop-shadow(0 0 .7vmin rgba(255,0,0,.6));
+  -webkit-mask-image:conic-gradient(from -42deg,transparent 0deg,#000 16deg,#000 68deg,transparent 84deg);
+  mask-image:conic-gradient(from -42deg,transparent 0deg,#000 16deg,#000 68deg,transparent 84deg);}
 
 /* ---- Hitmarker ---- */
 .dzf-hm{position:absolute;left:50%;top:50%;width:0;height:0;opacity:0;--c:#fff;--l:9px;--g:7px;--w:2px;--d:.3s;}
@@ -71,7 +73,8 @@ const CSS = /* css */ `
 .dzf-ro .dzf-ro-dist{color:#f2c94c;}
 
 /* ---- Armor break (victim) ---- */
-.dzf-ab{position:absolute;left:50%;bottom:17%;display:none;flex-direction:column;align-items:center;gap:2px;transform:translateX(-50%);opacity:0;}
+.dzf-ab{position:absolute;left:50%;bottom:17%;display:none;flex-direction:column;align-items:center;gap:2px;transform:translateX(-50%);opacity:0;
+  width:max-content;max-width:96vw;}
 .dzf-ab svg{width:34px;height:34px;color:#8fd0ff;overflow:visible;filter:drop-shadow(0 0 5px rgba(120,190,255,.7));}
 .dzf-ab span{font-size:13px;font-weight:800;color:#cfe8ff;text-transform:uppercase;letter-spacing:.06em;text-shadow:0 1px 3px rgba(0,0,0,.9);}
 .dzf-ab.dzf-pa,.dzf-ab.dzf-pb{display:flex;}
@@ -95,7 +98,7 @@ const CSS = /* css */ `
 
 /* ---- Kill / death banner (center bottom) ---- */
 .dzf-kb{position:absolute;left:50%;bottom:24%;display:none;flex-direction:column;align-items:center;gap:3px;text-align:center;
-  transform:translateX(-50%);opacity:0;max-width:90vw;}
+  transform:translateX(-50%);opacity:0;width:max-content;max-width:92vw;}
 .dzf-kb.dzf-pa,.dzf-kb.dzf-pb{display:flex;}
 .dzf-kb-icon{width:38px;height:38px;color:#ff3b30;filter:drop-shadow(0 0 7px rgba(255,40,30,.65));}
 .dzf-kb-icon svg{width:100%;height:100%;}
@@ -118,17 +121,17 @@ const CSS = /* css */ `
 
 /* ---- Match moment banner (top center) ---- */
 .dzf-mb{position:absolute;left:50%;top:14%;display:none;flex-direction:column;align-items:center;gap:2px;text-align:center;
-  transform:translateX(-50%);opacity:0;padding:9px 56px;max-width:96vw;
+  transform:translateX(-50%);opacity:0;padding:9px 56px;width:max-content;max-width:96vw;
   background:linear-gradient(90deg,rgba(0,0,0,0),rgba(0,0,0,.58) 22%,rgba(0,0,0,.58) 78%,rgba(0,0,0,0));}
 .dzf-mb.dzf-pa,.dzf-mb.dzf-pb{display:flex;}
 .dzf-mb-title{font-size:22px;font-weight:800;color:#fff;letter-spacing:.02em;text-shadow:0 2px 4px rgba(0,0,0,.8);}
 .dzf-mb-sub{font-size:14px;font-weight:600;color:#d9dde2;}
 .dzf-mb-sub:empty{display:none;}
 .dzf-mb-zone .dzf-mb-title{color:#8cc4ff;}
-.dzf-mb-zone{border-top:2px solid rgba(80,150,255,.75);}
+.dzf-mb-zone{border-top:2px solid;border-image:linear-gradient(90deg,rgba(80,150,255,0),rgba(80,150,255,.9) 25%,rgba(80,150,255,.9) 75%,rgba(80,150,255,0)) 1;}
 .dzf-mb-lose .dzf-mb-title{font-size:34px;color:#ff5a4f;}
-.dzf-mb-win{top:22%;background:radial-gradient(ellipse at 50% 50%,rgba(242,169,0,.32),rgba(0,0,0,.55) 55%,rgba(0,0,0,0) 75%);padding:22px 90px;}
-.dzf-mb-win .dzf-mb-title{font-size:60px;line-height:1.05;color:#ffd23f;letter-spacing:.03em;
+.dzf-mb-win{top:12%;background:radial-gradient(closest-side,rgba(60,40,0,.62),rgba(30,20,0,.4) 60%,rgba(0,0,0,0));padding:30px 110px;}
+.dzf-mb-win .dzf-mb-title{font-size:46px;line-height:1.05;color:#ffd23f;letter-spacing:.03em;
   text-shadow:0 0 18px rgba(255,190,0,.75),0 3px 0 #8a5a00,0 6px 12px rgba(0,0,0,.8);}
 .dzf-mb-win .dzf-mb-sub{font-size:18px;color:#fff3c4;}
 .dzf-mb.dzf-pa{animation:dzf-mb-a var(--d,3.4s) cubic-bezier(.2,.9,.3,1) forwards;}
@@ -143,7 +146,8 @@ const CSS = /* css */ `
   to{text-shadow:0 0 30px rgba(255,210,60,1),0 3px 0 #8a5a00,0 6px 12px rgba(0,0,0,.8);}}
 
 /* ---- Notices (teammates, revives) ---- */
-.dzf-notes{position:absolute;left:50%;top:21%;display:flex;flex-direction:column;align-items:center;gap:4px;transform:translateX(-50%);}
+.dzf-notes{position:absolute;left:50%;top:26%;display:flex;flex-direction:column;align-items:center;gap:4px;transform:translateX(-50%);
+  width:max-content;max-width:92vw;}
 .dzf-note{display:none;font-size:15px;font-weight:700;color:#fff;padding:3px 12px;border-radius:3px;white-space:nowrap;
   background:rgba(0,0,0,.5);border-inline-start:3px solid #3ad0ff;text-shadow:0 1px 2px rgba(0,0,0,.8);opacity:0;}
 .dzf-note.dzf-bad{border-inline-start-color:#ff3b30;color:#ffd9d6;}
@@ -156,7 +160,7 @@ const CSS = /* css */ `
 
 @media (max-height:640px){
   .dzf-kb-main,.dzf-mb-title{font-size:18px;}
-  .dzf-mb-win .dzf-mb-title{font-size:42px;}
+  .dzf-mb-win .dzf-mb-title{font-size:32px;}
 }
 `;
 

@@ -116,6 +116,8 @@ export class ClientConnection {
     ws.on('close', () => this.handleClosed());
     // Errors (e.g. maxPayload exceeded, protocol violations) are followed by 'close'.
     ws.on('error', (err) => opts.log.warn('socket error', { client: this.id, err: err.message }));
+    // Early RTT sample so lobby member pings are meaningful before the first heartbeat.
+    this.heartbeat(now);
   }
 
   get isOpen(): boolean {
@@ -223,7 +225,8 @@ export class ClientConnection {
       this.reject('net.badMessage');
       return;
     }
-    const text = Array.isArray(data) ? Buffer.concat(data).toString('utf8') : data.toString('utf8');
+    const buf = Array.isArray(data) ? Buffer.concat(data) : Buffer.isBuffer(data) ? data : Buffer.from(data);
+    const text = buf.toString('utf8');
     const res = decodeClientMessage(text);
     if (!res.ok) {
       if (res.fatal) {

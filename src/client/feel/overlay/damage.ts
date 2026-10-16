@@ -86,7 +86,7 @@ export class DamageIndicators {
   }
 
   armorBroken(helmet: boolean, now: number): void {
-    this.armorText.textContent = t(helmet ? 'feel.armor.helmetBroken' : 'feel.armor.vestBroken');
+    this.armorText.textContent = t(helmet ? 'banner.helmetBroken' : 'banner.armorBroken');
     this.armorEl.className = `dzf-ab ${this.armorPop.next()}`;
     this.armorUntil = now + 1.45;
   }

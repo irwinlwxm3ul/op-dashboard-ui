@@ -1,7 +1,5 @@
 // Shared context handed to every screen / widget of the UI module.
 
-import type { TKey } from '../i18n';
-import type { Params } from './dom';
 import type { ModalManager } from './modal';
 import type { AppActions, Screen } from './contracts';
 
@@ -13,8 +11,8 @@ export interface UiCtx {
   show(screen: Screen): void;
   openSettings(): void;
   openControls(): void;
-  /** Transient notification (errors are red). */
-  toast(key: TKey, params?: Params, kind?: 'error' | 'info'): void;
+  /** Transient notification with already-translated text (errors are red). */
+  toast(text: string, kind?: 'error' | 'info'): void;
   /** Register a callback run after the language changed (static labels are re-translated already). */
   onLanguage(cb: () => void): void;
 }

@@ -58,9 +58,19 @@ const HIGH_SPEED_STEER_RATE = 0.7;
 /** Portion of the tyre grip used for steady cornering (the rest is margin so it never slides). */
 const CORNER_GRIP_USE = 0.9;
 /** Lateral slip (m/s) where the tyres start to lose grip, range to the full loss, and the loss. */
-const SLIDE_START = 2.5;
-const SLIDE_RANGE = 6;
-const SLIDE_GRIP_LOSS = 0.3;
+const SLIDE_START = 2;
+const SLIDE_RANGE = 5;
+const SLIDE_GRIP_LOSS = 0.4;
+/** Slip angle (rad) a drift settles at, and how hard the yaw is pulled back beyond it (1/s). */
+const DRIFT_ANGLE = 0.38;
+const DRIFT_ALIGN = 5;
+/** While sliding the body keeps more of its rotation (yaw tracking slows by up to this much). */
+const SLIDE_YAW_HOLD = 0.6;
+/** Extra grip lost while sliding with the throttle open (power oversteer). */
+const POWER_SLIDE_LOSS = 0.15;
+/** Handbrake: steering lock multiplier and yaw response multiplier. */
+const HANDBRAKE_LOCK_MUL = 1.25;
+const HANDBRAKE_YAW_TRACK = 1.2;
 /** Longitudinal traction (fraction of grip * g) available for the engine. */
 const DRIVE_TRACTION = 0.6;
 /** Below this forward speed the vehicle can come to a full stop / hold on slopes (m/s). */
@@ -71,9 +81,9 @@ const HOLD_GRIP = 0.6;
 const DIRECTION_SWITCH_SPEED = 0.5;
 /** Engine force fraction available in reverse. */
 const REVERSE_ACCEL_MUL = 0.7;
-/** Friction of a wreck / of a vehicle without a driver (in gear, engine off) (m/s^2). */
+/** Friction of a wreck / of a vehicle whose engine is off (in gear) (m/s^2). */
 const WRECK_FRICTION = 7;
-const NO_DRIVER_BRAKE = 2.5;
+const ENGINE_OFF_BRAKE = 2.5;
 /** Yaw rate damping while airborne (1/s). */
 const AIR_YAW_DAMP = 0.4;
 /** Orientation smoothing rates (1/s) on the ground / in the air. */
@@ -112,6 +122,11 @@ const MAX_GROUND_ANGLE = 1.1;
 const BOUNDS_MARGIN = 2;
 /** If the body ends up this far under its ride height (teleport / spawn mismatch) it is snapped up. */
 const DEEP_PENETRATION = 1.5;
+/** Thresholds below which a driverless vehicle counts as parked and settled. */
+const REST_SPEED = 0.005;
+const REST_YAW_RATE = 0.0005;
+const REST_HEIGHT = 0.01;
+const REST_ANGLE = 0.005;
 /** Engine sound model. */
 export const IDLE_RPM = 900;
 export const MAX_RPM = 6500;
@@ -168,7 +183,9 @@ let trees: TreeDef[] = treeBuf;
 let rocks: RockDef[] = rockBuf;
 
 const B = makeBasis();
+/** Plane-fit height per wheel and the real ground height under it. */
 const wheelG = [0, 0, 0, 0];
+const realG = [0, 0, 0, 0];
 
 /** Per-call accumulators (reset at the start of stepVehicle). */
 let crashMax = 0;
@@ -180,7 +197,20 @@ let groundedPrev = true;
 let engineRunning = false;
 
 /** Per-sub-step ground fit (written by sampleGround). */
-const ground = { y: 0, pitch: 0, roll: 0, contacts: 0, count: 1 };
+const ground = {
+  /** Plane fit height (contacting wheels: ground; hanging wheels: their extended position). */
+  y: 0,
+  /** Mean real ground height under the wheels. */
+  real: 0,
+  pitch: 0,
+  roll: 0,
+  /** Slope of the real ground under the wheels (for landing impacts). */
+  realPitch: 0,
+  realRoll: 0,
+  upY: 1,
+  contacts: 0,
+  count: 1,
+};
 
 function noteCrash(impact: number, x: number, y: number, z: number): void {
   if (impact > crashMax) {
@@ -244,6 +274,13 @@ export function stepVehicle(
 
   gatherColliders(world, v, def, speed * dt + 2);
 
+  // Parked and settled: nothing can change until something pushes it (another vehicle's step
+  // applies the impulse, which wakes it up next tick). Skips the sub-steps for idle vehicles.
+  if (!driven && isAtRest(v, def, hd, world)) {
+    ev.inWater = world.waterLevel - ground.real > WATER_STOP_DEPTH;
+    return ev;
+  }
+
   for (let i = 0; i < n; i++) {
     substep(v, def, hd, driven, thrIn, steerIn, handbrake, boost, h, world, others);
   }
@@ -260,6 +297,25 @@ export function stepVehicle(
   ev.hitVehicle = hitOther;
   ev.hitVehicleImpact = hitOtherImpact;
   return ev;
+}
+
+/** Whether a vehicle without a driver is settled on its suspension and motionless. */
+function isAtRest(v: VehicleState, def: VehicleDef, hd: VehicleHandling, world: World): boolean {
+  const vel = v.vel;
+  if (!v.onGround || v.rpm !== 0 || v.throttle !== 0 || v.steer !== 0) return false;
+  if (Math.abs(vel.x) > REST_SPEED || Math.abs(vel.y) > REST_SPEED || Math.abs(vel.z) > REST_SPEED) return false;
+  if (Math.abs(v.yawRate) > REST_YAW_RATE) return false;
+  sampleGround(v, def, hd, world);
+  if (ground.contacts !== ground.count) return false;
+  // Must hold on this slope (same rule as the parking hold in the sub-step).
+  if (Math.abs(Math.sin(ground.pitch)) >= def.grip * HOLD_GRIP) return false;
+  const targetY = ground.y + rideHeight(def) * ground.upY;
+  if (Math.abs(v.pos.y - targetY) > REST_HEIGHT) return false;
+  if (Math.abs(v.pitch - ground.pitch) > REST_ANGLE) return false;
+  if (!def.isBike && Math.abs(v.roll - ground.roll) > REST_ANGLE) return false;
+  if (def.isBike && Math.abs(v.roll) > REST_ANGLE) return false;
+  v.speed = 0;
+  return true;
 }
 
 function finiteClamp(x: number, lo: number, hi: number): number {
@@ -325,34 +381,59 @@ function sampleGround(v: VehicleState, def: VehicleDef, hd: VehicleHandling, wor
   const wheels = WHEELS[v.type];
   basisFromAngles(v.yaw, v.pitch, v.roll, B);
   const cl = def.groundClearance;
-  let sum = 0, contacts = 0;
+  let sum = 0, real = 0, contacts = 0;
   for (let i = 0; i < wheels.length; i++) {
     const w = wheels[i];
     const ax = v.pos.x + B.right.x * w.x + B.up.x * w.y + B.back.x * w.z;
     const ay = v.pos.y + B.right.y * w.x + B.up.y * w.y + B.back.y * w.z;
     const az = v.pos.z + B.right.z * w.x + B.up.z * w.y + B.back.z * w.z;
-    const bottom = ay - cl;
-    const g = groundHeight(world, ax, az, bottom + hd.stepUp);
-    wheelG[i] = g;
-    sum += g;
-    if (bottom - hd.droop <= g + CONTACT_EPS) contacts++;
+    // Surfaces up to stepUp above the strut count: on a stepped ramp taken at speed the body lags
+    // behind the wheels, which must still find the step they are rolling onto.
+    const g = groundHeight(world, ax, az, ay + hd.stepUp);
+    realG[i] = g;
+    real += g;
+    // The strut extends along the body's down axis. A wheel that cannot reach the ground hangs at
+    // full extension and enters the plane fit at that height, so a wheel rolling off a ramp lip or
+    // a crest does not yank the body's attitude toward the ground far below it.
+    const hang = ay - (cl + hd.droop) * B.up.y;
+    if (hang <= g + CONTACT_EPS) {
+      contacts++;
+      wheelG[i] = g;
+    } else {
+      wheelG[i] = hang;
+    }
+    sum += wheelG[i];
   }
   const cnt = wheels.length;
-  let pitch: number, roll: number;
-  if (cnt === 2) {
-    pitch = Math.atan2(wheelG[0] - wheelG[1], def.wheelBase);
-    roll = 0;
-  } else {
-    const front = (wheelG[0] + wheelG[1]) * 0.5, rear = (wheelG[2] + wheelG[3]) * 0.5;
-    const left = (wheelG[0] + wheelG[2]) * 0.5, right = (wheelG[1] + wheelG[3]) * 0.5;
-    pitch = Math.atan2(front - rear, def.wheelBase);
-    roll = Math.atan2(right - left, hd.trackWidth);
-  }
-  ground.pitch = clamp(pitch, -MAX_GROUND_ANGLE, MAX_GROUND_ANGLE);
-  ground.roll = clamp(roll, -MAX_GROUND_ANGLE, MAX_GROUND_ANGLE);
+  // The wheels are sampled at their current (tilted) positions, so the horizontal spacing of the
+  // samples shrinks with the body angle; fit against that spacing to get the true slope.
+  const baseXZ = def.wheelBase * Math.cos(v.pitch);
+  const trackXZ = hd.trackWidth * Math.cos(v.roll);
+  fitPlane(wheelG, cnt, baseXZ, trackXZ);
+  ground.pitch = fitPitch;
+  ground.roll = fitRoll;
+  fitPlane(realG, cnt, baseXZ, trackXZ);
+  ground.realPitch = fitPitch;
+  ground.realRoll = fitRoll;
   ground.y = sum / cnt;
+  ground.real = real / cnt;
+  ground.upY = B.up.y;
   ground.contacts = contacts;
   ground.count = cnt;
+}
+
+let fitPitch = 0, fitRoll = 0;
+/** Pitch / roll of the plane through the wheel heights (FL, FR, RL, RR or front, rear). */
+function fitPlane(g: number[], cnt: number, baseXZ: number, trackXZ: number): void {
+  if (cnt === 2) {
+    fitPitch = Math.atan2(g[0] - g[1], baseXZ);
+    fitRoll = 0;
+  } else {
+    fitPitch = Math.atan2((g[0] + g[1] - g[2] - g[3]) * 0.5, baseXZ);
+    fitRoll = Math.atan2((g[1] + g[3] - g[0] - g[2]) * 0.5, trackXZ);
+  }
+  fitPitch = clamp(fitPitch, -MAX_GROUND_ANGLE, MAX_GROUND_ANGLE);
+  fitRoll = clamp(fitRoll, -MAX_GROUND_ANGLE, MAX_GROUND_ANGLE);
 }
 
 // ---------------------------------------------------------------------------
@@ -376,7 +457,7 @@ function substep(
   const gp = ground.pitch, gr = ground.roll;
 
   // ---- Water ----
-  const depth = world.waterLevel - ground.y;
+  const depth = world.waterLevel - ground.real;
   const drowned = depth > WATER_STOP_DEPTH;
   if (drowned) waterFlag = true;
 
@@ -394,10 +475,9 @@ function substep(
   const engineOn = driven && v.fuel > 0 && !drowned;
   if (engineOn) engineRunning = true;
 
-  // ---- Touchdown ----
-  const gvy = clamp(vf * Math.tan(gp) + vl * Math.tan(gr), -40, 40); // ground vertical velocity
+  // ---- Touchdown: vertical speed relative to the slope landed on ----
   if (grounded && !groundedPrev) {
-    const closing = gvy - vel.y;
+    const closing = vf * Math.tan(ground.realPitch) + vl * Math.tan(ground.realRoll) - vel.y;
     if (closing > LANDING_CRASH_SPEED) noteCrash(closing, pos.x, pos.y - rideHeight(def), pos.z);
   }
   groundedPrev = grounded;
@@ -442,7 +522,8 @@ function substep(
       drive *= 0.5;
       decel += hd.handbrakeDecel;
     }
-    if (!driven) decel += v.destroyed ? WRECK_FRICTION : NO_DRIVER_BRAKE;
+    // Engine off (no driver, out of fuel, drowned) but still in gear; wrecks barely roll.
+    if (!engineOn) decel += v.destroyed ? WRECK_FRICTION : ENGINE_OFF_BRAKE;
     decel += hd.rollRes;
     if (depth > FORD_START_DEPTH) decel += FORD_DRAG * Math.min(1, (depth - FORD_START_DEPTH) / (WATER_STOP_DEPTH - FORD_START_DEPTH));
 
@@ -476,7 +557,9 @@ function substep(
     // out it stays out for a moment, which makes drifts controllable instead of snapping back.
     const absVl = Math.abs(vl);
     const slide = absVl > SLIDE_START ? Math.min(1, (absVl - SLIDE_START) / SLIDE_RANGE) : 0;
-    const gripMul = (handbrake ? hd.handbrakeGrip : 1) * (1 - SLIDE_GRIP_LOSS * slide);
+    // Throttle in a slide keeps the driven wheels spinning (power oversteer sustains a drift).
+    const powerSlide = thr > 0 ? thr * slide * POWER_SLIDE_LOSS : 0;
+    const gripMul = (handbrake ? hd.handbrakeGrip : 1) * (1 - SLIDE_GRIP_LOSS * slide - powerSlide);
     const latLimit = def.grip * G * traction * gripMul * Math.cos(gr);
     let remove = vl * (1 - Math.exp(-hd.lateralRate * traction * h));
     const maxRemove = latLimit * h;
@@ -492,13 +575,25 @@ function substep(
     let yawMax = bicycle < gripYaw ? bicycle : gripYaw;
     let track = hd.yawRate;
     if (handbrake && absF > 2) {
-      // Locked rear wheels let the tail step out: more rotation than grip would allow, and the
-      // body keeps its rotational momentum (slower tracking).
+      // Locked rear wheels stop resisting rotation: the front tyres swing the tail out quickly,
+      // well beyond what grip alone would allow.
       const hbYaw = gripYaw * hd.handbrakeYaw;
-      yawMax = bicycle < hbYaw ? bicycle : hbYaw;
-      track *= 0.4;
+      const lock = bicycle * HANDBRAKE_LOCK_MUL;
+      yawMax = lock < hbYaw ? lock : hbYaw;
+      track *= HANDBRAKE_YAW_TRACK;
     }
-    const target = -v.steer * yawMax * (vf >= 0 ? 1 : -1);
+    let target = -v.steer * yawMax * (vf >= 0 ? 1 : -1);
+    if (!handbrake) {
+      track *= 1 - SLIDE_YAW_HOLD * slide;
+      // Drift stabiliser: past DRIFT_ANGLE of slip the tyres pull the nose back toward the
+      // direction of travel, so a held drift settles at a steady angle instead of spinning out
+      // (counter-steer or releasing the steering recovers; the handbrake still spins the car).
+      if (absF > 2) {
+        const beta = Math.atan2(vl, absF);
+        const over = beta > DRIFT_ANGLE ? beta - DRIFT_ANGLE : beta < -DRIFT_ANGLE ? beta + DRIFT_ANGLE : 0;
+        target -= DRIFT_ALIGN * over * (vf >= 0 ? 1 : -1);
+      }
+    }
     v.yawRate += (target - v.yawRate) * (1 - Math.exp(-track * traction * h));
 
     vel.x = fx * vf + rx * vl;
@@ -521,13 +616,22 @@ function substep(
   }
 
   // ---- Suspension / gravity ----
-  const tilt = Math.cos(gp) * Math.cos(gr);
-  const targetY = ground.y + rideHeight(def) / (tilt > 0.5 ? tilt : 0.5);
+  // Vertical speed of the ground under the vehicle, from the smoothed body attitude minus its
+  // weight-transfer part: robust against stepped ramps (noisy per-sample slopes) and it keeps the
+  // ramp's angle for a moment after the wheels leave it, which is what launches the jump.
+  const wPitch = clamp(hd.pitchPerAccel * aTire, -MAX_WEIGHT_PITCH, MAX_WEIGHT_PITCH);
+  const aLat = vf * v.yawRate;
+  const groundPitch = clamp(v.pitch - wPitch, -MAX_GROUND_ANGLE, MAX_GROUND_ANGLE);
+  const groundRoll = def.isBike ? 0
+    : clamp(v.roll + clamp(hd.rollPerAccel * aLat, -MAX_WEIGHT_ROLL, MAX_WEIGHT_ROLL), -MAX_GROUND_ANGLE, MAX_GROUND_ANGLE);
+  const gvy = grounded ? clamp(vf * Math.tan(groundPitch) + vl * Math.tan(groundRoll), -40, 40) : 0;
+  // Rest height of the centre above the wheel contact samples (along the tilted body axis).
+  const targetY = ground.y + rideHeight(def) * ground.upY;
   const K = G / hd.droop;
   const C = 2 * hd.damping * Math.sqrt(K);
   const ext = pos.y - targetY;
   let ay = -G;
-  if (ext < hd.droop) {
+  if (grounded && ext < hd.droop) {
     let f = K * (hd.droop - ext) - C * (vel.y - gvy);
     if (f < 0) f = 0;
     ay += f;
@@ -542,7 +646,7 @@ function substep(
 
   // Bump stop: the suspension bottoms out; never sink into the ground.
   const minY = targetY - hd.bump;
-  if (pos.y < minY) {
+  if (grounded && pos.y < minY) {
     pos.y = pos.y < targetY - DEEP_PENETRATION ? targetY : minY;
     if (vel.y < gvy) vel.y = gvy;
   }
@@ -550,8 +654,7 @@ function substep(
   // ---- Orientation (visual weight transfer + ground following) ----
   if (grounded) {
     const k = 1 - Math.exp(-ORIENT_RATE * h);
-    const aLat = vf * v.yawRate;
-    const tp = gp + clamp(hd.pitchPerAccel * aTire, -MAX_WEIGHT_PITCH, MAX_WEIGHT_PITCH);
+    const tp = gp + wPitch;
     let tr: number;
     if (def.isBike) tr = clamp(BIKE_LEAN_MUL * Math.atan(aLat / G), -hd.maxLean, hd.maxLean);
     else tr = gr - clamp(hd.rollPerAccel * aLat, -MAX_WEIGHT_ROLL, MAX_WEIGHT_ROLL);
@@ -565,7 +668,7 @@ function substep(
   }
 
   // ---- Collisions ----
-  collideWorld(v, def, hd);
+  collideWorld(v, def, hd, world);
   if (others.length > 0) collideVehicles(v, def, others);
   clampBounds(v, world);
 }
@@ -634,7 +737,7 @@ const TREE_TRUNK_FRAC = 0.6;
  * Resolve the vehicle's circle set against static colliders: push out, then apply an impulse at
  * the contact point (restitution, wall friction, spin from off-centre hits).
  */
-function collideWorld(v: VehicleState, def: VehicleDef, hd: VehicleHandling): void {
+function collideWorld(v: VehicleState, def: VehicleDef, hd: VehicleHandling, world: World): void {
   const cs = CIRCLES[v.type];
   const r = cs.r;
   const I = yawInertia(def);
@@ -650,7 +753,11 @@ function collideWorld(v: VehicleState, def: VehicleDef, hd: VehicleHandling): vo
       const yMid = -sp * lz;
       const bottom = v.pos.y + yMid - upY * (he.y + cl);
       const top = v.pos.y + yMid + upY * he.y;
-      const low = bottom + hd.stepUp;
+      // Ledges are climbable relative to the surface already under this circle (the body lags
+      // behind on the suspension when taking a stepped ramp at speed). A box can only get under
+      // the circle centre by passing this same ledge test first, so walls stay solid.
+      const under = groundHeight(world, v.pos.x + ox, v.pos.z + oz, v.pos.y + yMid);
+      const low = (under > bottom ? under : bottom) + hd.stepUp;
       for (let i = 0; i < boxes.length; i++) {
         const b = boxes[i];
         if (b.max.y <= low || b.min.y >= top) continue;

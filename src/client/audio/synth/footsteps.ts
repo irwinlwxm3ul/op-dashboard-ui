@@ -32,28 +32,31 @@ function heel(s: Synth, t: number, gain: number, lp = 260): void {
 
 function grains(s: Synth, t: number, dur: number, density: number, band: number, q: number, gain: number): void {
   const b = crackleBuffer(s.ctx, dur, density, dur * 0.45, s.rand);
-  noiseHit(s, { t, buffer: b, attack: 0.004, hold: dur * 0.5, tau: dur * 0.25, gain, filters: [{ type: 'bandpass', f: band, q }] });
+  noiseHit(s, {
+    t, buffer: b, attack: 0.004, hold: dur * 0.5, tau: dur * 0.25, gain,
+    filters: [{ type: 'bandpass', f: band, q }, { type: 'lowpass', f: band * 2.2, q: 0.6 }],
+  });
 }
 
 function step(cls: StepClass, s: Synth): void {
   const t = 0.002;
   switch (cls) {
     case 'grass':
-      heel(s, t, 0.45, 220);
+      heel(s, t, 0.65, 220);
       noiseHit(s, {                                             // blades brushing the boot
-        t, color: 'white', attack: rr(s, 0.02, 0.035), tau: 0.05, gain: 0.55,
-        filters: [{ type: 'highpass', f: 1800 }, { type: 'bandpass', f: jit(s, 4200, 0.2), q: 0.6 }],
+        t, color: 'pink', attack: rr(s, 0.02, 0.035), tau: 0.05, gain: 0.9,
+        filters: [{ type: 'bandpass', f: jit(s, 2600, 0.2), q: 0.7 }, { type: 'lowpass', f: 5500, q: 0.6 }],
       });
-      grains(s, t + 0.01, 0.1, 260, 3000, 0.7, 0.25);
+      grains(s, t + 0.01, 0.1, 260, 2400, 0.7, 0.2);
       break;
     case 'crunch':
       heel(s, t, 0.6);
-      grains(s, t + 0.004, rr(s, 0.08, 0.11), rr(s, 650, 900), jit(s, 2500, 0.2), 0.8, 0.8);
+      grains(s, t + 0.004, rr(s, 0.08, 0.11), rr(s, 650, 900), jit(s, 1900, 0.2), 0.8, 0.8);
       noiseHit(s, { t: t + 0.05, color: 'pink', attack: 0.01, tau: 0.03, gain: 0.2, filters: [{ type: 'bandpass', f: 1600, q: 0.7 }] });
       break;
     case 'snow':
       heel(s, t, 0.4, 200);
-      grains(s, t + 0.01, rr(s, 0.12, 0.16), rr(s, 1000, 1300), jit(s, 1500, 0.2), 0.6, 0.85);
+      grains(s, t + 0.01, rr(s, 0.12, 0.16), rr(s, 1000, 1300), jit(s, 1100, 0.2), 0.6, 0.85);
       break;
     case 'wood': {
       // Hollow knock: boards resonating over a cavity.
@@ -64,13 +67,16 @@ function step(cls: StepClass, s: Synth): void {
       break;
     }
     case 'hard':
-      heel(s, t, 0.5, 300);
-      noiseHit(s, { t, attack: 0.0003, tau: 0.006, gain: 0.8, filters: [{ type: 'bandpass', f: jit(s, 2800, 0.15), q: 1.2 }] });
+      heel(s, t, 0.75, 320);
+      noiseHit(s, {
+        t, attack: 0.0003, tau: 0.007, gain: 0.7,
+        filters: [{ type: 'bandpass', f: jit(s, 2200, 0.15), q: 1.3 }, { type: 'lowpass', f: 5000, q: 0.6 }],
+      });
       noiseHit(s, {                                             // toe scuff
         t: t + rr(s, 0.045, 0.06), attack: 0.006, tau: 0.014, gain: 0.3,
-        filters: [{ type: 'bandpass', f: jit(s, 3600, 0.15), q: 0.9 }],
+        filters: [{ type: 'bandpass', f: jit(s, 2800, 0.15), q: 0.9 }, { type: 'lowpass', f: 6000, q: 0.6 }],
       });
-      grains(s, t + 0.003, 0.05, 300, 5000, 0.8, 0.15);
+      grains(s, t + 0.003, 0.05, 300, 3500, 0.8, 0.1);
       break;
     case 'metal': {
       heel(s, t, 0.6, 320);

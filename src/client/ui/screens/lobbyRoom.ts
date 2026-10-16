@@ -42,7 +42,8 @@ export class LobbyRoomScreen implements ScreenView {
     menuBackdrop(this.el);
     const wrap = h('div', 'dz-screen-wrap dz-wide', this.el);
     const header = h('header', 'dz-screen-header', wrap);
-    button({ cls: 'dz-btn-ghost dz-back', label: 'ui.lobby.leave', parent: header, onClick: () => ctx.actions.leaveLobby() });
+    button({ cls: 'dz-btn-ghost dz-back', label: 'lobby.leave', parent: header, onClick: () => ctx.actions.leaveLobby() })
+      .dataset.testid = 'lobby-leave';
     this.title = h('h2', 'dz-screen-title', header);
     this.statusChip = h('span', 'dz-chip', header);
     this.statusChip.setAttribute('role', 'status');
@@ -53,15 +54,15 @@ export class LobbyRoomScreen implements ScreenView {
     // Settings summary / editor.
     const setPanel = h('div', 'dz-panel dz-lobby-settings', main);
     const setHead = h('div', 'dz-panel-head', setPanel);
-    tx(h('h3', 'dz-panel-title', setHead), 'ui.lobby.settings');
+    tx(h('h3', 'dz-panel-title', setHead), 'lobby.settings');
     this.editBtn = button({ cls: 'dz-btn-ghost dz-btn-sm', label: 'ui.lobby.edit', icon: ICONS.gear, parent: setHead, onClick: () => this.toggleEdit() });
     this.summary = h('div', 'dz-chips', setPanel);
     this.formWrap = h('div', 'dz-lobby-edit dz-hidden', setPanel);
     this.form = new LobbyForm({ name: '', maxPlayers: 16, teamSize: 1, botFill: true, botDifficulty: 'normal', zoneSpeed: 1 });
     this.formWrap.appendChild(this.form.el);
     const formFoot = h('div', 'dz-panel-foot', this.formWrap);
-    button({ cls: 'dz-btn-ghost', label: 'ui.common.cancel', parent: formFoot, onClick: () => this.toggleEdit(false) });
-    button({ cls: 'dz-btn-primary', label: 'ui.lobby.save', parent: formFoot, onClick: () => this.saveSettings() });
+    button({ cls: 'dz-btn-ghost', label: 'common.cancel', parent: formFoot, onClick: () => this.toggleEdit(false) });
+    button({ cls: 'dz-btn-primary', label: 'common.apply', parent: formFoot, onClick: () => this.saveSettings() });
 
     // Teams.
     const teamPanel = h('div', 'dz-panel dz-lobby-teams', main);
@@ -73,7 +74,7 @@ export class LobbyRoomScreen implements ScreenView {
     // Chat.
     const chat = h('div', 'dz-panel dz-chat', grid);
     const chatHead = h('div', 'dz-panel-head', chat);
-    tx(h('h3', 'dz-panel-title', chatHead), 'ui.lobby.chat');
+    tx(h('h3', 'dz-panel-title', chatHead), 'lobby.chat');
     this.chatLog = h('div', 'dz-chat-log', chat);
     this.chatLog.setAttribute('role', 'log');
     this.chatLog.setAttribute('aria-live', 'polite');
@@ -82,11 +83,11 @@ export class LobbyRoomScreen implements ScreenView {
     this.chatInput.type = 'text';
     this.chatInput.maxLength = MAX_CHAT_LEN;
     this.chatInput.autocomplete = 'off';
-    placeholderTx(this.chatInput, 'ui.lobby.chatPlaceholder');
-    ariaTx(this.chatInput, 'ui.lobby.chatPlaceholder');
+    placeholderTx(this.chatInput, 'lobby.chatPlaceholder');
+    ariaTx(this.chatInput, 'lobby.chatPlaceholder');
     const send = button({ cls: 'dz-btn-icon-only', icon: ICONS.send, parent: chatForm });
     send.type = 'submit';
-    ariaTx(send, 'ui.lobby.send');
+    ariaTx(send, 'common.send');
     chatForm.addEventListener('submit', (ev) => {
       ev.preventDefault();
       this.sendChat();
@@ -96,7 +97,9 @@ export class LobbyRoomScreen implements ScreenView {
     const footer = h('footer', 'dz-screen-footer', wrap);
     this.hint = h('span', 'dz-lobby-hint', footer);
     this.readyBtn = button({ cls: 'dz-btn-xl', parent: footer, onClick: () => this.toggleReady() });
-    this.startBtn = button({ cls: 'dz-btn-primary dz-btn-xl', label: 'ui.lobby.start', icon: ICONS.play, parent: footer, onClick: () => this.start() });
+    this.startBtn = button({ cls: 'dz-btn-primary dz-btn-xl', label: 'lobby.startMatch', icon: ICONS.play, parent: footer, onClick: () => this.start() });
+    this.readyBtn.dataset.testid = 'lobby-ready';
+    this.startBtn.dataset.testid = 'lobby-start';
 
     ctx.onLanguage(() => {
       this.form.relabel();
@@ -210,8 +213,8 @@ export class LobbyRoomScreen implements ScreenView {
 
     // Status chip.
     this.statusChip.className = `dz-chip dz-status-${s.status}`;
-    if (s.countdown >= 0) txp(this.statusChip, 'ui.lobby.startingIn', { n: fmtNumber(Math.max(0, Math.ceil(s.countdown))) });
-    else tx(this.statusChip, s.status === 'in_game' ? 'ui.lobbyStatus.inGame' : s.status === 'starting' ? 'ui.lobbyStatus.starting' : 'ui.lobbyStatus.waiting');
+    if (s.countdown >= 0) txp(this.statusChip, 'lobby.startingIn', { count: Math.max(0, Math.ceil(s.countdown)) });
+    else tx(this.statusChip, s.status === 'in_game' ? 'mp.status.in_game' : s.status === 'starting' ? 'mp.status.starting' : 'mp.status.waiting');
 
     // Settings summary.
     clear(this.summary);
@@ -220,17 +223,17 @@ export class LobbyRoomScreen implements ScreenView {
       h('span', 'dz-chip-k', c).textContent = label;
       h('span', 'dz-chip-v', c).textContent = value;
     };
-    chip(t('ui.lobbyForm.maxPlayers'), fmtNumber(s.settings.maxPlayers));
-    chip(t('ui.lobbyForm.teamSize'), t(teamSizeKey(s.settings.teamSize)));
-    chip(t('ui.lobbyForm.botFill'), t(s.settings.botFill ? 'ui.common.on' : 'ui.common.off'));
-    chip(t('ui.lobbyForm.difficulty'), t(difficultyKey(s.settings.botDifficulty)));
-    chip(t('ui.lobbyForm.zoneSpeed'), t(zoneSpeedKey(s.settings.zoneSpeed)));
+    chip(t('lobby.maxPlayers'), fmtNumber(s.settings.maxPlayers));
+    chip(t('lobby.teamSize'), t(teamSizeKey(s.settings.teamSize)));
+    chip(t('lobby.botFill'), t(s.settings.botFill ? 'common.on' : 'common.off'));
+    chip(t('lobby.botDifficulty'), t(difficultyKey(s.settings.botDifficulty)));
+    chip(t('lobby.zoneSpeed'), t(zoneSpeedKey(s.settings.zoneSpeed)));
     this.editBtn.classList.toggle('dz-hidden', !host || s.status !== 'waiting');
     this.formWrap.classList.toggle('dz-hidden', !(host && this.editing));
     this.summary.classList.toggle('dz-hidden', host && this.editing);
 
     // Teams.
-    txp(this.teamsHead, 'ui.lobby.membersCount', { n: fmtNumber(s.members.length), max: fmtNumber(s.settings.maxPlayers) });
+    txp(this.teamsHead, 'mp.playersOfMax', { players: s.members.length, max: s.settings.maxPlayers });
     this.renderTeams(s, me);
 
     // Footer.
@@ -239,7 +242,7 @@ export class LobbyRoomScreen implements ScreenView {
       this.readyBtn.classList.toggle('dz-btn-ok', me.ready);
       clear(this.readyBtn);
       if (me.ready) this.readyBtn.appendChild(svgIcon(ICONS.check, 'dz-btn-icon'));
-      tx(h('span', 'dz-btn-label', this.readyBtn), me.ready ? 'ui.lobby.ready' : 'ui.lobby.readyUp');
+      tx(h('span', 'dz-btn-label', this.readyBtn), me.ready ? 'lobby.unready' : 'lobby.readyUp');
       this.readyBtn.setAttribute('aria-pressed', me.ready ? 'true' : 'false');
     }
     this.readyBtn.disabled = s.status !== 'waiting';
@@ -247,11 +250,11 @@ export class LobbyRoomScreen implements ScreenView {
     this.startBtn.disabled = !this.canStart();
     const others = s.members.filter((m) => m.clientId !== this.myId);
     const waiting = others.filter((m) => !m.ready).length;
-    if (s.status === 'in_game') tx(this.hint, 'ui.lobby.matchRunning');
+    if (s.status === 'in_game') tx(this.hint, 'lobby.inGame');
     else if (host) {
-      if (waiting > 0) txp(this.hint, 'ui.lobby.waitingReady', { n: fmtNumber(waiting) });
-      else tx(this.hint, s.settings.botFill || others.length > 0 ? 'ui.lobby.allReady' : 'ui.lobby.aloneHint');
-    } else tx(this.hint, me?.ready ? 'ui.lobby.waitingHost' : 'ui.lobby.readyHint');
+      if (waiting > 0) tx(this.hint, 'lobby.waitingForReady');
+      else tx(this.hint, s.settings.botFill || others.length > 0 ? 'lobby.allReady' : 'lobby.waitingForPlayers');
+    } else tx(this.hint, me?.ready ? 'lobby.waitingForHost' : 'ui.lobby.readyHint');
   }
 
   private renderTeams(s: LobbyState, me: LobbyMember | null): void {
@@ -269,35 +272,36 @@ export class LobbyRoomScreen implements ScreenView {
       card.classList.toggle('dz-team-mine', mine);
       card.classList.toggle('dz-team-full', full && !mine);
       card.disabled = s.status !== 'waiting' || (full && !mine);
-      card.setAttribute('aria-label', t('ui.lobby.joinTeamAria', { n: fmtNumber(i + 1) }));
+      card.setAttribute('aria-label', t('lobby.team', { n: i + 1 }));
+      card.dataset.testid = `team-${i}`;
       const head = h('div', 'dz-team-head', card);
-      txp(h('span', 'dz-team-name', head), 'ui.lobby.team', { n: fmtNumber(i + 1) });
+      txp(h('span', 'dz-team-name', head), 'lobby.team', { n: fmtNumber(i + 1) });
       h('span', 'dz-team-count', head).textContent = `${fmtNumber(members.length)}/${fmtNumber(size)}`;
       for (let k = 0; k < size; k++) {
         const m = members[k];
         const slot = h('div', 'dz-slot', card);
         if (!m) {
           slot.classList.add('dz-slot-empty');
-          tx(slot, mine || full ? 'ui.lobby.emptySlot' : 'ui.lobby.joinTeam');
+          tx(slot, mine || full ? 'lobby.emptySlot' : 'lobby.joinTeam');
           continue;
         }
         if (m.clientId === this.myId) slot.classList.add('dz-slot-me');
         if (m.isHost) {
           const crown = svgIcon(ICONS.crown, 'dz-icon dz-icon-sm dz-accent');
-          crown.title = t('ui.lobby.host');
+          crown.title = t('lobby.host');
           slot.appendChild(crown);
         }
         const name = h('span', 'dz-slot-name', slot);
         name.textContent = m.name;
         const ready = h('span', `dz-slot-ready${m.ready || m.isHost ? ' dz-on' : ''}`, slot);
-        if (m.isHost) tx(ready, 'ui.lobby.hostTag');
+        if (m.isHost) tx(ready, 'lobby.host');
         else if (m.ready) {
           ready.appendChild(svgIcon(ICONS.check, 'dz-icon dz-icon-sm'));
-          ready.title = t('ui.lobby.ready');
-        } else tx(ready, 'ui.lobby.notReady');
+          ready.title = t('lobby.ready');
+        } else tx(ready, 'lobby.notReady');
         if (m.ping > 0) {
           const ping = h('span', `dz-slot-ping${m.ping > 150 ? ' dz-warn' : ''}`, slot);
-          txp(ping, 'ui.common.ms', { n: fmtNumber(Math.round(m.ping)) });
+          txp(ping, 'unit.ms', { n: fmtNumber(Math.round(m.ping)) });
         }
       }
       card.addEventListener('click', () => {

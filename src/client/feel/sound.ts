@@ -157,18 +157,22 @@ export class SoundRouter {
 
   /**
    * Reload phase sounds over the reload duration: mag out at 20 %, mag in at 70 %, bolt at the end
-   * for empty reloads; shell-by-shell weapons get one shell sound per round (+ pump when empty).
-   * `mag` is the magazine count when the reload started (shell count for tube-fed weapons).
+   * for empty reloads. Shell-by-shell weapons follow the predicted timeline (client-net / sim): an
+   * empty tube first spends the extra empty time racking the action, then one shell per
+   * `reloadPerShell` until full or out of reserve. `mag` is the magazine count when the reload
+   * started, `reserve` the rounds available (Infinity when unknown or infinite).
    */
-  reload(weapon: WeaponId, empty: boolean, mag: number, local: boolean): void {
+  reload(weapon: WeaponId, empty: boolean, mag: number, reserve: number, local: boolean): void {
     const def = WEAPONS[weapon];
     this.cancel(local, 'reload');
     if (local) this.localReloadStarted = this.now;
     const kind = def.sound;
     if (def.reloadPerShell !== undefined && def.reloadPerShell > 0) {
-      const shells = Math.max(1, def.magSize - Math.max(0, Math.min(def.magSize, empty ? 0 : mag)));
-      for (let i = 0; i < shells; i++) this.schedule((i + 0.6) * def.reloadPerShell, kind, 'shell', 'reload', local);
-      if (empty) this.schedule(shells * def.reloadPerShell + 0.12, kind, 'bolt', 'reload', local);
+      const missing = def.magSize - Math.max(0, Math.min(def.magSize, empty ? 0 : mag));
+      const shells = Math.max(1, Math.min(missing, reserve));
+      const rack = empty ? Math.max(0, def.reloadEmptyTime - def.reloadTime) : 0;
+      if (empty) this.schedule(rack * 0.45, kind, 'bolt', 'reload', local);
+      for (let i = 0; i < shells; i++) this.schedule(rack + (i + 0.7) * def.reloadPerShell, kind, 'shell', 'reload', local);
       return;
     }
     const total = empty ? def.reloadEmptyTime : def.reloadTime;
@@ -265,7 +269,11 @@ export class SoundRouter {
   // Per frame
   // ---------------------------------------------------------------------------
 
-  update(frame: FrameState, cam: CameraState | null, dt: number): void {
+  /**
+   * Start of a frame (before events are routed): advances the clock and updates the listener so
+   * event handlers cull / measure against the current camera.
+   */
+  begin(frame: FrameState, cam: CameraState | null, dt: number): void {
     this.now += dt;
     this.frameNo++;
     const self = frame.self;
@@ -284,6 +292,11 @@ export class SoundRouter {
     else copyInto(this.head, this.listener);
 
     this.impactTokens = Math.min(IMPACT_BURST, this.impactTokens + IMPACT_RATE * dt);
+  }
+
+  /** End of a frame (after events): scheduled sounds, footsteps, engines, loops, engine update. */
+  end(frame: FrameState, dt: number): void {
+    const self = frame.self;
 
     // ---- Scheduled weapon-handling sounds ----
     // A local reload that the prediction aborted (sprint, slot switch, ...) drops its later phases.
@@ -490,21 +503,23 @@ interface Gait {
   stride: number;
   intensity: number;
 }
-const GAIT_SWIM: Gait = { stride: 2.2, intensity: 0.5 };
-const GAIT_CRAWL: Gait = { stride: 1.1, intensity: 0.22 };
-const GAIT_PRONE: Gait = { stride: 1.0, intensity: 0.2 };
-const GAIT_CROUCH: Gait = { stride: 1.4, intensity: 0.35 };
-const GAIT_SPRINT: Gait = { stride: 2.3, intensity: 1 };
-const GAIT_SLOW: Gait = { stride: 1.5, intensity: 0.3 };
-const GAIT_WALK: Gait = { stride: 1.9, intensity: 0.65 };
+// Same cadence and loudness as the local player's predicted footsteps (src/client/game), so every
+// character sounds alike.
+const GAIT_SWIM: Gait = { stride: 1.7, intensity: 0.5 };
+const GAIT_CRAWL: Gait = { stride: 0.8, intensity: 0.15 };
+const GAIT_CROUCH: Gait = { stride: 1.05, intensity: 0.35 };
+const GAIT_SPRINT: Gait = { stride: 2.05, intensity: 1 };
+const GAIT_SLOW: Gait = { stride: 1.15, intensity: 0.3 };
+const GAIT_WALK: Gait = { stride: 1.6, intensity: 0.65 };
+/** Below this horizontal speed (m/s) a walking player counts as slow-walking. */
+const SLOW_WALK_SPEED = 3;
 
 function footGait(p: PlayerView, speed: number, swim: boolean): Gait {
   if (swim) return GAIT_SWIM;
-  if (p.life === 'downed') return GAIT_CRAWL;
-  if (p.stance === 'prone') return GAIT_PRONE;
+  if (p.life === 'downed' || p.stance === 'prone') return GAIT_CRAWL;
   if (p.stance === 'crouch') return GAIT_CROUCH;
   if ((p.flags & PF.SPRINT) !== 0 || speed > MOVE_SPEED.walk + 0.6) return GAIT_SPRINT;
-  if (speed < MOVE_SPEED.slowWalk + 0.6) return GAIT_SLOW;
+  if (speed < SLOW_WALK_SPEED) return GAIT_SLOW;
   return GAIT_WALK;
 }
 

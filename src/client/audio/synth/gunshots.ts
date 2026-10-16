@@ -32,54 +32,54 @@ export const GUN_PROFILES: Record<WeaponSoundKind, GunProfile> = {
   pistol: {
     clickHp: 3600, clickTau: 0.0014, clickGain: 0.9,
     bodyBp: 1700, bodyQ: 0.9, bodyLp: 7500, bodyTau: 0.02, bodyGain: 0.85,
-    lowF: 480, lowGain: 0.42,
+    lowF: 480, lowGain: 0.53,
     thumpFrom: 130, thumpTo: 52, thumpSweep: 0.07, thumpTau: 0.032, thumpGain: 0.55,
-    tailLp: 1700, tailTau: 0.17, tailGain: 0.16, rolling: 0.15,
+    tailLp: 1700, tailTau: 0.26, tailGain: 1.0, rolling: 0.15,
     echoes: [[0.11, 0.08]],
     drive: 2.2, seconds: 0.95,
   },
   smg: {
     clickHp: 4200, clickTau: 0.0011, clickGain: 0.85,
     bodyBp: 1350, bodyQ: 1.05, bodyLp: 6800, bodyTau: 0.015, bodyGain: 0.8,
-    lowF: 400, lowGain: 0.36,
+    lowF: 400, lowGain: 0.45,
     thumpFrom: 122, thumpTo: 50, thumpSweep: 0.05, thumpTau: 0.026, thumpGain: 0.5,
-    tailLp: 1450, tailTau: 0.12, tailGain: 0.13, rolling: 0.15,
+    tailLp: 1450, tailTau: 0.2, tailGain: 0.85, rolling: 0.15,
     echoes: [[0.1, 0.06]],
     drive: 2.4, seconds: 0.72,
   },
   rifle: {
     clickHp: 3000, clickTau: 0.0019, clickGain: 1.0,
     bodyBp: 1150, bodyQ: 0.62, bodyLp: 9500, bodyTau: 0.03, bodyGain: 0.95,
-    lowF: 310, lowGain: 0.52,
+    lowF: 310, lowGain: 0.65,
     thumpFrom: 120, thumpTo: 42, thumpSweep: 0.09, thumpTau: 0.048, thumpGain: 0.72,
-    tailLp: 1350, tailTau: 0.3, tailGain: 0.27, rolling: 0.3,
+    tailLp: 1350, tailTau: 0.4, tailGain: 1.4, rolling: 0.3,
     echoes: [[0.14, 0.1], [0.34, 0.06]],
     drive: 2.6, seconds: 1.4,
   },
   shotgun: {
     clickHp: 2400, clickTau: 0.0024, clickGain: 0.78,
     bodyBp: 720, bodyQ: 0.5, bodyLp: 3600, bodyTau: 0.055, bodyGain: 1.0,
-    lowF: 170, lowGain: 0.85,
+    lowF: 170, lowGain: 1.0,
     thumpFrom: 112, thumpTo: 38, thumpSweep: 0.13, thumpTau: 0.08, thumpGain: 1.0,
-    tailLp: 950, tailTau: 0.34, tailGain: 0.32, rolling: 0.35,
+    tailLp: 950, tailTau: 0.42, tailGain: 1.5, rolling: 0.35,
     echoes: [[0.16, 0.12], [0.39, 0.07]],
     drive: 3.0, seconds: 1.5,
   },
   dmr: {
     clickHp: 2800, clickTau: 0.0022, clickGain: 1.0,
     bodyBp: 1000, bodyQ: 0.6, bodyLp: 10000, bodyTau: 0.04, bodyGain: 1.0,
-    lowF: 270, lowGain: 0.62,
+    lowF: 270, lowGain: 0.78,
     thumpFrom: 120, thumpTo: 40, thumpSweep: 0.11, thumpTau: 0.064, thumpGain: 0.86,
-    tailLp: 1150, tailTau: 0.52, tailGain: 0.36, rolling: 0.55,
+    tailLp: 1150, tailTau: 0.52, tailGain: 1.44, rolling: 0.55,
     echoes: [[0.2, 0.14], [0.47, 0.09], [0.86, 0.05]],
     drive: 2.8, seconds: 2.2,
   },
   sniper: {
     clickHp: 2500, clickTau: 0.0028, clickGain: 1.0,
     bodyBp: 900, bodyQ: 0.55, bodyLp: 10500, bodyTau: 0.05, bodyGain: 1.0,
-    lowF: 230, lowGain: 0.72,
+    lowF: 230, lowGain: 0.9,
     thumpFrom: 120, thumpTo: 37, thumpSweep: 0.13, thumpTau: 0.08, thumpGain: 1.0,
-    tailLp: 1050, tailTau: 0.72, tailGain: 0.42, rolling: 0.7,
+    tailLp: 1050, tailTau: 0.72, tailGain: 1.68, rolling: 0.7,
     // Strong slapback off the terrain, then progressively darker/later reflections.
     echoes: [[0.24, 0.3], [0.55, 0.16], [0.96, 0.09], [1.42, 0.05]],
     drive: 3.0, seconds: 2.8,
@@ -189,7 +189,7 @@ function farShot(kind: WeaponSoundKind, s: Synth): void {
   sweep(lp.frequency, t + 0.05, p.tailLp * 0.7, p.tailLp * 0.32, p.tailTau * 4);
   const tg = amp(s);
   tg.gain.setValueAtTime(0, t);
-  tg.gain.linearRampToValueAtTime(p.tailGain * 2.1, t + 0.06);
+  tg.gain.linearRampToValueAtTime(p.tailGain * 0.75, t + 0.06);
   tg.gain.setTargetAtTime(0, t + 0.06, p.tailTau * 1.55);
   chain(src, lp, tg, s.out);
   // Long terrain reflections ("thunder roll").

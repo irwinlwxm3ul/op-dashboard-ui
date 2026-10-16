@@ -150,41 +150,33 @@ export class Segmented<T extends string | number> implements Control {
   }
 }
 
-/** On/off switch (button role="switch"). */
+/** On/off switch: a native checkbox (role="switch") styled as a toggle. */
 export class Toggle implements Control {
-  readonly el: HTMLButtonElement;
-  private on: boolean;
+  readonly el: HTMLSpanElement;
+  readonly input: HTMLInputElement;
 
-  constructor(value: boolean, private readonly onChange: (v: boolean) => void) {
-    this.el = h('button', 'dz-switch');
-    this.el.type = 'button';
-    this.el.setAttribute('role', 'switch');
-    h('span', 'dz-switch-knob', this.el);
-    this.on = value;
-    this.paint();
-    this.el.addEventListener('click', () => {
-      this.on = !this.on;
-      this.paint();
-      this.onChange(this.on);
-    });
+  constructor(value: boolean, onChange: (v: boolean) => void) {
+    this.el = h('span', 'dz-switch');
+    this.input = h('input', 'dz-switch-input', this.el);
+    this.input.type = 'checkbox';
+    this.input.setAttribute('role', 'switch');
+    const track = h('span', 'dz-switch-track', this.el);
+    track.setAttribute('aria-hidden', 'true');
+    h('span', 'dz-switch-knob', track);
+    this.input.checked = value;
+    this.input.addEventListener('change', () => onChange(this.input.checked));
   }
 
   get value(): boolean {
-    return this.on;
+    return this.input.checked;
   }
 
   set value(v: boolean) {
-    this.on = v;
-    this.paint();
+    this.input.checked = v;
   }
 
   setDisabled(d: boolean): void {
-    this.el.disabled = d;
-  }
-
-  private paint(): void {
-    this.el.classList.toggle('dz-on', this.on);
-    this.el.setAttribute('aria-checked', this.on ? 'true' : 'false');
+    this.input.disabled = d;
   }
 }
 

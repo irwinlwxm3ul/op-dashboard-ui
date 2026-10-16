@@ -7,6 +7,7 @@
 // back onto that grid so the bob stays in sync with the footstep sounds.
 
 import { MOVE_SPEED } from '../../shared/constants';
+import { WEAPONS } from '../../shared/items';
 import { clamp, damp, smoothstep, TAU } from '../../shared/math';
 import type { Stance, WeaponDef } from '../../shared/types';
 import type { LocalPlayerView } from '../game/types';
@@ -43,6 +44,17 @@ const VM_LIMIT_BACK = 0.16;
 const VM_LIMIT_UP = 0.07;
 const VM_LIMIT_ROT = 0.3;
 const VM_LIMIT_SIDE = 0.04;
+
+/**
+ * Distance per footstep (m). Matches the local footstep cadence of the client prediction
+ * (src/client/game ClientGame.footsteps) so bob and footstep sounds stay phase locked; footstep
+ * events only need to trim small drift.
+ */
+const STRIDE_WALK = 1.6;
+const STRIDE_SPRINT = 2.05;
+const STRIDE_CROUCH = 1.05;
+const STRIDE_SLOW = 1.15;
+const STRIDE_SWIM = 1.7;
 
 /** Health below which the low-health effects start. */
 export const LOW_HEALTH_THRESHOLD = 35;
@@ -146,7 +158,13 @@ export class CameraFeel {
 
     // ---- Trauma shake ----
     this.trauma = decayTrauma(this.trauma, TRAUMA_DECAY, dt);
-    const t2 = this.trauma * this.trauma;
+    // Optics magnify angular motion on screen: scale the shake down with the current zoom.
+    let zoomScale = 1;
+    if (self && self.weapon !== null && self.ads > 0) {
+      const zoom = 1 + (WEAPONS[self.weapon].adsZoom - 1) * self.ads;
+      zoomScale = Math.max(0.35, Math.sqrt(zoom));
+    }
+    const t2 = this.trauma * this.trauma * zoomScale;
     if (t2 > 0) {
       const nt = this.time * SHAKE_FREQ;
       out.shake.pitch = t2 * SHAKE_MAX_PITCH * shakeNoise(this.seed, nt);
@@ -183,11 +201,11 @@ export class CameraFeel {
     if (self && self.life === 'alive' && self.vehicleId === null) {
       const speed = Math.hypot(self.vel.x, self.vel.z);
       if (self.mode === 'ground' && self.onGround && self.stance !== 'prone' && speed > 0.25) {
-        const stride = self.sprinting ? 2.4 : self.stance === 'crouch' ? 1.45 : speed < 2.6 ? 1.5 : 1.9;
+        const stride = self.sprinting ? STRIDE_SPRINT : self.stance === 'crouch' ? STRIDE_CROUCH : speed < 3 ? STRIDE_SLOW : STRIDE_WALK;
         this.bobPhase += ((speed * dt) / stride) * Math.PI;
         target = Math.min(1, speed / MOVE_SPEED.sprint) * (self.stance === 'crouch' ? 0.75 : 1);
       } else if (self.mode === 'swim' && speed > 0.25) {
-        this.bobPhase += ((speed * dt) / 2.6) * Math.PI;
+        this.bobPhase += ((speed * dt) / STRIDE_SWIM) * Math.PI;
         target = 0.35 * Math.min(1, speed / MOVE_SPEED.swim);
       }
     }

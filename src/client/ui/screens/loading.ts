@@ -25,6 +25,7 @@ export class LoadingScreen implements ScreenView {
 
   constructor(ctx: UiCtx) {
     this.el = h('section', 'dz-screen dz-loading');
+    this.el.dataset.testid = 'loading';
     menuBackdrop(this.el);
     const wrap = h('div', 'dz-loading-wrap', this.el);
     this.logo = h('div', 'dz-logo dz-logo-sm', wrap);
@@ -75,8 +76,8 @@ export class LoadingScreen implements ScreenView {
   }
 
   private renderStep(): void {
-    this.step.textContent = this.stepKey ? t(this.stepKey as TKey) : t('ui.loading.title');
-    txp(this.pct, 'ui.common.percent', { n: fmtNumber(Math.round(this.progress * 100)) });
+    this.step.textContent = this.stepKey ? t(this.stepKey as TKey) : t('common.loading');
+    txp(this.pct, 'unit.percent', { n: fmtNumber(Math.round(this.progress * 100)) });
   }
 
   private renderTip(): void {

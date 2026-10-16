@@ -29,7 +29,7 @@ function debris(s: Synth, t: number, dur: number, density: number, band: number,
   const b = crackleBuffer(s.ctx, dur, density, dur * 0.35, s.rand);
   noiseHit(s, {
     t, buffer: b, attack: 0.001, hold: dur * 0.6, tau: dur * 0.2, gain,
-    filters: [{ type: 'bandpass', f: band, q: 0.8 }], dest,
+    filters: [{ type: 'bandpass', f: band, q: 0.8 }, { type: 'lowpass', f: band * 2, q: 0.6 }], dest,
   });
 }
 
@@ -48,9 +48,10 @@ function impact(cls: ImpactClass, s: Synth): void {
       break;
     case 'hard':
       // Sharp crack + chips flying off.
-      noiseHit(s, { t, attack: 0.0002, tau: 0.004, gain: 1.2, filters: [{ type: 'bandpass', f: jit(s, 3200, 0.15), q: 0.9 }] });
-      noiseHit(s, { t, attack: 0.0006, tau: 0.018, gain: 0.6, filters: [{ type: 'bandpass', f: jit(s, 1300, 0.15), q: 1.2 }] });
-      debris(s, t + 0.004, 0.22, 700, jit(s, 4200, 0.2), 0.5);
+      noiseHit(s, { t, attack: 0.0002, tau: 0.005, gain: 1.0, filters: [{ type: 'bandpass', f: jit(s, 2600, 0.15), q: 0.9 }] });
+      noiseHit(s, { t, attack: 0.0006, tau: 0.025, gain: 0.9, filters: [{ type: 'bandpass', f: jit(s, 1300, 0.15), q: 1.2 }] });
+      thunk(s, t, 160, 0.025, 0.5);
+      debris(s, t + 0.004, 0.22, 700, jit(s, 3000, 0.2), 0.35);
       break;
     case 'metal': {
       const b = jit(s, 1900, 0.15);
@@ -137,11 +138,11 @@ export function bulletCrackSpec(): SoundSpec {
       for (let i = 0; i < nLen; i++) d[i] = 1 - (2 * i) / (nLen - 1);  // N-wave: +1 -> -1
       const crack = play(s, nb, 0.004);
       const hp = bq(s, 'highpass', 900, 0.7);
-      const cg = amp(s, 1.6);
+      const cg = amp(s, 0.8);
       chain(crack, hp, cg, s.out);
-      noiseHit(s, { t: 0.004, attack: 0.0002, tau: 0.003, gain: 1, filters: [{ type: 'highpass', f: 3000 }] });
+      noiseHit(s, { t: 0.004, attack: 0.0002, tau: 0.004, gain: 1.1, filters: [{ type: 'highpass', f: 2600 }] });
       noiseHit(s, {
-        t: 0.008, attack: 0.008, tau: 0.06, gain: 0.45,
+        t: 0.008, attack: 0.008, tau: 0.075, gain: 1.2,
         filters: [{ type: 'bandpass', f: rr(s, 5200, 6200), q: 5, to: rr(s, 1600, 2100), time: 0.18 }],
       });
       // Ground reflection of the crack.
@@ -157,12 +158,16 @@ export function armorBreakSpec(): SoundSpec {
   return {
     seconds: 0.8,
     build: (s) => {
-      noiseHit(s, { t: 0.002, attack: 0.0002, tau: 0.006, gain: 1, filters: [{ type: 'highpass', f: 2000 }] });
+      noiseHit(s, { t: 0.002, attack: 0.0002, tau: 0.006, gain: 1, filters: [{ type: 'highpass', f: 1800 }] });
+      noiseHit(s, { t: 0.002, attack: 0.0005, tau: 0.03, gain: 0.5, filters: [{ type: 'bandpass', f: 1500, q: 1 }] });
       const crk = crackleBuffer(s.ctx, 0.25, 1600, 0.06, s.rand);
-      noiseHit(s, { t: 0.002, buffer: crk, attack: 0.001, hold: 0.1, tau: 0.05, gain: 0.9, filters: [{ type: 'highpass', f: 3000 }] });
+      noiseHit(s, {
+        t: 0.002, buffer: crk, attack: 0.001, hold: 0.1, tau: 0.05, gain: 0.8,
+        filters: [{ type: 'highpass', f: 2200 }, { type: 'lowpass', f: 8000 }],
+      });
       for (let i = 0; i < 10; i++) {
         const t = 0.004 + s.rand() * s.rand() * 0.3;
-        tone(s, { t, f: rr(s, 2600, 9000), attack: 0.0005, tau: rr(s, 0.02, 0.18), gain: rr(s, 0.08, 0.22) });
+        tone(s, { t, f: rr(s, 2200, 7000), attack: 0.0005, tau: rr(s, 0.02, 0.18), gain: rr(s, 0.08, 0.22) });
       }
       thunk(s, 0.002, 150, 0.04, 0.5);
       metalClick(s, 0.004, 1100, 0.4, 0.04);

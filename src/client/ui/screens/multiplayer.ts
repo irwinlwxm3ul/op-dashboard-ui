@@ -50,25 +50,27 @@ export class MultiplayerScreen implements ScreenView {
     menuBackdrop(this.el);
     const wrap = h('div', 'dz-screen-wrap', this.el);
     const header = h('header', 'dz-screen-header', wrap);
-    button({ cls: 'dz-btn-ghost dz-back', label: 'ui.common.back', parent: header, onClick: () => this.back() });
-    tx(h('h2', 'dz-screen-title', header), 'ui.mp.title');
+    button({ cls: 'dz-btn-ghost dz-back', label: 'common.back', parent: header, onClick: () => this.back() });
+    tx(h('h2', 'dz-screen-title', header), 'mp.title');
 
     // --- connection bar -----------------------------------------------------------------------
     this.connPanel = h('div', 'dz-panel dz-mp-conn', wrap);
     this.nameRow = h('div', 'dz-mp-conn-row', this.connPanel);
-    const nameLabel = tx(h('label', 'dz-field-label', this.nameRow), 'ui.main.playerName');
+    const nameLabel = tx(h('label', 'dz-field-label', this.nameRow), 'menu.playerName');
     this.nameInput = h('input', 'dz-input', this.nameRow);
     this.nameInput.id = 'dz-mp-name';
     nameLabel.htmlFor = this.nameInput.id;
     this.nameInput.type = 'text';
     this.nameInput.maxLength = MAX_NAME_LEN;
     this.nameInput.spellcheck = false;
-    placeholderTx(this.nameInput, 'ui.main.namePlaceholder');
+    placeholderTx(this.nameInput, 'menu.playerNamePlaceholder');
     this.nameInput.addEventListener('keydown', (ev) => {
       if (ev.key === 'Enter') this.connect();
     });
     this.nameInput.addEventListener('input', () => this.nameInput.classList.remove('dz-invalid'));
-    this.connectBtn = button({ cls: 'dz-btn-primary', label: 'ui.mp.connect', parent: this.nameRow, onClick: () => this.connect() });
+    this.nameInput.dataset.testid = 'mp-name';
+    this.connectBtn = button({ cls: 'dz-btn-primary', label: 'mp.connect', parent: this.nameRow, onClick: () => this.connect() });
+    this.connectBtn.dataset.testid = 'mp-connect';
 
     this.connectedRow = h('div', 'dz-mp-conn-row', this.connPanel);
     h('span', 'dz-dot dz-dot-ok', this.connectedRow);
@@ -82,14 +84,15 @@ export class MultiplayerScreen implements ScreenView {
     const grid = h('div', 'dz-mp-grid', wrap);
     this.listPanel = h('div', 'dz-panel dz-mp-list', grid);
     const listHead = h('div', 'dz-panel-head', this.listPanel);
-    tx(h('h3', 'dz-panel-title', listHead), 'ui.mp.lobbies');
-    this.refreshBtn = button({ cls: 'dz-btn-ghost dz-btn-sm', label: 'ui.mp.refresh', icon: ICONS.refresh, parent: listHead, onClick: () => this.refresh() });
+    tx(h('h3', 'dz-panel-title', listHead), 'mp.lobbies');
+    this.refreshBtn = button({ cls: 'dz-btn-ghost dz-btn-sm', label: 'mp.refresh', icon: ICONS.refresh, parent: listHead, onClick: () => this.refresh() });
+    this.refreshBtn.dataset.testid = 'mp-refresh';
 
     const table = h('div', 'dz-table dz-lobby-table', this.listPanel);
     table.setAttribute('role', 'table');
     const thead = h('div', 'dz-tr dz-th', table);
     thead.setAttribute('role', 'row');
-    for (const k of ['ui.mp.colName', 'ui.mp.colHost', 'ui.mp.colPlayers', 'ui.mp.colMode', 'ui.mp.colStatus'] as const) {
+    for (const k of ['mp.col.name', 'mp.col.host', 'mp.col.players', 'mp.col.mode', 'mp.col.status'] as const) {
       const c = tx(h('div', 'dz-td', thead), k);
       c.setAttribute('role', 'columnheader');
     }
@@ -99,11 +102,12 @@ export class MultiplayerScreen implements ScreenView {
 
     this.createPanel = h('div', 'dz-panel dz-mp-create', grid);
     const createHead = h('div', 'dz-panel-head', this.createPanel);
-    tx(h('h3', 'dz-panel-title', createHead), 'ui.mp.createLobby');
-    this.form = new LobbyForm({ ...DEFAULT_LOBBY_SETTINGS, name: '' }, () => { this.formTouched = true; });
+    tx(h('h3', 'dz-panel-title', createHead), 'mp.createLobby');
+    this.form = new LobbyForm({ ...DEFAULT_LOBBY_SETTINGS, name: '' }, () => { this.formTouched = true; }, 'create');
     this.createPanel.appendChild(this.form.el);
     const createFooter = h('div', 'dz-panel-foot', this.createPanel);
-    this.createBtn = button({ cls: 'dz-btn-primary', label: 'ui.mp.create', parent: createFooter, onClick: () => this.create() });
+    this.createBtn = button({ cls: 'dz-btn-primary', label: 'common.create', parent: createFooter, onClick: () => this.create() });
+    this.createBtn.dataset.testid = 'create-submit';
 
     ctx.onLanguage(() => {
       this.form.relabel();
@@ -119,9 +123,8 @@ export class MultiplayerScreen implements ScreenView {
     if (this.state === 'connected') {
       // Re-validate the connection silently (the app may have dropped it while we were away).
       this.connect(true);
-    } else if (this.state === 'idle' && sanitizeName(this.nameInput.value)) {
-      this.connect();
-    } else if (!sanitizeName(this.nameInput.value)) {
+    } else {
+      // Connecting is an explicit action (the name is sent to the server).
       this.nameInput.focus();
     }
     this.startAutoRefresh();
@@ -177,7 +180,7 @@ export class MultiplayerScreen implements ScreenView {
     if (!name) {
       this.nameInput.classList.add('dz-invalid');
       this.nameInput.focus();
-      this.ctx.toast(t('ui.mp.nameRequired'), 'error');
+      this.ctx.toast(t('mp.nameRequired'), 'error');
       return;
     }
     this.nameInput.value = name;
@@ -268,7 +271,7 @@ export class MultiplayerScreen implements ScreenView {
     switch (this.state) {
       case 'connecting':
         this.statusLine.classList.add('dz-busy');
-        tx(this.statusLine, 'ui.mp.connecting');
+        tx(this.statusLine, 'mp.connecting');
         break;
       case 'error':
         this.statusLine.classList.add('dz-error');
@@ -294,13 +297,15 @@ export class MultiplayerScreen implements ScreenView {
     const connected = this.state === 'connected';
     if (!connected || this.lobbies.length === 0) {
       this.listEmpty.classList.remove('dz-hidden');
-      tx(this.listEmpty, connected ? 'ui.mp.noLobbies' : this.state === 'connecting' ? 'ui.mp.connecting' : 'ui.mp.notConnected');
+      tx(this.listEmpty, connected ? 'mp.noLobbies' : this.state === 'connecting' ? 'mp.connecting' : 'ui.mp.notConnected');
       return;
     }
     this.listEmpty.classList.add('dz-hidden');
     for (const l of this.lobbies) {
       const row = h('div', 'dz-tr', this.listBody);
       row.setAttribute('role', 'row');
+      row.dataset.testid = 'lobby-row';
+      row.dataset.lobbyId = l.id;
       const full = l.players >= l.maxPlayers;
       const joinable = l.status === 'waiting' && !full;
       row.classList.toggle('dz-row-muted', !joinable);
@@ -311,16 +316,17 @@ export class MultiplayerScreen implements ScreenView {
       host.appendChild(svgIcon(ICONS.crown, 'dz-icon dz-icon-sm dz-accent'));
       h('span', '', host).textContent = l.host;
       const players = h('div', 'dz-td dz-num', row);
-      txp(players, 'ui.mp.playersCount', { n: fmtNumber(l.players), max: fmtNumber(l.maxPlayers) });
+      txp(players, 'mp.playersOfMax', { players: l.players, max: l.maxPlayers });
       tx(h('div', 'dz-td', row), teamSizeKey(l.teamSize));
       const status = h('div', `dz-td dz-status dz-status-${l.status}`, row);
-      tx(status, l.status === 'waiting' ? (full ? 'ui.lobbyStatus.full' : 'ui.lobbyStatus.waiting')
-        : l.status === 'starting' ? 'ui.lobbyStatus.starting' : 'ui.lobbyStatus.inGame');
+      tx(status, l.status === 'waiting' ? (full ? 'mp.full' : 'mp.status.waiting')
+        : l.status === 'starting' ? 'mp.status.starting' : 'mp.status.in_game');
       for (const c of Array.from(row.children)) c.setAttribute('role', 'cell');
       const cell = h('div', 'dz-td dz-td-action', row);
       cell.setAttribute('role', 'cell');
-      const join = button({ cls: 'dz-btn-sm dz-btn-primary', label: 'ui.mp.join', parent: cell, onClick: () => this.join(l) });
+      const join = button({ cls: 'dz-btn-sm dz-btn-primary', label: 'mp.joinLobby', parent: cell, onClick: () => this.join(l) });
       join.disabled = !joinable;
+      join.dataset.testid = 'lobby-join';
       row.addEventListener('dblclick', () => { if (joinable) this.join(l); });
     }
   }

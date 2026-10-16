@@ -14,25 +14,25 @@ import { Modal, type ModalManager } from '../modal';
 type Tab = 'graphics' | 'mouse' | 'audio' | 'gameplay';
 
 const TABS: { id: Tab; label: TKey }[] = [
-  { id: 'graphics', label: 'ui.settings.tabGraphics' },
-  { id: 'mouse', label: 'ui.settings.tabMouse' },
-  { id: 'audio', label: 'ui.settings.tabAudio' },
-  { id: 'gameplay', label: 'ui.settings.tabGameplay' },
+  { id: 'graphics', label: 'settings.tab.graphics' },
+  { id: 'mouse', label: 'settings.tab.controls' },
+  { id: 'audio', label: 'settings.tab.audio' },
+  { id: 'gameplay', label: 'settings.tab.gameplay' },
 ];
 
 const QUALITY_OPTIONS: { value: Quality; label: TKey }[] = [
-  { value: 'low', label: 'ui.settings.qualityLow' },
-  { value: 'medium', label: 'ui.settings.qualityMedium' },
-  { value: 'high', label: 'ui.settings.qualityHigh' },
-  { value: 'ultra', label: 'ui.settings.qualityUltra' },
+  { value: 'low', label: 'settings.quality.low' },
+  { value: 'medium', label: 'settings.quality.medium' },
+  { value: 'high', label: 'settings.quality.high' },
+  { value: 'ultra', label: 'settings.quality.ultra' },
 ];
 
 const CAMERA_OPTIONS: { value: CameraMode; label: TKey }[] = [
-  { value: 'tpp', label: 'ui.settings.cameraTpp' },
-  { value: 'fpp', label: 'ui.settings.cameraFpp' },
+  { value: 'tpp', label: 'settings.cameraMode.tpp' },
+  { value: 'fpp', label: 'settings.cameraMode.fpp' },
 ];
 
-const pct = (v: number): string => t('ui.common.percent', { n: fmtNumber(Math.round(v * 100)) });
+const pct = (v: number): string => t('unit.percent', { n: Math.round(v * 100) });
 const mult = (v: number): string => fmtNumber(v, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
 export class SettingsModal extends Modal {
@@ -43,7 +43,7 @@ export class SettingsModal extends Modal {
   private readonly relabels: Array<() => void> = [];
 
   constructor(mgr: ModalManager, ctx: UiCtx) {
-    super(mgr, 'ui.settings.title', 'dz-settings-modal');
+    super(mgr, 'settings.title', 'dz-settings-modal');
     const tabBar = h('div', 'dz-tabs', this.body);
     tabBar.setAttribute('role', 'tablist');
     const pages = h('div', 'dz-tab-pages', this.body);
@@ -72,39 +72,39 @@ export class SettingsModal extends Modal {
     const page = (id: Tab) => this.tabs.get(id)!.page;
 
     // Graphics
-    this.seg(page('graphics'), 'ui.settings.quality', QUALITY_OPTIONS, s0.quality, (v) => settings.set({ quality: v }), (s) => s.quality, 'ui.settings.qualityHint');
-    this.slider(page('graphics'), 'ui.settings.renderScale', { min: 0.5, max: 1.5, step: 0.05, format: pct }, (s) => s.renderScale, (v) => settings.set({ renderScale: v }), 'ui.settings.renderScaleHint');
-    this.slider(page('graphics'), 'ui.settings.fov', { min: 70, max: 100, step: 1, format: (v) => t('ui.common.degrees', { n: fmtNumber(v) }) }, (s) => s.fov, (v) => settings.set({ fov: v }));
-    this.toggle(page('graphics'), 'ui.settings.showFps', (s) => s.showFps, (v) => settings.set({ showFps: v }));
+    this.seg(page('graphics'), 'settings.quality', QUALITY_OPTIONS, s0.quality, (v) => settings.set({ quality: v }), (s) => s.quality);
+    this.slider(page('graphics'), 'settings.renderScale', { min: 0.5, max: 1.5, step: 0.05, format: pct }, (s) => s.renderScale, (v) => settings.set({ renderScale: v }), 'settings.renderScaleHint');
+    this.slider(page('graphics'), 'settings.fov', { min: 70, max: 100, step: 1, format: (v) => t('ui.unit.degrees', { n: v }) }, (s) => s.fov, (v) => settings.set({ fov: v }));
+    this.toggle(page('graphics'), 'settings.showFps', (s) => s.showFps, (v) => settings.set({ showFps: v }));
 
     // Mouse
-    this.slider(page('mouse'), 'ui.settings.mouseSensitivity', { min: 0.1, max: 3, step: 0.05, format: mult }, (s) => s.mouseSensitivity, (v) => settings.set({ mouseSensitivity: v }));
-    this.slider(page('mouse'), 'ui.settings.adsSensitivity', { min: 0.1, max: 2, step: 0.05, format: mult }, (s) => s.adsSensitivity, (v) => settings.set({ adsSensitivity: v }), 'ui.settings.adsSensitivityHint');
-    this.slider(page('mouse'), 'ui.settings.scopeSensitivity', { min: 0.1, max: 2, step: 0.05, format: mult }, (s) => s.scopeSensitivity, (v) => settings.set({ scopeSensitivity: v }), 'ui.settings.scopeSensitivityHint');
-    this.toggle(page('mouse'), 'ui.settings.invertY', (s) => s.invertY, (v) => settings.set({ invertY: v }));
+    this.slider(page('mouse'), 'settings.mouseSensitivity', { min: 0.1, max: 3, step: 0.05, format: mult }, (s) => s.mouseSensitivity, (v) => settings.set({ mouseSensitivity: v }));
+    this.slider(page('mouse'), 'settings.adsSensitivity', { min: 0.1, max: 2, step: 0.05, format: mult }, (s) => s.adsSensitivity, (v) => settings.set({ adsSensitivity: v }));
+    this.slider(page('mouse'), 'settings.scopeSensitivity', { min: 0.1, max: 2, step: 0.05, format: mult }, (s) => s.scopeSensitivity, (v) => settings.set({ scopeSensitivity: v }));
+    this.toggle(page('mouse'), 'settings.invertY', (s) => s.invertY, (v) => settings.set({ invertY: v }));
 
     // Audio
     const pushAudio = () => {
       const s = settings.get();
       audio.setSettings({ master: s.masterVolume, sfx: s.sfxVolume, ui: s.uiVolume });
     };
-    this.slider(page('audio'), 'ui.settings.masterVolume', { min: 0, max: 1, step: 0.01, format: pct }, (s) => s.masterVolume, (v) => { settings.set({ masterVolume: v }); pushAudio(); });
-    this.slider(page('audio'), 'ui.settings.sfxVolume', { min: 0, max: 1, step: 0.01, format: pct }, (s) => s.sfxVolume, (v) => { settings.set({ sfxVolume: v }); pushAudio(); });
-    this.slider(page('audio'), 'ui.settings.uiVolume', { min: 0, max: 1, step: 0.01, format: pct }, (s) => s.uiVolume, (v) => { settings.set({ uiVolume: v }); pushAudio(); }, undefined, () => audio.ui('click'));
+    this.slider(page('audio'), 'settings.masterVolume', { min: 0, max: 1, step: 0.01, format: pct }, (s) => s.masterVolume, (v) => { settings.set({ masterVolume: v }); pushAudio(); });
+    this.slider(page('audio'), 'settings.sfxVolume', { min: 0, max: 1, step: 0.01, format: pct }, (s) => s.sfxVolume, (v) => { settings.set({ sfxVolume: v }); pushAudio(); });
+    this.slider(page('audio'), 'settings.uiVolume', { min: 0, max: 1, step: 0.01, format: pct }, (s) => s.uiVolume, (v) => { settings.set({ uiVolume: v }); pushAudio(); }, undefined, () => audio.ui('click'));
 
     // Gameplay
-    this.seg(page('gameplay'), 'ui.settings.cameraMode', CAMERA_OPTIONS, s0.cameraMode, (v) => settings.set({ cameraMode: v }), (s) => s.cameraMode, 'ui.settings.cameraModeHint');
-    this.toggle(page('gameplay'), 'ui.settings.toggleCrouch', (s) => s.toggleCrouch, (v) => settings.set({ toggleCrouch: v }), 'ui.settings.toggleCrouchHint');
-    this.toggle(page('gameplay'), 'ui.settings.toggleAds', (s) => s.toggleAds, (v) => settings.set({ toggleAds: v }), 'ui.settings.toggleAdsHint');
-    this.toggle(page('gameplay'), 'ui.settings.damageNumbers', (s) => s.damageNumbers, (v) => settings.set({ damageNumbers: v }));
+    this.seg(page('gameplay'), 'settings.cameraMode', CAMERA_OPTIONS, s0.cameraMode, (v) => settings.set({ cameraMode: v }), (s) => s.cameraMode);
+    this.toggle(page('gameplay'), 'settings.toggleCrouch', (s) => s.toggleCrouch, (v) => settings.set({ toggleCrouch: v }));
+    this.toggle(page('gameplay'), 'settings.toggleAds', (s) => s.toggleAds, (v) => settings.set({ toggleAds: v }));
+    this.toggle(page('gameplay'), 'settings.damageNumbers', (s) => s.damageNumbers, (v) => settings.set({ damageNumbers: v }));
     const lang = new Select<Lang>(LANGUAGES.map((l) => ({ value: l.code, raw: l.native })), getLanguage(), (v) => setLanguage(v));
     Array.from(lang.el.options).forEach((o, i) => { o.lang = LANGUAGES[i].code; });
-    fieldRow(page('gameplay'), 'ui.settings.language', lang);
+    fieldRow(page('gameplay'), 'settings.language', lang);
     this.relabels.push(() => { lang.value = getLanguage(); });
 
     const done = h('button', 'dz-btn dz-btn-primary', this.footer);
     done.type = 'button';
-    tx(done, 'ui.common.done');
+    tx(done, 'common.ok');
     done.addEventListener('click', () => this.close());
 
     settings.subscribe((s) => {

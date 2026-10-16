@@ -29,6 +29,7 @@ export class ResultsScreen implements ScreenView {
 
   constructor(private readonly ctx: UiCtx) {
     this.el = h('section', 'dz-screen dz-results');
+    this.el.dataset.testid = 'results';
     const wrap = h('div', 'dz-screen-wrap dz-wide', this.el);
     this.hero = h('div', 'dz-results-hero', wrap);
     this.confetti = h('div', 'dz-confetti', this.hero);
@@ -51,7 +52,7 @@ export class ResultsScreen implements ScreenView {
     this.stats = h('div', 'dz-stat-grid', statsPanel);
 
     const teamPanel = h('div', 'dz-panel dz-results-teams', grid);
-    tx(h('h3', 'dz-panel-title', h('div', 'dz-panel-head', teamPanel)), 'ui.results.teamBreakdown');
+    tx(h('h3', 'dz-panel-title', h('div', 'dz-panel-head', teamPanel)), 'results.teamBreakdown');
     this.table = h('div', 'dz-table dz-results-table', teamPanel);
     this.table.setAttribute('role', 'table');
 
@@ -87,17 +88,18 @@ export class ResultsScreen implements ScreenView {
       if (!list) teams.set(p.team, (list = []));
       list.push(p);
     }
-    const teamSize = Math.max(1, ...Array.from(teams.values(), (l) => l.length));
     const placement = me?.placement ?? 0;
     const won = (me && placement === 1) || (this.myTeam !== null && r.winnerTeam === this.myTeam);
     this.hero.classList.toggle('dz-results-win', !!won);
 
-    tx(this.headline, won ? 'ui.results.winner' : me ? 'ui.results.eliminated' : 'ui.results.title');
-    tx(this.placeLabel, teamSize > 1 ? 'ui.results.teamPlaced' : 'ui.results.youPlaced');
+    tx(this.headline, won ? 'results.victory' : me ? 'banner.eliminated' : 'results.title');
+    tx(this.placeLabel, 'results.placement');
     this.placeNum.textContent = placement > 0 ? `#${fmtNumber(placement)}` : '—';
     txp(this.placeTotal, 'ui.results.ofTotal', { n: fmtNumber(teams.size) });
     clear(this.meta);
-    txp(h('span', '', this.meta), 'ui.results.duration', { time: fmtDuration(r.duration) });
+    const dur = h('span', 'dz-kv', this.meta);
+    tx(h('span', 'dz-kv-k', dur), 'results.matchDuration');
+    h('span', 'dz-kv-v', dur).textContent = fmtDuration(r.duration);
     if (r.winnerTeam !== null && !won) {
       const winners = teams.get(r.winnerTeam);
       if (winners?.length) {
@@ -115,14 +117,14 @@ export class ResultsScreen implements ScreenView {
       tx(h('div', 'dz-stat-label', c), labelKey);
     };
     if (me) {
-      stat('ui.results.kills', fmtNumber(me.kills), true);
-      stat('ui.results.knocks', fmtNumber(me.knocks));
-      stat('ui.results.damage', fmtNumber(Math.round(me.damage)));
-      stat('ui.results.headshots', fmtNumber(me.headshots));
-      stat('ui.results.revives', fmtNumber(me.revives));
-      stat('ui.results.longestKill', t('ui.common.meters', { n: fmtNumber(Math.round(me.longestKill)) }));
-      stat('ui.results.survived', fmtDuration(me.survivalTime));
-      stat('ui.results.accuracy', t('ui.common.percent', { n: fmtNumber(Math.round(me.accuracy * (me.accuracy <= 1 ? 100 : 1))) }));
+      stat('results.kills', fmtNumber(me.kills), true);
+      stat('results.knocks', fmtNumber(me.knocks));
+      stat('results.damage', fmtNumber(Math.round(me.damage)));
+      stat('results.headshots', fmtNumber(me.headshots));
+      stat('results.revives', fmtNumber(me.revives));
+      stat('results.longestKill', t('unit.meters', { n: fmtNumber(Math.round(me.longestKill)) }));
+      stat('results.survivalTime', fmtDuration(me.survivalTime));
+      stat('results.accuracy', t('unit.percent', { n: fmtNumber(Math.round(me.accuracy * (me.accuracy <= 1 ? 100 : 1))) }));
     } else {
       tx(h('p', 'dz-empty', this.stats), 'ui.results.spectator');
     }
@@ -131,7 +133,7 @@ export class ResultsScreen implements ScreenView {
     clear(this.table);
     const head = h('div', 'dz-tr dz-th', this.table);
     head.setAttribute('role', 'row');
-    for (const k of ['ui.results.colPlace', 'ui.results.colPlayer', 'ui.results.colKills', 'ui.results.colKnocks', 'ui.results.colDamage', 'ui.results.colSurvived'] as const) {
+    for (const k of ['results.placement', 'results.player', 'results.kills', 'results.knocks', 'results.damage', 'results.survivalTime'] as const) {
       tx(h('div', 'dz-td', head), k).setAttribute('role', 'columnheader');
     }
     const ordered = Array.from(teams.entries()).sort((a, b) => {
@@ -155,7 +157,7 @@ export class ResultsScreen implements ScreenView {
         }
         const name = h('div', 'dz-td dz-td-strong', row);
         h('span', '', name).textContent = p.name;
-        if (p.isBot) tx(h('span', 'dz-tag', name), 'ui.results.bot');
+        if (p.isBot) tx(h('span', 'dz-tag', name), 'common.bot');
         h('div', 'dz-td dz-num', row).textContent = fmtNumber(p.kills);
         h('div', 'dz-td dz-num', row).textContent = fmtNumber(p.knocks);
         h('div', 'dz-td dz-num', row).textContent = fmtNumber(Math.round(p.damage));
@@ -168,14 +170,18 @@ export class ResultsScreen implements ScreenView {
     clear(this.actionsEl);
     const a = this.ctx.actions;
     if (this.context === 'mp') {
-      button({ cls: 'dz-btn-primary dz-btn-xl', label: 'ui.results.backToLobby', parent: this.actionsEl, onClick: () => a.leaveMatch() })
-        .dataset.autofocus = '';
+      const back = button({ cls: 'dz-btn-primary dz-btn-xl', label: 'results.backToLobby', parent: this.actionsEl, onClick: () => a.leaveMatch() });
+      back.dataset.autofocus = '';
+      back.dataset.testid = 'results-back';
     } else {
-      button({ cls: 'dz-btn-ghost dz-btn-xl', label: 'ui.results.mainMenu', parent: this.actionsEl, onClick: () => a.backToMenu() });
-      button({
-        cls: 'dz-btn-primary dz-btn-xl', label: 'ui.results.playAgain', icon: ICONS.play, parent: this.actionsEl,
+      button({ cls: 'dz-btn-ghost dz-btn-xl', label: 'results.backToMenu', parent: this.actionsEl, onClick: () => a.backToMenu() })
+        .dataset.testid = 'results-back';
+      const again = button({
+        cls: 'dz-btn-primary dz-btn-xl', label: 'results.playAgain', icon: ICONS.play, parent: this.actionsEl,
         onClick: () => (this.context === 'training' ? a.startTraining() : a.startSinglePlayer(loadSpOptions())),
-      }).dataset.autofocus = '';
+      });
+      again.dataset.autofocus = '';
+      again.dataset.testid = 'results-again';
     }
   }
 

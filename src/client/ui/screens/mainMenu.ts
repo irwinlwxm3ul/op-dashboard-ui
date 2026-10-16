@@ -5,7 +5,7 @@ import { settings } from '../../game';
 import { MAX_NAME_LEN } from '../../../shared/constants';
 import { sanitizeName } from '../../../shared/validate';
 import type { UiCtx, ScreenView } from '../context';
-import { button, h, placeholderTx, svgIcon, tx } from '../dom';
+import { button, h, placeholderTx, svgIcon, titleTx, tx } from '../dom';
 import { ICONS } from '../icons';
 
 /** Decorative animated backdrop shared by the menu screens (pure CSS animation). */
@@ -56,28 +56,36 @@ export class MainMenu implements ScreenView {
     tx(h('p', 'dz-tagline', left), 'app.tagline');
 
     this.nav = h('nav', 'dz-main-nav', left);
-    button({
-      cls: 'dz-btn-primary dz-btn-xl', label: 'ui.main.singlePlayer', icon: ICONS.users, parent: this.nav,
+    const sp = button({
+      cls: 'dz-btn-primary dz-btn-xl', label: 'menu.singlePlayer', icon: ICONS.users, parent: this.nav,
       onClick: () => ctx.show('singleplayer'),
-    }).dataset.autofocus = '';
-    button({ cls: 'dz-btn-xl', label: 'ui.main.training', icon: ICONS.target, parent: this.nav, onClick: () => ctx.actions.startTraining() });
-    button({ cls: 'dz-btn-xl', label: 'ui.main.multiplayer', icon: ICONS.globe, parent: this.nav, onClick: () => this.openMultiplayer() });
+    });
+    sp.dataset.autofocus = '';
+    titleTx(sp, 'menu.singlePlayerDesc');
+    sp.dataset.testid = 'main-sp';
+    const training = button({ cls: 'dz-btn-xl', label: 'menu.training', icon: ICONS.target, parent: this.nav, onClick: () => ctx.actions.startTraining() });
+    training.dataset.testid = 'main-training';
+    titleTx(training, 'menu.trainingDesc');
+    const mp = button({ cls: 'dz-btn-xl', label: 'menu.multiplayer', icon: ICONS.globe, parent: this.nav, onClick: () => this.openMultiplayer() });
+    mp.dataset.testid = 'main-mp';
+    titleTx(mp, 'menu.multiplayerDesc');
     const row = h('div', 'dz-main-nav-row', this.nav);
-    button({ label: 'ui.main.settings', icon: ICONS.gear, parent: row, onClick: () => ctx.openSettings() });
-    button({ label: 'ui.main.controls', icon: ICONS.keyboard, parent: row, onClick: () => ctx.openControls() });
+    button({ label: 'menu.settings', icon: ICONS.gear, parent: row, onClick: () => ctx.openSettings() }).dataset.testid = 'main-settings';
+    button({ label: 'menu.controls', icon: ICONS.keyboard, parent: row, onClick: () => ctx.openControls() }).dataset.testid = 'main-controls';
     this.nav.addEventListener('keydown', (ev) => this.onNavKey(ev));
 
     const side = h('aside', 'dz-main-side dz-panel', layout);
     const nameField = h('div', 'dz-stack', side);
-    const nameLabel = tx(h('label', 'dz-field-label', nameField), 'ui.main.playerName');
+    const nameLabel = tx(h('label', 'dz-field-label', nameField), 'menu.playerName');
     this.nameInput = h('input', 'dz-input', nameField);
     this.nameInput.id = 'dz-main-name';
+    this.nameInput.dataset.testid = 'name-input';
     nameLabel.htmlFor = this.nameInput.id;
     this.nameInput.type = 'text';
     this.nameInput.maxLength = MAX_NAME_LEN;
     this.nameInput.autocomplete = 'nickname';
     this.nameInput.spellcheck = false;
-    placeholderTx(this.nameInput, 'ui.main.namePlaceholder');
+    placeholderTx(this.nameInput, 'menu.playerNamePlaceholder');
     this.nameInput.addEventListener('change', () => this.commitName());
     this.nameInput.addEventListener('keydown', (ev) => {
       if (ev.key === 'Enter') {
@@ -87,9 +95,10 @@ export class MainMenu implements ScreenView {
     });
 
     const langField = h('div', 'dz-stack', side);
-    const langLabel = tx(h('label', 'dz-field-label', langField), 'ui.main.language');
+    const langLabel = tx(h('label', 'dz-field-label', langField), 'menu.language');
     this.langSelect = h('select', 'dz-select', langField);
     this.langSelect.id = 'dz-main-lang';
+    this.langSelect.dataset.testid = 'lang-select';
     langLabel.htmlFor = this.langSelect.id;
     for (const l of LANGUAGES) {
       const o = h('option', '', this.langSelect);
@@ -100,7 +109,8 @@ export class MainMenu implements ScreenView {
     this.langSelect.addEventListener('change', () => setLanguage(this.langSelect.value as Lang));
 
     const footer = h('footer', 'dz-main-footer', this.el);
-    tx(h('span', '', footer), 'ui.main.credits');
+    tx(h('span', '', footer), 'menu.creditsText');
+    tx(h('span', '', footer), 'ui.main.fontCredit');
 
     ctx.onLanguage(() => {
       buildLogo(this.logo);
@@ -132,13 +142,8 @@ export class MainMenu implements ScreenView {
   }
 
   private openMultiplayer(): void {
-    const name = this.commitName() ?? sanitizeName(settings.get().playerName);
-    if (!name) {
-      this.ctx.toast(t('ui.mp.nameRequired'), 'error');
-      this.nameInput.classList.add('dz-invalid');
-      this.nameInput.focus();
-      return;
-    }
+    // Keep a name typed here; the lobby browser asks for one before connecting.
+    this.commitName();
     this.ctx.show('multiplayer');
   }
 

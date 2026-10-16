@@ -122,7 +122,7 @@ function rip(s: Synth, t: number, dur: number, gain: number): void {
   applyRollingAM(fibres.getChannelData(0), s.sr, rr(s, 18, 30), 0.9, s.rand);
   noiseHit(s, {
     t, buffer: fibres, attack: 0.02, hold: dur * 0.65, tau: dur * 0.12, gain,
-    filters: [{ type: 'bandpass', f: rr(s, 2200, 3000), q: 0.55 }, { type: 'highpass', f: 700 }],
+    filters: [{ type: 'bandpass', f: rr(s, 2200, 3000), q: 0.55 }, { type: 'highpass', f: 700 }, { type: 'lowpass', f: 5500, q: 0.6 }],
   });
   noiseHit(s, {
     t, color: 'pink', attack: 0.03, hold: dur * 0.55, tau: dur * 0.15, gain: gain * 0.25,

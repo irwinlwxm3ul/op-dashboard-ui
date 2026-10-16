@@ -261,9 +261,10 @@ function drawDecals(ctx: CanvasRenderingContext2D): void {
   });
 }
 
-function finishTexture(canvas: HTMLCanvasElement): THREE.Texture {
+function finishTexture(canvas: HTMLCanvasElement, srgb: boolean): THREE.Texture {
   const tex = new THREE.CanvasTexture(canvas);
-  tex.colorSpace = THREE.NoColorSpace;
+  // Sprite masks are white (colour comes from instances); decal colours are authored in sRGB.
+  tex.colorSpace = srgb ? THREE.SRGBColorSpace : THREE.NoColorSpace;
   tex.generateMipmaps = true;
   tex.minFilter = THREE.LinearMipmapLinearFilter;
   tex.magFilter = THREE.LinearFilter;
@@ -280,7 +281,7 @@ export function getSpriteAtlas(): THREE.Texture {
     return spriteAtlas;
   }
   drawSprites(c.ctx);
-  spriteAtlas = finishTexture(c.canvas);
+  spriteAtlas = finishTexture(c.canvas, false);
   return spriteAtlas;
 }
 
@@ -293,7 +294,7 @@ export function getDecalAtlas(): THREE.Texture {
     return decalAtlas;
   }
   drawDecals(c.ctx);
-  decalAtlas = finishTexture(c.canvas);
+  decalAtlas = finishTexture(c.canvas, true);
   return decalAtlas;
 }
 

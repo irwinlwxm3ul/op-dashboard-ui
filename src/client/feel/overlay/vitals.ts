@@ -18,7 +18,7 @@ export class Vitals {
 
   constructor(parent: HTMLElement) {
     this.desat = div(parent, 'dzf-full dzf-desat');
-    this.downed = div(parent, 'dzf-downed');
+    this.downed = div(parent, 'dzf-full dzf-downed');
     this.vignette = div(parent, 'dzf-full dzf-lowhp');
   }
 
