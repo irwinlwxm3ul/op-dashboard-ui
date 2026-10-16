@@ -60,7 +60,7 @@ const clear = (stage) => { stage.renderer.domElement.remove(); document.querySel
 
 // --- vehicles: rest pose + steering / spinning + physics collision box --------------------------
 {
-  const stage = makeStage({ width: 1600, height: 700 });
+  const stage = makeStage({ width: 2000, height: 700 });
   const objs = [], names = [];
   for (const [type, v] of Object.entries(vehicles)) {
     for (const steer of [0, 0.5]) {
@@ -82,14 +82,14 @@ const clear = (stage) => { stage.renderer.domElement.remove(); document.querySel
   }
   const proj = [];
   lineup(stage, objs, { gap: 1, elevation: 0.3, labelsTo: proj });
-  addLabels(names, proj, 1600, 700);
+  addLabels(names, proj, 2000, 700);
   stage.renderer.render(stage.scene, stage.camera);
   await shot('vehicles.png');
   clear(stage);
 }
 // --- props -------------------------------------------------------------------------------------
 {
-  const stage = makeStage({ width: 1800, height: 650 });
+  const stage = makeStage({ width: 2000, height: 700 });
   const objs = [], names = [];
   for (const p of Object.values(props)) {
     const o = loaded[p.file].scene.clone(true); enableShadows(o);
@@ -98,14 +98,14 @@ const clear = (stage) => { stage.renderer.domElement.remove(); document.querySel
   }
   const proj = [];
   lineup(stage, objs, { gap: 0.5, elevation: 0.25, labelsTo: proj });
-  addLabels(names, proj, 1800, 650);
+  addLabels(names, proj, 2000, 700);
   stage.renderer.render(stage.scene, stage.camera);
   await shot('props.png');
   clear(stage);
 }
 // --- trees (every variant LOD0, then LOD1) at a common 10 m height -----------------------------
 for (const lod of [0, 1]) {
-  const stage = makeStage({ width: 2000, height: 650 });
+  const stage = makeStage({ width: 2000, height: 700 });
   const objs = [], names = [];
   for (const t of Object.values(nature.trees)) {
     for (const v of t.variants) {
@@ -116,14 +116,14 @@ for (const lod of [0, 1]) {
   }
   const proj = [];
   lineup(stage, objs, { gap: 0.5, elevation: 0.1, labelsTo: proj });
-  addLabels(names, proj, 2000, 650);
+  addLabels(names, proj, 2000, 700);
   stage.renderer.render(stage.scene, stage.camera);
   await shot(lod ? 'trees-lod1.png' : 'trees.png');
   clear(stage);
 }
 // --- rocks (r = 1.2 m, h = 1 m), bushes, grass (0.5 m) -----------------------------------------
 {
-  const stage = makeStage({ width: 1800, height: 600 });
+  const stage = makeStage({ width: 2000, height: 700 });
   const objs = [], names = [];
   const add = (file, node, s) => { const n = loaded[file].scene.getObjectByName(node).clone(true); n.position.set(0, 0, 0); n.scale.set(...s); enableShadows(n); objs.push(n); names.push(node); };
   for (const v of nature.rocks.variants) add(nature.rocks.file, v.node, [1.2, 1, 1.2]);
@@ -131,7 +131,7 @@ for (const lod of [0, 1]) {
   for (const v of nature.grass.variants) add(nature.grass.file, v.node, [0.5, 0.5, 0.5]);
   const proj = [];
   lineup(stage, objs, { gap: 0.4, elevation: 0.25, labelsTo: proj });
-  addLabels(names, proj, 1800, 600);
+  addLabels(names, proj, 2000, 700);
   stage.renderer.render(stage.scene, stage.camera);
   await shot('nature-misc.png');
   clear(stage);

@@ -9,7 +9,7 @@ import { SOURCES } from './sources.mjs';
 
 const REPORTS = path.join(REPO_ROOT, 'scripts', 'assets', 'world', 'reports');
 const read = (n) => JSON.parse(fs.readFileSync(path.join(REPORTS, `${n}.json`), 'utf8'));
-const rel = (abs) => path.relative(MODELS_DIR, abs).split(path.sep).join('/');
+const rel = (p) => (path.isAbsolute(p) ? path.relative(MODELS_DIR, p) : p).split(path.sep).join('/');
 const tree = (key, sub) => `${SOURCES[key].repo}/tree/${SOURCES[key].commit}/${sub}`;
 
 // ------------------------------------------------------------------------------------------------

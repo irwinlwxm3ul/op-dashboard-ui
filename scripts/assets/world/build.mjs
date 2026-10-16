@@ -3,9 +3,9 @@
 // run fetch-sources.mjs first). All processing happens in headless Chromium with three.js
 // (GLTFLoader -> transform / simplify / retexture -> GLTFExporter), see *.page.js.
 // Usage: node scripts/assets/world/build.mjs [vehicles] [props] [nature]   (default: all)
-// Writes a measurement report to scripts/assets/world/reports/<category>.json; the numbers in
-// src/client/assets/manifest-world.ts (wheel centres / radii, fork axis, trunk radii, ...) are
-// copied from there.
+// Writes a measurement report to scripts/assets/world/reports/<category>.json, from which
+// gen-manifest.mjs generates src/client/assets/manifest-world.ts (wheel centres / radii, fork
+// axis, trunk radii, triangle counts, ...).
 import fs from 'node:fs';
 import path from 'node:path';
 import { tsImport } from 'tsx/esm/api';
@@ -63,7 +63,9 @@ window.__done(results);
   });
   const warnings = logs.filter((l) => /warn|error/i.test(l));
   if (warnings.length) console.log(warnings.join('\n'));
-  fs.writeFileSync(path.join(REPORTS, `${cat}.json`), JSON.stringify(result, null, 2) + '\n');
+  // Paths in the report are relative to public/assets/models (machine independent).
+  const report = JSON.stringify(result, null, 2).split(MODELS_DIR + path.sep).join('');
+  fs.writeFileSync(path.join(REPORTS, `${cat}.json`), report + '\n');
   console.log(`${cat}: built in ${((Date.now() - t0) / 1000).toFixed(1)} s`);
   console.log(JSON.stringify(result, null, 1).slice(0, 6000));
 }

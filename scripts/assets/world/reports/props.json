@@ -2,7 +2,7 @@
   [
     {
       "id": "crate_wood",
-      "file": "/home/user/op-dashboard-ui/public/assets/models/props/crate_wood.glb",
+      "file": "props/crate_wood.glb",
       "bytes": 163092,
       "tris": 230,
       "size": [
@@ -16,7 +16,7 @@
     },
     {
       "id": "crate_military",
-      "file": "/home/user/op-dashboard-ui/public/assets/models/props/crate_military.glb",
+      "file": "props/crate_military.glb",
       "bytes": 322168,
       "tris": 1576,
       "size": [
@@ -31,7 +31,7 @@
     },
     {
       "id": "ammo_crate",
-      "file": "/home/user/op-dashboard-ui/public/assets/models/props/ammo_crate.glb",
+      "file": "props/ammo_crate.glb",
       "bytes": 225656,
       "tris": 1531,
       "size": [
@@ -45,7 +45,7 @@
     },
     {
       "id": "barrel_oil",
-      "file": "/home/user/op-dashboard-ui/public/assets/models/props/barrel_oil.glb",
+      "file": "props/barrel_oil.glb",
       "bytes": 169448,
       "tris": 1100,
       "size": [
@@ -59,7 +59,7 @@
     },
     {
       "id": "barrel_red",
-      "file": "/home/user/op-dashboard-ui/public/assets/models/props/barrel_red.glb",
+      "file": "props/barrel_red.glb",
       "bytes": 204584,
       "tris": 1100,
       "size": [
@@ -73,7 +73,7 @@
     },
     {
       "id": "jerrycan",
-      "file": "/home/user/op-dashboard-ui/public/assets/models/props/jerrycan.glb",
+      "file": "props/jerrycan.glb",
       "bytes": 198572,
       "tris": 895,
       "size": [
@@ -87,7 +87,7 @@
     },
     {
       "id": "barrier_concrete",
-      "file": "/home/user/op-dashboard-ui/public/assets/models/props/barrier_concrete.glb",
+      "file": "props/barrier_concrete.glb",
       "bytes": 207760,
       "tris": 1400,
       "size": [
@@ -101,7 +101,7 @@
     },
     {
       "id": "container_green",
-      "file": "/home/user/op-dashboard-ui/public/assets/models/props/container_green.glb",
+      "file": "props/container_green.glb",
       "bytes": 104020,
       "tris": 1336,
       "size": [
@@ -115,7 +115,7 @@
     },
     {
       "id": "container_red",
-      "file": "/home/user/op-dashboard-ui/public/assets/models/props/container_red.glb",
+      "file": "props/container_red.glb",
       "bytes": 81868,
       "tris": 1032,
       "size": [
@@ -129,7 +129,7 @@
     },
     {
       "id": "fence_wood",
-      "file": "/home/user/op-dashboard-ui/public/assets/models/props/fence_wood.glb",
+      "file": "props/fence_wood.glb",
       "bytes": 148724,
       "tris": 40,
       "size": [
@@ -143,7 +143,7 @@
     },
     {
       "id": "fence_chainlink",
-      "file": "/home/user/op-dashboard-ui/public/assets/models/props/fence_chainlink.glb",
+      "file": "props/fence_chainlink.glb",
       "bytes": 576352,
       "tris": 1470,
       "size": [
@@ -158,7 +158,7 @@
     },
     {
       "id": "sandbag_wall",
-      "file": "/home/user/op-dashboard-ui/public/assets/models/props/sandbag_wall.glb",
+      "file": "props/sandbag_wall.glb",
       "bytes": 81136,
       "tris": 1848,
       "size": [

@@ -3,7 +3,7 @@
     "trees": [
       {
         "kind": "pine",
-        "file": "/home/user/op-dashboard-ui/public/assets/models/nature/tree_pine.glb",
+        "file": "nature/tree_pine.glb",
         "bytes": 1017000,
         "variants": [
           {
@@ -60,7 +60,7 @@
       },
       {
         "kind": "oak",
-        "file": "/home/user/op-dashboard-ui/public/assets/models/nature/tree_oak.glb",
+        "file": "nature/tree_oak.glb",
         "bytes": 1179980,
         "variants": [
           {
@@ -117,7 +117,7 @@
       },
       {
         "kind": "birch",
-        "file": "/home/user/op-dashboard-ui/public/assets/models/nature/tree_birch.glb",
+        "file": "nature/tree_birch.glb",
         "bytes": 1083924,
         "variants": [
           {
@@ -174,7 +174,7 @@
       },
       {
         "kind": "dead",
-        "file": "/home/user/op-dashboard-ui/public/assets/models/nature/tree_dead.glb",
+        "file": "nature/tree_dead.glb",
         "bytes": 883200,
         "variants": [
           {
@@ -231,7 +231,7 @@
       }
     ],
     "bushes": {
-      "file": "/home/user/op-dashboard-ui/public/assets/models/nature/bushes.glb",
+      "file": "nature/bushes.glb",
       "bytes": 288116,
       "variants": [
         {
@@ -261,7 +261,7 @@
       ]
     },
     "rocks": {
-      "file": "/home/user/op-dashboard-ui/public/assets/models/nature/rocks.glb",
+      "file": "nature/rocks.glb",
       "bytes": 322868,
       "variants": [
         {
@@ -339,7 +339,7 @@
       ]
     },
     "grass": {
-      "file": "/home/user/op-dashboard-ui/public/assets/models/nature/grass.glb",
+      "file": "nature/grass.glb",
       "bytes": 88996,
       "variants": [
         {
@@ -366,7 +366,7 @@
       ]
     },
     "impostors": {
-      "file": "/home/user/op-dashboard-ui/public/assets/models/nature/impostors.png",
+      "file": "nature/impostors.png",
       "size": [
         1280,
         512

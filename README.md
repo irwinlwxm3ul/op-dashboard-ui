@@ -91,7 +91,10 @@ tests/          vitest suites, integration soak tests, Playwright e2e
   (@Zsky_01, https://zsky2000.itch.io/low-poly-weapons-pack-v1), licensed under
   [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/); the ammo box models were rescaled,
   re-coloured and merged into single meshes. Rifle and parachute animations and the body-armour models
-  were made for DROPZONE. Per-asset sources, commits, licences and modifications:
+  were made for DROPZONE. Vehicles, props and nature: LuAZ-969 4x4 by **aaadragon** (CC BY 4.0), dirt bike
+  by **nabeelashrafphotography** (CC BY 4.0), "Sandbag" by **Jenna** (CC BY 4.0), props and photo-scanned
+  rocks from **Poly Haven** (CC0; authors listed in docs/ASSETS-world.md), trees, bushes, crates, fences
+  and containers by **Quaternius** (CC0). Per-asset sources, commits, licences and modifications:
   [docs/ASSETS.md](docs/ASSETS.md) (and [docs/ASSETS-world.md](docs/ASSETS-world.md) for vehicles,
   props and nature).
 * Sound effects and sprites: [Kenney](https://kenney.nl) Starter Kit FPS. The assets are CC0 and the kit's

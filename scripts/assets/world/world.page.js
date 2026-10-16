@@ -137,8 +137,6 @@ export function weldGeometry(g) {
 
 /** Normals with hard edges above `angle` degrees (re-indexed). */
 export function creased(g, angle = 40) {
-  const keep = {};
-  for (const k of Object.keys(g.attributes)) if (k !== 'position' && k !== 'normal' && k !== 'uv') keep[k] = true;
   const nonIdx = toCreasedNormals(g, (angle * Math.PI) / 180);
   const m = mergeVertices(nonIdx, 1e-6);
   return m;
@@ -296,15 +294,6 @@ export function addScalar(g, name, fn) {
   return g;
 }
 
-/** Sets a constant vertex colour (linear RGB) on every vertex. */
-export function setColor(g, r, gg, b) {
-  const n = g.getAttribute('position').count;
-  const c = new Float32Array(n * 3);
-  for (let i = 0; i < n; i++) { c[i * 3] = r; c[i * 3 + 1] = gg; c[i * 3 + 2] = b; }
-  g.setAttribute('color', new THREE.BufferAttribute(c, 3));
-  return g;
-}
-
 /** Sets every uv to (u, v) (palette lookups). */
 export function setUv(g, u, v) {
   const n = g.getAttribute('position').count;
@@ -317,13 +306,6 @@ export function setUv(g, u, v) {
 /** Drops every attribute not listed. */
 export function only(g, names) {
   for (const k of Object.keys(g.attributes)) if (!names.includes(k)) g.deleteAttribute(k);
-  return g;
-}
-
-/** Recomputes smooth normals (after scaling non-uniformly etc.). */
-export function renormal(g) {
-  g.deleteAttribute('normal');
-  g.computeVertexNormals();
   return g;
 }
 
@@ -406,17 +388,9 @@ export const ops = {
   },
 };
 
+/** Composes pixel ops (null entries are skipped). */
 export function chain(...fns) {
   return (d, w, h) => { for (const f of fns) if (f) f(d, w, h); };
-}
-
-/** Average colour of the opaque pixels of an image (sRGB 0..1). */
-export function averageColor(image) {
-  const c = canvasOf(image, 64);
-  const d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data;
-  let r = 0, g = 0, b = 0, n = 0;
-  for (let i = 0; i < d.length; i += 4) if (d[i + 3] > 128) { r += d[i]; g += d[i + 1]; b += d[i + 2]; n++; }
-  return n ? [r / n / 255, g / n / 255, b / n / 255] : [1, 1, 1];
 }
 
 // ------------------------------------------------------------------------------------------------

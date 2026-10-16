@@ -3,6 +3,7 @@
 // their procedural models. Templates are loaded once and shared; `instantiate` / `cloneSkinned` /
 // `createCharacterInstance` produce per-entity copies that share geometry, materials and clips.
 
+import { worldAssetFilesFor, type WorldAssetCategory } from './manifest-world';
 import * as THREE from 'three';
 import { GLTFLoader, type GLTF } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import * as SkeletonUtils from 'three/examples/jsm/utils/SkeletonUtils.js';
@@ -90,8 +91,13 @@ export async function preloadFiles(files: readonly string[], onProgress?: (done:
 }
 
 /** Preloads every file of the given categories of this manifest (see preloadFiles). */
-export function preloadAssets(categories: readonly AssetCategory[], onProgress?: (done: number, total: number) => void): Promise<void> {
-  return preloadFiles(categories.flatMap((c) => assetFilesFor(c)), onProgress);
+export function preloadAssets(
+  categories: readonly (AssetCategory | WorldAssetCategory)[],
+  onProgress?: (done: number, total: number) => void,
+): Promise<void> {
+  const files = categories.flatMap((c) =>
+    c === 'vehicles' || c === 'props' || c === 'nature' ? worldAssetFilesFor(c) : assetFilesFor(c));
+  return preloadFiles(files, onProgress);
 }
 
 /** Deep clone that rebinds skinned meshes to the cloned bones (geometry/materials shared). */
