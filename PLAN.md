@@ -60,7 +60,7 @@ track with ramps, instant respawn.
   crouch 2.7 / prone 1.2 m/s, ADS slows. Jump with 100 ms coyote time + input buffering, landing dip
   scaled by fall speed, stride-synced head bob and footsteps, subtle strafe tilt, smooth stance
   transitions, peek lean (Q/E).
-* **Weapon handling** — per-weapon draw/holster/ADS times, ADS FOV (red dot 1×, DMR 4×, sniper 8×
+* **Weapon handling** — per-weapon draw and ADS times with a short uniform holster, ADS FOV (red dot 1×, DMR 4×, sniper 8×
   with scope overlay), breathing sway (Shift steadies while scoped), viewmodel inertia lag and bob,
   tactical vs empty reloads, sniper bolt cycle, dry-fire click, low-ammo counter tint.
 * **Recoil** — deterministic per-weapon pattern (vertical climb + seeded horizontal jitter) applied
@@ -69,7 +69,8 @@ track with ramps, instant respawn.
 * **Hit feedback** — hitmarkers (white body / red head / X on knock/kill) with distinct sounds,
   optional damage numbers, blood puff / armor spark on the target, victim flinch, directional damage
   indicators, low-HP vignette + desaturation, armor-break sound.
-* **Sound** — WebAudio graph: layered gunshots (Kenney samples + synthesized crack/boom per weapon),
+* **Sound** — WebAudio graph: layered gunshots synthesized per weapon (four layers: transient, body,
+  tail and supersonic crack, plus a mechanical action layer, crossfaded between near and far banks),
   **speed-of-sound delay** and low-pass muffling with distance, supersonic snap for near misses,
   footsteps by surface, engine sound synthesized from RPM, wind during freefall, UI sounds.
 * **Camera shake** — trauma-based noise shake: firing (small), explosions/crashes (distance-scaled),
@@ -89,15 +90,23 @@ plane`, `open chute`), and `renderTime` — the server timestamp of the interpol
 was looking at when they pressed the button. No positions, hits, damage, ammo or health ever.
 
 **What the server validates / owns**
-* Schema & size check on every message (bad types, NaN/Infinity, oversized → dropped; repeat → kick).
-* **Rate limiting**: a token bucket allows ≤ ~1.25 inputs per tick; the server consumes **one input
-  per tick per player**, so speed-hacks gain nothing. Missing inputs repeat the last one.
+* Schema & size check on every message (bad types, NaN/Infinity → dropped; repeat → kick; a frame over
+  16 KB closes the socket).
+* **Rate limiting & input pacing**: a token bucket (refill ≈ 1.25 inputs per tick, burst 32 ≈ 1 s of
+  inputs) bounds what a client can queue. The server applies every queued input exactly once, in
+  order, normally **one per tick per player**. A tick with no input pauses that player (nothing is
+  invented); after 15 ticks (0.5 s) without input the body is stepped with a neutral input so it still
+  falls and lands. After a delivery stall, a lasting backlog is drained at two inputs per tick, paid
+  with credit earned only by the paused ticks (plus a 0.2 % clock-drift allowance), so catching up
+  never yields more movement than real time allows and speed-hacks gain nothing.
 * **Movement is simulated on the server** with the same code the client predicts with →
   no teleport/fly/noclip/speedhack. Move vector clamped to the unit circle, pitch to ±89°.
 * **Weapons**: fire-rate cooldowns, ammo, reload/draw/ADS timers, spread RNG (seeded by player + shot
   index) and **recoil are server-authoritative** — a no-recoil cheat changes nothing because the
   server adds the pattern itself.
-* **Interactions** (loot, vehicles, revive) checked for distance ≤ 3 m, line of sight and state.
+* **Interactions** checked for distance, line of sight and state: loot ≤ 3.3 m, revive ≤ 2.2 m, vehicle
+  entry ≤ 4.5 m from the vehicle centre (or 1.5 m from its hull, so long vehicles can be entered from
+  the side).
 * Damage, health, armor, inventory, kills, zone, vehicle state: server-only.
 * **Information hiding**: other players' inventories and enemy health are never sent; entity update
   rates drop with distance (interest management).
@@ -130,8 +139,8 @@ was looking at when they pressed the button. No positions, hits, damage, ammo or
 | CPU per frame | ≤ 2 ms prediction/interp, ≤ 3 ms entity/scene update, ≤ 4 ms render submit |
 | GPU | ≤ 250 draw calls, ≤ 1.5 M triangles visible, one 2048² shadow map covering 140 m around the camera |
 | Players | ≤ **64** per match (humans + bots) |
-| Vehicles / loot / projectiles | ≤ 24 vehicles, ~1 800 loot items, ≤ 200 in-flight projectiles/grenades |
-| Static world | ~4 000 trees, ~1 500 rocks/bushes, ~110 buildings, 1 024 × 1 024 m island |
+| Vehicles / loot / projectiles | ≤ 24 vehicles, ~1 800 loot spawn points holding ~2 700 items (only items within 120 m are drawn), ≤ 200 in-flight projectiles/grenades |
+| Static world | ~4 000 trees, ~1 200 rocks + ~2 500 bushes (instanced), ~110 buildings, 1 024 × 1 024 m island |
 | Server | 30 Hz tick, ≤ 8 ms/tick for 64 players incl. bots on one core |
 | Bandwidth | 20 Hz snapshots; quantized JSON; ≤ 15 KB/s per client average |
 

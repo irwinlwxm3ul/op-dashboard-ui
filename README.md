@@ -39,7 +39,7 @@ Artificial latency for testing lag compensation: `LAG_MS=150 npm run dev`.
 Each match runs: plane → jump → freefall → parachute → land → loot → fight → zone shrinks →
 vehicles → downed/revive → final circle → winner → results → back to the lobby.
 
-## Controls (default, rebindable in Settings → Controls)
+## Controls (defaults; rebind them under Controls in the main or pause menu)
 
 | Action | Key | Action | Key |
 |---|---|---|---|
