@@ -47,6 +47,33 @@
   --origin: right;
 }
 
+/* Per-language font stacks: Han unification means the first CJK font wins, so Japanese, Korean
+   and Chinese each list their own fonts first. Arabic prefers fonts with good Arabic shaping. */
+:root:lang(ja) {
+  --dz-font: system-ui, -apple-system, 'Segoe UI', 'Hiragino Sans', 'Hiragino Kaku Gothic ProN', 'Yu Gothic UI',
+    'Yu Gothic', 'Meiryo', 'Noto Sans CJK JP', 'Noto Sans JP', Roboto, Arial, sans-serif;
+}
+
+:root:lang(ko) {
+  --dz-font: system-ui, -apple-system, 'Segoe UI', 'Apple SD Gothic Neo', 'Malgun Gothic', 'Noto Sans CJK KR',
+    'Noto Sans KR', Roboto, Arial, sans-serif;
+}
+
+:root:lang(zh) {
+  --dz-font: system-ui, -apple-system, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei',
+    'Noto Sans CJK SC', 'Noto Sans SC', Roboto, Arial, sans-serif;
+}
+
+:root:lang(ar) {
+  --dz-font: system-ui, -apple-system, 'Segoe UI', 'Noto Sans Arabic', 'Geeza Pro', 'Segoe UI Arabic', Tahoma,
+    Roboto, Arial, sans-serif;
+}
+
+/* User-generated text (names, chat): isolated so mixed-direction content keeps its place. */
+.dz-user {
+  unicode-bidi: isolate;
+}
+
 .dz-hidden {
   display: none !important;
 }
@@ -446,7 +473,6 @@
 }
 
 .dz-range {
-  --fill: 50%;
   flex: 1;
   min-width: 0;
   height: 22px;
@@ -729,7 +755,9 @@
 .dz-th .dz-td {
   white-space: normal;
   line-height: 1.15;
-  overflow-wrap: anywhere;
+  overflow-wrap: normal;
+  word-break: normal;
+  hyphens: auto;
 }
 
 .dz-th {

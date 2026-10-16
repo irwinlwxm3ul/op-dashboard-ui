@@ -78,7 +78,8 @@ export class Slider implements Control {
   private paint(v: number): void {
     const { min, max } = this.opts;
     const f = max > min ? (v - min) / (max - min) : 0;
-    this.el.style.setProperty('--fill', `${(f * 100).toFixed(2)}%`);
+    // On the input itself so the track pseudo-element inherits it (LTR and RTL gradients).
+    this.input.style.setProperty('--fill', `${(f * 100).toFixed(2)}%`);
     this.out.textContent = this.opts.format(v);
   }
 }

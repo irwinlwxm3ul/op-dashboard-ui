@@ -645,6 +645,18 @@ class GltfNearBody implements NearBody {
     this.inst.root.visible = false;
   }
 
+  /** Forget the previous owner's animation state (new clips start at full weight, no crossfade). */
+  resetForNewOwner(): void {
+    this.inst.mixer.stopAllAction();
+    this.baseClip = null;
+    this.baseAction = null;
+    this.baseKey = null;
+    this.overlayClip = null;
+    this.overlayAction = null;
+    this.overlayKey = null;
+    this.fresh = true;
+  }
+
   dispose(): void {
     for (const m of this.materials) m.dispose();
     this.gear.skeleton.dispose();
@@ -712,7 +724,7 @@ export class GltfNearProvider implements NearBodyProvider {
       this.parent.add(body.inst.root);
     }
     body.ownerId = ownerId;
-    body.fresh = true;
+    body.resetForNewOwner();
     return body;
   }
 

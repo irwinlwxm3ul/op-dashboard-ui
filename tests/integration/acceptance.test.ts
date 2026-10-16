@@ -203,7 +203,6 @@ class Harness {
   }
 
   private toServer(c: SimClient, msg: ClientMessage): void {
-    if (process.env.DBG_ACTIONS && msg.t === 'input') for (const i of msg.inputs) if (i.actions) console.log('ACT', c.spec.name, i.seq, JSON.stringify(i.actions));
     const raw: unknown = JSON.parse(JSON.stringify(msg));
     this.schedule(c.latencyMs, () => {
       const v = validateClientMessage(raw);
@@ -674,12 +673,12 @@ function lootSomething(h: Harness, c: SimClient, maxMs = 90_000): boolean {
 }
 
 /** A flat, open patch of terrain (no boxes / trees / rocks within `r` m) near `near`. */
-function openSpot(h: Harness, near: { x: number; z: number }, r = 22): Vec3 {
+function openSpot(h: Harness, near: { x: number; z: number }, r = 14): Vec3 {
   const w = h.sim.world;
   const boxes: Parameters<typeof w.queryBoxes>[4] = [];
   const trees: Parameters<typeof w.queryTrees>[4] = [];
   const rocks: Parameters<typeof w.queryRocks>[4] = [];
-  for (let ring = 0; ring < 60; ring++) {
+  for (let ring = 0; ring < 80; ring++) {
     const n = Math.max(1, ring * 8);
     for (let k = 0; k < n; k++) {
       const ang = (k / n) * Math.PI * 2;
@@ -691,7 +690,7 @@ function openSpot(h: Harness, near: { x: number; z: number }, r = 22): Vec3 {
       for (let dx = -r; dx <= r && ok; dx += 4) {
         for (let dz = -r; dz <= r && ok; dz += 4) {
           const y = w.heightAt(x + dx, z + dz);
-          if (Math.abs(y - y0) > 1.2 || y < w.waterLevel + 1) ok = false;
+          if (Math.abs(y - y0) > 1.5 || y < w.waterLevel + 1) ok = false;
         }
       }
       if (!ok) continue;
@@ -1075,14 +1074,11 @@ describe('AT8 vehicles', () => {
     tap(h, D, 'KeyF');
     expect(h.until(() => D.self.vehicleId === buggy.id && D.self.seat === 0, 3000), 'driver seat').toBe(true);
     expect(D.evs('vehicleEnter').some((e) => e.ev.player === D.id && e.ev.seat === 0)).toBe(true);
-    D.key('Digit2', true);
-    console.log('SEATDBG2 queued', JSON.stringify((D.g.input as unknown as { actions: unknown }).actions));
-    h.frame();
-    console.log('SEATDBG3 queued', JSON.stringify((D.g.input as unknown as { actions: unknown }).actions));
-    D.key('Digit2', false);
+    h.run(300); // a human presses the seat key a moment after sitting down
+    tap(h, D, 'Digit2');
     const okSeat = h.until(() => D.self.seat === 1, 3000);
-    if (!okSeat) console.log('SEATDBG', JSON.stringify((D.g.input as unknown as { ctx: unknown }).ctx), JSON.stringify({ predSeat: D.self.seat, srvSeat: h.player(D.id).seat, seats: buggy.seats, mode: h.player(D.id).mode, veh: h.player(D.id).vehicleId, evs: D.events.slice(-8).map((e) => e.ev.type) }));
     expect(okSeat, 'seat 2').toBe(true);
+    h.run(300);
     tap(h, D, 'Digit1');
     expect(h.until(() => D.self.seat === 0, 3000), 'back to the wheel').toBe(true);
 

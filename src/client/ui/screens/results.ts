@@ -1,13 +1,21 @@
 // Results screen: placement, winner celebration, personal stats, per-team breakdown, next actions.
 
-import { fmtDuration, fmtNumber, t } from '../../i18n';
+import { fmtDuration, fmtNumber, getLanguage, t } from '../../i18n';
 import type { MatchResults, PlayerResult } from '../../../shared/types';
 import type { FrameState } from '../../game/types';
 import type { MatchContext } from '../contracts';
 import type { ScreenView, UiCtx } from '../context';
-import { button, clear, h, svgIcon, tx, txp } from '../dom';
+import { button, clear, h, isolate, svgIcon, tx, txp, userText } from '../dom';
 import { ICONS } from '../icons';
 import { loadSpOptions } from './singlePlayer';
+
+/** Locale-aware list ("A, B and C" / "A、B、C" / "A، B و C"). */
+function formatList(items: string[]): string {
+  const lang = getLanguage();
+  const locale = lang === 'zh' ? 'zh-CN' : lang === 'pt' ? 'pt-BR' : lang;
+  if (typeof Intl.ListFormat !== 'function') return items.join(' · ');
+  return new Intl.ListFormat(locale, { style: 'long', type: 'conjunction' }).format(items);
+}
 
 export class ResultsScreen implements ScreenView {
   readonly el: HTMLElement;
@@ -109,7 +117,7 @@ export class ResultsScreen implements ScreenView {
       if (winners?.length) {
         const w = h('span', '', this.meta);
         w.appendChild(svgIcon(ICONS.trophy, 'dz-icon dz-icon-sm dz-accent'));
-        h('span', '', w).textContent = t('ui.results.winners', { names: winners.map((p) => p.name).join(', ') });
+        h('span', '', w).textContent = t('ui.results.winners', { names: formatList(winners.map((p) => isolate(p.name))) });
       }
     }
 
@@ -160,7 +168,7 @@ export class ResultsScreen implements ScreenView {
           h('span', '', place).textContent = p.placement > 0 ? `#${fmtNumber(p.placement)}` : '—';
         }
         const name = h('div', 'dz-td dz-td-strong', row);
-        h('span', '', name).textContent = p.name;
+        userText(h('span', '', name), p.name);
         if (p.isBot) tx(h('span', 'dz-tag', name), 'common.bot');
         h('div', 'dz-td dz-num', row).textContent = fmtNumber(p.kills);
         h('div', 'dz-td dz-num', row).textContent = fmtNumber(p.knocks);

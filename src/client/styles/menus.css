@@ -591,15 +591,27 @@
 }
 
 .dz-chat-line {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
   font-size: 0.9rem;
   line-height: 1.35;
-  overflow-wrap: anywhere;
 }
 
 .dz-chat-from {
-  margin-inline-end: 6px;
+  flex: none;
+  max-width: 40%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   color: var(--dz-team);
   font-weight: 750;
+}
+
+.dz-chat-text {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .dz-chat-me {
@@ -819,7 +831,7 @@
 
 .dz-results-grid {
   display: grid;
-  grid-template-columns: minmax(280px, 1fr) minmax(0, 1.7fr);
+  grid-template-columns: minmax(240px, 0.8fr) minmax(0, 2fr);
   gap: 18px;
   align-items: start;
 }
@@ -853,10 +865,21 @@
   color: var(--dz-accent);
 }
 
+.dz-results-teams {
+  min-width: 0;
+}
+
+/* The player column has priority: fixed numeric columns stay compact, the name column never
+   drops below a readable width (the table scrolls sideways before names collapse). */
 .dz-results-table {
-  --cols: 5.4rem minmax(0, 2.2fr) 4.6rem 4.6rem 6.4rem 6.6rem;
+  --cols: 3.4rem minmax(9rem, 1fr) 3.8rem 3.8rem 5.2rem 5.6rem;
   max-height: 50vh;
-  overflow-y: auto;
+  overflow: auto;
+}
+
+.dz-results-table .dz-tr,
+.dz-results-table .dz-tgroup {
+  min-width: 34rem;
 }
 
 .dz-results-table .dz-td:first-child {
@@ -882,6 +905,24 @@
 
   .dz-lobby-table {
     --cols: minmax(0, 2fr) minmax(0, 1.2fr) 4.6rem 5.4rem 6rem 5rem;
+  }
+}
+
+@media (max-width: 1000px) {
+  .dz-results-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .dz-stat-grid {
+    grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
+  }
+
+  .dz-stat {
+    padding: 8px 10px;
+  }
+
+  .dz-stat-value {
+    font-size: 1.25rem;
   }
 }
 
