@@ -1,0 +1,319 @@
+// Orientation helpers and spatial queries against a vehicle's oriented box: seat placement, exit
+// spots, ray casts (bullets) and point tests (run-over).
+
+import { PLAYER_RADIUS } from '../constants';
+import type { RockDef, TreeDef, Vec3, VehicleState, World, WorldBox } from '../types';
+import { VEHICLES, rideHeight } from './defs';
+
+// ---------------------------------------------------------------------------
+// Orientation basis
+// ---------------------------------------------------------------------------
+
+/**
+ * World-space axes of a vehicle (columns of R = Ry(yaw) Rx(pitch) Rz(roll)).
+ * `right` = local +X, `up` = local +Y, `back` = local +Z (forward is -back).
+ */
+export interface Basis {
+  right: Vec3;
+  up: Vec3;
+  back: Vec3;
+}
+
+export function makeBasis(): Basis {
+  return { right: { x: 1, y: 0, z: 0 }, up: { x: 0, y: 1, z: 0 }, back: { x: 0, y: 0, z: 1 } };
+}
+
+/** Fill `b` with the axes for the given Euler angles (three.js order 'YXZ'). */
+export function basisFromAngles(yaw: number, pitch: number, roll: number, b: Basis): Basis {
+  const cy = Math.cos(yaw), sy = Math.sin(yaw);
+  const cp = Math.cos(pitch), sp = Math.sin(pitch);
+  const cr = Math.cos(roll), sr = Math.sin(roll);
+  b.right.x = cy * cr + sy * sp * sr;
+  b.right.y = cp * sr;
+  b.right.z = -sy * cr + cy * sp * sr;
+  b.up.x = -cy * sr + sy * sp * cr;
+  b.up.y = cp * cr;
+  b.up.z = sy * sr + cy * sp * cr;
+  b.back.x = sy * cp;
+  b.back.y = -sp;
+  b.back.z = cy * cp;
+  return b;
+}
+
+const basis = makeBasis();
+
+/** Transform a local-space point of the vehicle into world space. */
+export function localToWorld(v: VehicleState, local: Vec3, out: Vec3 = { x: 0, y: 0, z: 0 }): Vec3 {
+  basisFromAngles(v.yaw, v.pitch, v.roll, basis);
+  const { right: r, up: u, back: k } = basis;
+  const lx = local.x, ly = local.y, lz = local.z;
+  out.x = v.pos.x + r.x * lx + u.x * ly + k.x * lz;
+  out.y = v.pos.y + r.y * lx + u.y * ly + k.y * lz;
+  out.z = v.pos.z + r.z * lx + u.z * ly + k.z * lz;
+  return out;
+}
+
+/** Transform a world-space point into the vehicle's local frame. */
+export function worldToLocal(v: VehicleState, p: Vec3, out: Vec3 = { x: 0, y: 0, z: 0 }): Vec3 {
+  basisFromAngles(v.yaw, v.pitch, v.roll, basis);
+  const dx = p.x - v.pos.x, dy = p.y - v.pos.y, dz = p.z - v.pos.z;
+  const { right: r, up: u, back: k } = basis;
+  out.x = dx * r.x + dy * r.y + dz * r.z;
+  out.y = dx * u.x + dy * u.y + dz * u.z;
+  out.z = dx * k.x + dy * k.y + dz * k.z;
+  return out;
+}
+
+// ---------------------------------------------------------------------------
+// Seats
+// ---------------------------------------------------------------------------
+
+/**
+ * World position of a seated occupant's body origin (feet level, plays the role of
+ * CharacterBody.pos). Out-of-range seats clamp to the nearest valid seat.
+ */
+export function seatWorldPosition(v: VehicleState, seat: number, out: Vec3 = { x: 0, y: 0, z: 0 }): Vec3 {
+  const offs = VEHICLES[v.type].seatOffsets;
+  const i = seat < 0 || !Number.isFinite(seat) ? 0 : seat >= offs.length ? offs.length - 1 : Math.floor(seat);
+  return localToWorld(v, offs[i], out);
+}
+
+// ---------------------------------------------------------------------------
+// Ray cast / point test
+// ---------------------------------------------------------------------------
+
+/**
+ * Ray versus the vehicle's oriented collision box. `dir` must be normalised. Returns the entry
+ * distance along the ray (0 when the origin is inside the box) or -1 for a miss / beyond maxDist.
+ */
+export function raycastVehicle(v: VehicleState, origin: Vec3, dir: Vec3, maxDist: number): number {
+  const he = VEHICLES[v.type].halfExtents;
+  basisFromAngles(v.yaw, v.pitch, v.roll, basis);
+  const { right: r, up: u, back: k } = basis;
+  const dx = origin.x - v.pos.x, dy = origin.y - v.pos.y, dz = origin.z - v.pos.z;
+  // Local origin / direction.
+  const ox = dx * r.x + dy * r.y + dz * r.z;
+  const oy = dx * u.x + dy * u.y + dz * u.z;
+  const oz = dx * k.x + dy * k.y + dz * k.z;
+  const lx = dir.x * r.x + dir.y * r.y + dir.z * r.z;
+  const ly = dir.x * u.x + dir.y * u.y + dir.z * u.z;
+  const lz = dir.x * k.x + dir.y * k.y + dir.z * k.z;
+  let tmin = 0, tmax = maxDist;
+  // Slab test per axis.
+  for (let axis = 0; axis < 3; axis++) {
+    const o = axis === 0 ? ox : axis === 1 ? oy : oz;
+    const d = axis === 0 ? lx : axis === 1 ? ly : lz;
+    const h = axis === 0 ? he.x : axis === 1 ? he.y : he.z;
+    if (Math.abs(d) < 1e-12) {
+      if (o < -h || o > h) return -1;
+      continue;
+    }
+    const inv = 1 / d;
+    let t1 = (-h - o) * inv, t2 = (h - o) * inv;
+    if (t1 > t2) { const tt = t1; t1 = t2; t2 = tt; }
+    if (t1 > tmin) tmin = t1;
+    if (t2 < tmax) tmax = t2;
+    if (tmin > tmax) return -1;
+  }
+  return tmin;
+}
+
+/**
+ * Whether a point (e.g. a player's body centre) lies within the vehicle box inflated by `radius`.
+ * The box is extended down to the ground (through the ground clearance) so a standing person in
+ * front of the bumper is hit, not driven over.
+ */
+export function vehicleHitsPoint(v: VehicleState, p: Vec3, radius: number): boolean {
+  const def = VEHICLES[v.type];
+  const he = def.halfExtents;
+  basisFromAngles(v.yaw, v.pitch, v.roll, basis);
+  const { right: r, up: u, back: k } = basis;
+  const dx = p.x - v.pos.x, dy = p.y - v.pos.y, dz = p.z - v.pos.z;
+  const lx = dx * r.x + dy * r.y + dz * r.z;
+  if (lx < -he.x - radius || lx > he.x + radius) return false;
+  const lz = dx * k.x + dy * k.y + dz * k.z;
+  if (lz < -he.z - radius || lz > he.z + radius) return false;
+  const ly = dx * u.x + dy * u.y + dz * u.z;
+  return ly >= -he.y - def.groundClearance - radius && ly <= he.y + radius;
+}
+
+// ---------------------------------------------------------------------------
+// Exit position
+// ---------------------------------------------------------------------------
+
+const exitBoxes: WorldBox[] = [];
+const exitTrees: TreeDef[] = [];
+const exitRocks: RockDef[] = [];
+const segBoxes: WorldBox[] = [];
+const rayO: Vec3 = { x: 0, y: 0, z: 0 };
+const rayD: Vec3 = { x: 0, y: 0, z: 0 };
+const seatScratch: Vec3 = { x: 0, y: 0, z: 0 };
+
+/** Body height that must be free above an exit spot (standing). */
+const EXIT_HEADROOM = 1.8;
+/** Clearance between the vehicle side and the exiting player's capsule. */
+const EXIT_GAP = 0.3;
+/** Tree trunk collision height as a fraction of the tree height (matches the physics module). */
+const TREE_TRUNK_FRAC = 0.6;
+/** Box tops this far above the vehicle floor do not count as ground for the exit spot. */
+const EXIT_STEP = 0.6;
+
+/**
+ * Where an occupant of `seat` is placed when leaving the vehicle: beside the seat, falling back to
+ * the other side, behind, in front, and finally on top of the vehicle. The spot is free of world
+ * colliders for a standing player, reachable from the seat without passing through a wall, and
+ * at ground height (box tops such as floors/roofs count as ground).
+ */
+export function exitPosition(v: VehicleState, seat: number, world: World): Vec3 {
+  const def = VEHICLES[v.type];
+  const he = def.halfExtents;
+  const offs = def.seatOffsets;
+  const si = seat < 0 || !Number.isFinite(seat) ? 0 : seat >= offs.length ? offs.length - 1 : Math.floor(seat);
+  const so = offs[si];
+  const side = so.x > 0.05 ? 1 : so.x < -0.05 ? -1 : si % 2 === 0 ? -1 : 1;
+  const sideX = he.x + PLAYER_RADIUS + EXIT_GAP;
+  const endZ = he.z + PLAYER_RADIUS + EXIT_GAP;
+  const sz = so.z;
+  // Candidate exit spots in local XZ, in order of preference.
+  const cands: number[] = [
+    side * sideX, sz,
+    -side * sideX, sz,
+    side * sideX, sz + 1.0,
+    side * sideX, sz - 1.0,
+    -side * sideX, sz + 1.0,
+    -side * sideX, sz - 1.0,
+    0, endZ,
+    0, -endZ,
+    side * (sideX + 0.8), sz,
+    -side * (sideX + 0.8), sz,
+  ];
+  const cy = Math.cos(v.yaw), sy = Math.sin(v.yaw);
+  const floorY = v.pos.y - rideHeight(def);
+  const seatPos = seatWorldPosition(v, si, seatScratch);
+  const lim = world.half - 1;
+  let fallback: Vec3 | null = null;
+
+  for (let i = 0; i < cands.length; i += 2) {
+    const lx = cands[i], lz = cands[i + 1];
+    // Local -> world on the horizontal plane (yaw only: the player stands upright).
+    const x = v.pos.x + cy * lx + sy * lz;
+    const z = v.pos.z - sy * lx + cy * lz;
+    if (x < -lim || x > lim || z < -lim || z > lim) continue;
+    gatherExit(world, x, z, PLAYER_RADIUS + 0.5);
+    const g = exitGround(world, x, z, floorY + EXIT_STEP);
+    if (spotBlocked(x, z, g)) continue;
+    if (pathBlocked(world, seatPos, x, z, g)) continue;
+    const y = waterAdjusted(world, g);
+    // Prefer spots without a big drop (bridges, cliffs, roofs); keep the first such as fallback.
+    if (floorY - g > 3) {
+      if (!fallback) fallback = { x, y, z };
+      continue;
+    }
+    return { x, y, z };
+  }
+  if (fallback) return fallback;
+  // Last resort: stand on top of the vehicle.
+  basisFromAngles(v.yaw, v.pitch, v.roll, basis);
+  return {
+    x: v.pos.x + basis.up.x * he.y,
+    y: v.pos.y + basis.up.y * he.y + 0.05,
+    z: v.pos.z + basis.up.z * he.y,
+  };
+}
+
+function gatherExit(world: World, x: number, z: number, m: number): void {
+  exitBoxes.length = 0;
+  exitTrees.length = 0;
+  exitRocks.length = 0;
+  world.queryBoxes(x - m, z - m, x + m, z + m, exitBoxes);
+  world.queryTrees(x - m, z - m, x + m, z + m, exitTrees);
+  world.queryRocks(x - m, z - m, x + m, z + m, exitRocks);
+}
+
+/** Highest terrain / box top under (x, z) at or below refY. */
+function exitGround(world: World, x: number, z: number, refY: number): number {
+  let g = world.heightAt(x, z);
+  for (let i = 0; i < exitBoxes.length; i++) {
+    const b = exitBoxes[i];
+    const top = b.max.y;
+    if (top > g && top <= refY && x >= b.min.x && x <= b.max.x && z >= b.min.z && z <= b.max.z) g = top;
+  }
+  return g;
+}
+
+/** Whether a standing player capsule at (x, g, z) overlaps any gathered collider. */
+function spotBlocked(x: number, z: number, g: number): boolean {
+  const r = PLAYER_RADIUS + 0.05;
+  const y0 = g + 0.05, y1 = g + EXIT_HEADROOM;
+  for (let i = 0; i < exitBoxes.length; i++) {
+    const b = exitBoxes[i];
+    if (b.max.y <= y0 || b.min.y >= y1) continue;
+    const cx = x < b.min.x ? b.min.x : x > b.max.x ? b.max.x : x;
+    const cz = z < b.min.z ? b.min.z : z > b.max.z ? b.max.z : z;
+    const dx = x - cx, dz = z - cz;
+    if (dx * dx + dz * dz < r * r) return true;
+  }
+  for (let i = 0; i < exitTrees.length; i++) {
+    const t = exitTrees[i];
+    if (t.y + t.h * TREE_TRUNK_FRAC <= y0 || t.y >= y1) continue;
+    const dx = x - t.x, dz = z - t.z, R = t.r + r;
+    if (dx * dx + dz * dz < R * R) return true;
+  }
+  for (let i = 0; i < exitRocks.length; i++) {
+    const k = exitRocks[i];
+    if (k.y + k.h <= y0 || k.y >= y1) continue;
+    const dx = x - k.x, dz = z - k.z, R = k.r + r;
+    if (dx * dx + dz * dz < R * R) return true;
+  }
+  return false;
+}
+
+/** Whether a wall lies between the seat and the exit spot (tested at chest height). */
+function pathBlocked(world: World, seat: Vec3, x: number, z: number, g: number): boolean {
+  const y0 = seat.y + 0.9;
+  const y1 = g + 1.0;
+  rayO.x = seat.x; rayO.y = y0; rayO.z = seat.z;
+  let dx = x - seat.x, dy = y1 - y0, dz = z - seat.z;
+  const l = Math.sqrt(dx * dx + dy * dy + dz * dz);
+  if (l < 1e-6) return false;
+  dx /= l; dy /= l; dz /= l;
+  rayD.x = dx; rayD.y = dy; rayD.z = dz;
+  const m = 0.2;
+  segBoxes.length = 0;
+  const minX = Math.min(seat.x, x) - m, maxX = Math.max(seat.x, x) + m;
+  const minZ = Math.min(seat.z, z) - m, maxZ = Math.max(seat.z, z) + m;
+  const boxes = world.queryBoxes(minX, minZ, maxX, maxZ, segBoxes);
+  for (let i = 0; i < boxes.length; i++) {
+    const b = boxes[i];
+    if (segmentHitsBox(rayO, rayD, l, b.min, b.max)) return true;
+  }
+  return false;
+}
+
+/** Slab test of a finite segment against an AABB (strictly entering it before `len`). */
+function segmentHitsBox(o: Vec3, d: Vec3, len: number, mn: Vec3, mx: Vec3): boolean {
+  let tmin = 0, tmax = len;
+  for (let axis = 0; axis < 3; axis++) {
+    const oo = axis === 0 ? o.x : axis === 1 ? o.y : o.z;
+    const dd = axis === 0 ? d.x : axis === 1 ? d.y : d.z;
+    const lo = axis === 0 ? mn.x : axis === 1 ? mn.y : mn.z;
+    const hi = axis === 0 ? mx.x : axis === 1 ? mx.y : mx.z;
+    if (Math.abs(dd) < 1e-12) {
+      if (oo <= lo || oo >= hi) return false;
+      continue;
+    }
+    const inv = 1 / dd;
+    let t1 = (lo - oo) * inv, t2 = (hi - oo) * inv;
+    if (t1 > t2) { const tt = t1; t1 = t2; t2 = tt; }
+    if (t1 > tmin) tmin = t1;
+    if (t2 < tmax) tmax = t2;
+    if (tmin >= tmax) return false;
+  }
+  return true;
+}
+
+function waterAdjusted(world: World, g: number): number {
+  // In deep water place the player at swimming depth instead of on the sea floor.
+  const surfaceFeet = world.waterLevel - 1.25;
+  return g < surfaceFeet ? surfaceFeet : g;
+}
