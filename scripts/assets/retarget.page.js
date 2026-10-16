@@ -29,6 +29,14 @@ for (const side of ['L', 'R']) {
   for (let i = 1; i <= 3; i++) BONE_MAP[`Thumb${i}.${side}`] = `thumb_0${i}_${s}`;
 }
 
+// three.js strips '.' from node names (PropertyBinding.sanitizeNodeName): 'Foot.L' -> 'FootL'.
+const S = (n) => THREE.PropertyBinding.sanitizeNodeName(n);
+for (const k of Object.keys(BONE_MAP)) {
+  const v = BONE_MAP[k];
+  delete BONE_MAP[k];
+  BONE_MAP[S(k)] = v;
+}
+
 /** Direction-alignment chains: [targetBone, targetChild, sourceBone, sourceChild]. */
 const ALIGN = [];
 for (const side of ['L', 'R']) {
@@ -48,9 +56,10 @@ for (const side of ['L', 'R']) {
   ALIGN.push([`Thumb1.${side}`, `Thumb2.${side}`, `thumb_01_${s}`, `thumb_02_${s}`], [`Thumb2.${side}`, `Thumb3.${side}`, `thumb_02_${s}`, `thumb_03_${s}`]);
 }
 ALIGN.push(['Abdomen', 'Torso', 'spine_01', 'spine_02'], ['Torso', 'Chest', 'spine_02', 'spine_03'], ['Neck', 'Head', 'neck_01', 'Head']);
+for (const a of ALIGN) { a[0] = S(a[0]); a[1] = S(a[1]); }
 
 /** Bones whose anatomical parent differs from their scene-graph parent (IK feet). */
-const ANATOMICAL_PARENT = { 'Foot.L': 'LowerLeg.L', 'Foot.R': 'LowerLeg.R' };
+const ANATOMICAL_PARENT = { FootL: 'LowerLegL', FootR: 'LowerLegR' };
 
 export function boneMap(root) {
   const m = {};
@@ -178,7 +187,7 @@ export function bakeClip(rt, srcRoot, clip, name, { fps = 30, loop = true } = {}
   const frames = Math.max(2, Math.round(clip.duration * fps) + 1);
   const times = new Float32Array(frames);
   const qs = {}, ps = {};
-  const posBones = ['Body', 'Foot.L', 'Foot.R'];
+  const posBones = ['Body', 'FootL', 'FootR'];
   for (const n of rt.order) qs[n] = new Float32Array(frames * 4);
   for (const n of posBones) ps[n] = new Float32Array(frames * 3);
   for (let f = 0; f < frames; f++) {
