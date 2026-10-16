@@ -19,7 +19,9 @@ import {
 } from '../src/client/assets/manifest';
 
 const MODELS = path.resolve(__dirname, '..', 'public', 'assets', 'models');
-const CATEGORIES: AssetCategory[] = ['characters', 'weapons', 'items', 'props', 'vehicles', 'nature'];
+const CATEGORIES: AssetCategory[] = ['characters', 'weapons', 'items'];
+/** Folders owned by this manifest (vehicles / props / nature belong to manifest-world.ts). */
+const OWN_DIRS = ['characters', 'animations', 'weapons', 'items'];
 
 interface GltfJson {
   asset: { version: string };
@@ -90,12 +92,14 @@ describe('asset library', () => {
     }
   });
 
-  it('the model tree stays within the total size budget and holds only referenced files', () => {
+  it('the model tree stays within the total size budget and our folders hold only referenced files', () => {
     const all = walk(MODELS);
     const total = all.reduce((a, f) => a + fs.statSync(f).size, 0);
     expect(total).toBeLessThanOrEqual(ASSET_BUDGETS.totalBytes);
     const referenced = new Set(CATEGORIES.flatMap((c) => assetFilesFor(c)));
-    const unreferenced = all.map((f) => path.relative(MODELS, f).split(path.sep).join('/')).filter((f) => !referenced.has(f));
+    const unreferenced = all
+      .map((f) => path.relative(MODELS, f).split(path.sep).join('/'))
+      .filter((f) => OWN_DIRS.includes(f.split('/')[0]) && !referenced.has(f));
     expect(unreferenced).toEqual([]);
   });
 
@@ -142,7 +146,7 @@ describe('asset library', () => {
           // Overlays must drive the upper body; the authored ones drive nothing else (the
           // retargeted pistol clips are full-body and get split by the loader).
           if (spec?.layer === 'upper') expect(targets.some((t) => upper.has(t)), `${a.name} drives the upper body`).toBe(true);
-          if (a.name.startsWith('Rifle_') || a.name === 'Parachute_Hang') for (const t of targets) expect(upper.has(t), `${a.name} overlay touches ${t}`).toBe(true);
+          if ((a.name ?? '').startsWith('Rifle_') || a.name === 'Parachute_Hang') for (const t of targets) expect(upper.has(t), `${a.name} overlay touches ${t}`).toBe(true);
         }
         // Weapon socket is a unit quaternion.
         const q = rig.socket.quaternion;

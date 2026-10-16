@@ -70,18 +70,23 @@ async function track(file: string): Promise<GLTF | null> {
 }
 
 /**
- * Preloads every file of the given categories. `onProgress(done, total)` is called after each file
- * (failures count as done). Resolves when all are settled; never rejects.
+ * Preloads files (paths relative to public/assets/models/). `onProgress(done, total)` is called
+ * after each file (failures count as done). Resolves when all are settled; never rejects.
  */
-export async function preloadAssets(categories: readonly AssetCategory[], onProgress?: (done: number, total: number) => void): Promise<void> {
-  const files = [...new Set(categories.flatMap((c) => assetFilesFor(c)))];
+export async function preloadFiles(files: readonly string[], onProgress?: (done: number, total: number) => void): Promise<void> {
+  const unique = [...new Set(files)];
   let done = 0;
-  onProgress?.(0, files.length);
-  await Promise.all(files.map(async (f) => {
+  onProgress?.(0, unique.length);
+  await Promise.all(unique.map(async (f) => {
     await track(f);
     done++;
-    onProgress?.(done, files.length);
+    onProgress?.(done, unique.length);
   }));
+}
+
+/** Preloads every file of the given categories of this manifest (see preloadFiles). */
+export function preloadAssets(categories: readonly AssetCategory[], onProgress?: (done: number, total: number) => void): Promise<void> {
+  return preloadFiles(categories.flatMap((c) => assetFilesFor(c)), onProgress);
 }
 
 /** Deep clone that rebinds skinned meshes to the cloned bones (geometry/materials shared). */

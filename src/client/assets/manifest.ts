@@ -16,7 +16,11 @@ import type { ConsumableId, GearId, ThrowableId, VehicleType, WeaponId } from '.
 export type Vec3 = readonly [number, number, number];
 export type Quat = readonly [number, number, number, number];
 
-export type AssetCategory = 'characters' | 'weapons' | 'items' | 'props' | 'vehicles' | 'nature';
+/**
+ * Categories of this manifest. Vehicles, props and nature live in manifest-world.ts (separate
+ * owner); load those with `preloadFiles` / `loadModel` from loader.ts using their own file lists.
+ */
+export type AssetCategory = 'characters' | 'weapons' | 'items';
 
 /** Folder (relative to the site base URL) that holds every model. */
 export const MODELS_PATH = 'assets/models/';
@@ -281,7 +285,7 @@ export const ASSET_BUDGETS = {
   /** One character file (mesh, materials, textures). */
   characterBytes: 4 * 1024 * 1024,
   /** Triangles per category (unique geometry per file). */
-  tris: { characters: 8000 + 64, weapons: 3000, items: 2000, props: 2000, vehicles: 6000, nature: 2000 } as Record<AssetCategory, number>,
+  tris: { characters: 8000 + 64, weapons: 3000, items: 2000 } as Record<AssetCategory, number>,
   /** Largest texture edge. */
   textureSize: 1024,
 } as const;

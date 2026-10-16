@@ -11,7 +11,9 @@ import { runInPage, MODELS_DIR } from './harness.mjs';
 
 const quiet = process.argv.includes('--quiet');
 const M = await tsImport('../../src/client/assets/manifest.ts', import.meta.url);
-const categories = ['characters', 'weapons', 'items', 'props', 'vehicles', 'nature'];
+const categories = ['characters', 'weapons', 'items'];
+// Folders owned by manifest.ts (vehicles / props / nature belong to manifest-world.ts).
+const OWN_DIRS = ['characters', 'animations', 'weapons', 'items'];
 const files = [];
 for (const c of categories) for (const f of M.assetFilesFor(c)) files.push({ category: c, file: f });
 
@@ -23,7 +25,7 @@ const onDisk = [];
 const walk = (d) => { for (const e of fs.readdirSync(d, { withFileTypes: true })) { const p = path.join(d, e.name); if (e.isDirectory()) walk(p); else onDisk.push(path.relative(MODELS_DIR, p)); } };
 walk(MODELS_DIR);
 const referenced = new Set(files.map((f) => f.file));
-const orphans = onDisk.filter((f) => f.endsWith('.glb') && !referenced.has(f));
+const orphans = onDisk.filter((f) => f.endsWith('.glb') && OWN_DIRS.includes(f.split('/')[0]) && !referenced.has(f));
 const totalBytes = onDisk.reduce((a, f) => a + fs.statSync(path.join(MODELS_DIR, f)).size, 0);
 if (totalBytes > M.ASSET_BUDGETS.totalBytes) problems.push(`models total ${totalBytes} B > budget ${M.ASSET_BUDGETS.totalBytes}`);
 
