@@ -11,7 +11,7 @@
 // Node names in this file are the names three.js gives the nodes after loading (GLTFLoader strips
 // '.', so the source rig's "Wrist.R" is "WristR").
 
-import type { ConsumableId, GearId, ThrowableId, VehicleType, WeaponId } from '../../shared/types';
+import type { AmmoId, ConsumableId, GearId, ThrowableId, WeaponId } from '../../shared/types';
 
 export type Vec3 = readonly [number, number, number];
 export type Quat = readonly [number, number, number, number];
@@ -276,6 +276,51 @@ export const CHARACTER_CLIPS: Record<CharacterAnimKey, CharacterClipSpec | null>
 };
 
 // ================================================================================================
+// Weapons
+// ================================================================================================
+
+export interface WeaponModel {
+  id: WeaponId;
+  file: string;
+  /** Source model (Quaternius Ultimate Guns Pack). */
+  source: string;
+  tris: number;
+  /** Overall length (m). */
+  length: number;
+  /** Pistol-class (held out with both hands, not shouldered). */
+  pistol: boolean;
+  /**
+   * Hold points in the weapon frame (grip = origin). Same meaning as render/entities WeaponHold:
+   * butt sits on the shoulder pocket (pistols: [0,0,0]), support = left-hand position, muzzle =
+   * bore exit (flash / tracer origin), sight = the point the eye aligns with for ADS (rear sight /
+   * scope eyepiece axis; the line of sight runs from it along -Z, parallel to the bore).
+   * Every GLB also carries these as empty nodes named Grip, Butt, Support, Muzzle, Sight.
+   */
+  butt: Vec3;
+  support: Vec3;
+  muzzle: Vec3;
+  sight: Vec3;
+  /** Built-in optic on the model ('iron' = open sights). */
+  optic: 'iron' | 'scope';
+}
+
+const weapon = (id: WeaponId, source: string, tris: number, length: number, pistol: boolean, optic: 'iron' | 'scope', butt: Vec3, support: Vec3, muzzle: Vec3, sight: Vec3): WeaponModel =>
+  ({ id, file: `weapons/${id}.glb`, source, tris, length, pistol, butt, support, muzzle, sight, optic });
+
+/**
+ * One GLB per WeaponId: a single vertex-coloured mesh with one material ('weapon'), so it can be
+ * drawn as one InstancedMesh for loot and attached under CharacterInstance.weaponSocket in hand.
+ */
+export const WEAPON_MODELS: Record<WeaponId, WeaponModel> = {
+  pistol: weapon('pistol', 'Pistol_1', 1040, 0.21, true, 'iron', [0, 0, 0], [-0.03, -0.02, 0.01], [0, 0.0633, -0.17], [0, 0.085, 0.01]),
+  smg: weapon('smg', 'SubmachineGun_5', 1440, 0.66, false, 'iron', [0, 0.025, 0.235], [0, 0.035, -0.215], [0, 0.0674, -0.425], [0, 0.11, 0.005]),
+  ar: weapon('ar', 'AssaultRifle2_1', 1930, 0.9, false, 'iron', [0, 0.04, 0.27], [0, 0.045, -0.3], [0, 0.0767, -0.63], [0, 0.13, -0.03]),
+  shotgun: weapon('shotgun', 'Shotgun_3', 978, 1.02, false, 'iron', [0, -0.04, 0.27], [0, -0.015, -0.36], [0, 0.0224, -0.75], [0, 0.043, -0.06]),
+  dmr: weapon('dmr', 'SniperRifle_2', 1732, 1.1, false, 'scope', [0, 0, 0.29], [0, 0.025, -0.33], [0, 0.0568, -0.81], [0, 0.105, 0.01]),
+  sniper: weapon('sniper', 'SniperRifle_3', 1722, 1.2, false, 'scope', [0, 0.01, 0.325], [0, 0.025, -0.375], [0, 0.0598, -0.875], [0, 0.12, -0.015]),
+};
+
+// ================================================================================================
 // Budgets (checked by tests/assets.test.ts and scripts/assets/verify.mjs)
 // ================================================================================================
 
@@ -299,6 +344,8 @@ export function assetFilesFor(category: AssetCategory): string[] {
   switch (category) {
     case 'characters':
       return [...Object.values(CHARACTER_VARIANTS).map((v) => v.file), ...Object.values(CHARACTER_RIGS).map((r) => r.animations)];
+    case 'weapons':
+      return Object.values(WEAPON_MODELS).map((w) => w.file);
     default:
       return [];
   }

@@ -18,8 +18,10 @@ import {
   type CharacterRig,
   type CharacterVariant,
   type CharacterVariantId,
+  WEAPON_MODELS,
   assetFilesFor,
 } from './manifest';
+import type { WeaponId } from '../../shared/types';
 
 export type { GLTF };
 
@@ -240,4 +242,32 @@ export function createCharacterInstance(asset: CharacterAsset): CharacterInstanc
       root.removeFromParent();
     },
   };
+}
+
+// ------------------------------------------------------------------------------------------------
+// Single-mesh models (weapons, items): instancing helpers
+// ------------------------------------------------------------------------------------------------
+
+export interface MeshParts {
+  geometry: THREE.BufferGeometry;
+  material: THREE.Material;
+}
+
+/**
+ * Geometry + material of a single-mesh model (every weapon / item GLB is one vertex-coloured mesh
+ * in its own frame), for THREE.InstancedMesh or merging. Shared: do not dispose or mutate.
+ */
+export async function loadMeshParts(file: string): Promise<MeshParts | null> {
+  const g = await track(file);
+  if (!g) return null;
+  let found: THREE.Mesh | null = null;
+  g.scene.traverse((o) => { if (!found && (o as THREE.Mesh).isMesh) found = o as THREE.Mesh; });
+  const mesh = found as THREE.Mesh | null;
+  if (!mesh) return null;
+  return { geometry: mesh.geometry, material: Array.isArray(mesh.material) ? mesh.material[0] : mesh.material };
+}
+
+/** A copy of the weapon model (weapon frame: grip at origin, barrel -Z), or null. */
+export function instantiateWeapon(id: WeaponId): Promise<THREE.Object3D | null> {
+  return instantiate(WEAPON_MODELS[id].file);
 }

@@ -12,6 +12,7 @@ import {
   CHARACTER_RIGS,
   CHARACTER_VARIANTS,
   UPPER_BODY_BONES,
+  WEAPON_MODELS,
   assetFilesFor,
   characterVariantFor,
   modelUrl,
@@ -25,7 +26,7 @@ const OWN_DIRS = ['characters', 'animations', 'weapons', 'items'];
 
 interface GltfJson {
   asset: { version: string };
-  nodes?: { name?: string; mesh?: number; skin?: number; children?: number[] }[];
+  nodes?: { name?: string; mesh?: number; skin?: number; children?: number[]; translation?: number[]; matrix?: number[] }[];
   meshes?: { primitives: { indices?: number; attributes: Record<string, number>; mode?: number; material?: number }[] }[];
   skins?: { joints: number[] }[];
   animations?: { name?: string; channels: { target: { node?: number; path: string } }[] }[];
@@ -162,5 +163,33 @@ describe('asset library', () => {
       }
       expect(seen.size).toBe(Object.keys(CHARACTER_VARIANTS).length);
     });
+  });
+
+  describe('weapons', () => {
+    for (const w of Object.values(WEAPON_MODELS)) {
+      it(`${w.id}: one vertex-coloured mesh in the weapon frame with matching hold markers`, () => {
+        const { json } = readGlb(w.file);
+        const meshNodes = (json.nodes ?? []).filter((n) => n.mesh !== undefined);
+        expect(meshNodes.length).toBe(1);
+        expect(json.meshes![meshNodes[0].mesh!].primitives.length).toBe(1);
+        expect(json.meshes![meshNodes[0].mesh!].primitives[0].attributes.COLOR_0).toBeDefined();
+        expect((json.materials ?? []).map((m) => m.name)).toEqual(['weapon']);
+        expect(triangles(json)).toBe(w.tris);
+        const marker = (name: string): number[] => {
+          const n = (json.nodes ?? []).find((x) => x.name === name);
+          return n?.translation ?? (n?.matrix ? n.matrix.slice(12, 15) : [0, 0, 0]);
+        };
+        const close = (a: readonly number[], b: readonly number[]) => a.forEach((v, i) => expect(v).toBeCloseTo(b[i], 3));
+        expect((json.nodes ?? []).some((n) => n.name === 'Grip')).toBe(true);
+        close(marker('Muzzle'), w.muzzle);
+        close(marker('Sight'), w.sight);
+        close(marker('Support'), w.support);
+        close(marker('Butt'), w.butt);
+        // Barrel along -Z: the muzzle is in front of the grip and the stock (if any) behind it.
+        expect(w.muzzle[2]).toBeLessThan(-0.1);
+        expect(w.butt[2]).toBeGreaterThanOrEqual(0);
+        expect(Math.abs(w.muzzle[2] - (w.pistol ? 0 : w.butt[2]))).toBeLessThanOrEqual(w.length + 1e-3);
+      });
+    }
   });
 });

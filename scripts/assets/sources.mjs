@@ -13,3 +13,4 @@ export const UAL1 = 'ual/UAL1.glb'; // github.com/tilakpatell/tilakverse-assets 
 export const UAL2 = 'ual/UAL2.glb'; // ... quaternius/universal-animation-library-2/Unreal-Godot/UAL2.glb
 
 export const abs = (rel) => path.join(DL, rel);
+export const UGP = 'ugp'; // github.com/WingNut17/ps1-style @ 42b446d7983d87b6029f42d5e110861a80c6ebee assets/models/props/items/weapons/Ultimate Gun Pack by Quaternius/*.fbx (copied flat)
