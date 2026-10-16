@@ -5,9 +5,10 @@
 // player (no input-driven step) and banks one catch-up credit; after INPUT_PAUSE_MAX_TICKS the
 // client counts as absent and the body is stepped with a neutral input so it still falls / lands.
 // When a backlog persists (depth > CATCHUP_DEPTH for CATCHUP_DELAY_TICKS) two inputs are applied
-// per tick, paid with credit, until the queue is shallow: latency never ratchets up after a stall,
-// and because credit only comes from ticks the player did not move, catching up never yields
-// more movement than real time allows.
+// per tick, paid with credit, until the queue is shallow: latency never ratchets up after a stall.
+// Credit is only earned for paused ticks whose inputs then arrive together (a delivery stall), for
+// ticks the host skipped, and for a tiny clock-drift allowance — so catching up never yields more
+// movement than real time allows, and idling does not bank a later speed burst.
 //
 // Per input: aim, actions, movement (plane / drop / ground / vehicle seat), weapons, healing and
 // revive progress. Per tick: boost and bleeding. After the match ended only the aim updates.
@@ -27,8 +28,7 @@ import { planePosition } from './plane';
 import type { PlayerRt } from './players';
 import { LAG_BUCKETS, LAG_BUCKET_TICKS, neutralize, popInput } from './players';
 import {
-  ADS_MOVE_MUL, CATCHUP_DELAY_TICKS, CATCHUP_DEPTH, EVENT_RANGE, GIVE_BURST, GIVE_RATE, INPUT_CREDIT_DECAY,
-  INPUT_CREDIT_MAX,
+  ADS_MOVE_MUL, CATCHUP_DELAY_TICKS, CATCHUP_DEPTH, EVENT_RANGE, GIVE_BURST, GIVE_RATE, INPUT_CREDIT_MAX,
   INPUT_DRIFT_CREDIT, INPUT_PAUSE_MAX_TICKS, MOVE_DEADZONE, NOISE_FOOTSTEP_INTERVAL, NOISE_FOOTSTEP_RADIUS,
   PITCH_LIMIT, REVIVE_HEALTH, REVIVE_KEEP_SLACK, SPRINT_MIN_FORWARD,
 } from './tuning';
@@ -82,7 +82,8 @@ export function updatePlayer(sim: GameSim, rt: PlayerRt, dt: number): void {
   if (rt.qLen === 0) {
     rt.starved++;
     rt.deepTicks = 0;
-    rt.credit = Math.min(INPUT_CREDIT_MAX, rt.credit + 1);
+    // Owed until its delayed input shows up in the resumption burst (players.ts noteArrival).
+    if (rt.owed < INPUT_CREDIT_MAX) rt.owed++;
     if (rt.starved <= INPUT_PAUSE_MAX_TICKS) {
       // Paused: the late input will be applied when it arrives. Plane riders still ride along and
       // a driver's vehicle keeps its last controls (rt.hasControls is left as it was).
@@ -95,6 +96,8 @@ export function updatePlayer(sim: GameSim, rt: PlayerRt, dt: number): void {
     }
   } else {
     rt.starved = 0;
+    rt.owed = 0;
+    rt.burstSeen = false;
     popInput(rt);
     applyInput(sim, rt, dt, true);
     if (rt.qLen > CATCHUP_DEPTH) rt.deepTicks++;
@@ -105,8 +108,10 @@ export function updatePlayer(sim: GameSim, rt: PlayerRt, dt: number): void {
       popInput(rt);
       applyInput(sim, rt, dt, true);
       if (rt.qLen <= 1) rt.deepTicks = 0;
-    } else if (rt.qLen <= 1 && rt.credit > 0) {
-      rt.credit = Math.max(0, rt.credit - INPUT_CREDIT_DECAY);
+    } else if (rt.deepTicks === 0 && rt.qLen <= CATCHUP_DEPTH) {
+      // Nothing to catch up on: credit cannot be banked for later (no speed burst after idling
+      // or after harmless jitter).
+      rt.credit = 0;
     }
   }
   if (p.life === 'dead') return;

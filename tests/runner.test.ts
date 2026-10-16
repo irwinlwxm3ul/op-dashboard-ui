@@ -53,7 +53,12 @@ function setup(cfg: Partial<MatchConfig> = {}, teams: (number | null)[] = [0, 1,
       runner.update(now);
     }
   };
-  return { runner, clients, advance, ended: () => ended, results: () => results, now: () => now };
+  /** One late update after `ms` (a host stall: everything in between arrives, nothing ticks). */
+  const jump = (ms: number) => {
+    now += ms;
+    runner.update(now);
+  };
+  return { runner, clients, advance, jump, ended: () => ended, results: () => results, now: () => now };
 }
 
 function areaClear(w: World, x0: number, z0: number, x1: number, z1: number): boolean {
@@ -188,8 +193,9 @@ describe('MatchRunner', () => {
     const p = sim.players.get(id)!;
     const o = findOpen(sim.world, 18);
     for (const q of sim.players.values()) placeOnGround(sim.world, q, o.x, o.z);
-    advance(200);
     const start = { x: p.pos.x, z: p.pos.z };
+    const t0 = sim.time;
+    advance(200);
     let seq = 1000;
     const flood = () => {
       const inputs: PlayerInput[] = [];
@@ -199,9 +205,19 @@ describe('MatchRunner', () => {
       runner.handleMessage(clients[0].id, { t: 'input', inputs });
     };
     advance(2000, flood);
+    // Over the whole period (including the ticks it waited for its first input) the player is
+    // never faster than sprinting, however many inputs it pushes.
     const moved = Math.hypot(p.pos.x - start.x, p.pos.z - start.z);
     expect(moved).toBeGreaterThan(3);
-    expect(moved).toBeLessThanOrEqual(MOVE_SPEED.sprint * 2 * 1.05 + 0.2);
+    expect(moved).toBeLessThanOrEqual(MOVE_SPEED.sprint * (sim.time - t0) * 1.02 + 0.2);
+    // Sustained: keep flooding; once any banked credit is spent the rate is exactly one input per tick.
+    advance(1000, flood);
+    const mid = { x: p.pos.x, z: p.pos.z };
+    const t1 = sim.time;
+    advance(3000, flood);
+    const late = Math.hypot(p.pos.x - mid.x, p.pos.z - mid.z);
+    expect(late).toBeLessThanOrEqual(MOVE_SPEED.sprint * (sim.time - t1) * 1.02);
+    expect(late).toBeGreaterThan(MOVE_SPEED.sprint * (sim.time - t1) * 0.8);
     // Acks advance (the latest accepted inputs were processed) but never beyond what was sent.
     const self = clients[0].snaps().at(-1)!.self!;
     expect(self.ack).toBeGreaterThan(1000);
@@ -217,6 +233,65 @@ describe('MatchRunner', () => {
     advance(100);
     expect(Number.isFinite(p.pos.x)).toBe(true);
     expect(INPUT_BURST).toBeGreaterThan(0);
+  });
+
+  it('inputs over the rate budget keep their actions; a host stall is caught up', () => {
+    const { runner, clients, advance, jump } = setup({ botFill: false, maxPlayers: 2 }, [0, 1]);
+    const sim = runner.sim;
+    const id = clients[0].init().you!;
+    const p = sim.players.get(id)!;
+    const o = findOpen(sim.world, 4, 8);
+    placeOnGround(sim.world, p, o.x, o.z);
+    advance(300);
+    const loot = sim.placeLootAt('bandage', 3, { x: p.pos.x + 1, y: p.pos.y + 0.05, z: p.pos.z })!;
+    let seq = 0;
+    const input = (actions?: PlayerInput['actions']): PlayerInput => ({ seq: ++seq, mx: 0, mz: 0, yaw: 0, pitch: 0, buttons: 0, stance: 0, slot: -1, rt: 0, actions });
+    // 40 inputs at once: the token bucket admits 32, the pickup rides on input 40.
+    const burst: PlayerInput[] = [];
+    for (let k = 0; k < 39; k++) burst.push(input());
+    burst.push(input([{ a: 'pickup', id: loot.id }]));
+    runner.handleMessage(clients[0].id, { t: 'input', inputs: burst });
+    advance(2500, () => runner.handleMessage(clients[0].id, { t: 'input', inputs: [input()] }));
+    expect(p.items.bandage).toBe(3);
+    expect(sim.loot.has(loot.id)).toBe(false);
+    // That burst was far more input than real time allowed: the surplus stays queued (latency for
+    // the flooder, never extra speed). Let it drain before the next part.
+    const rt = sim.rtById.get(id)!;
+    advance(1500);
+    expect(rt.qLen).toBe(0);
+    // Steady client, then the host stalls 400 ms (backlog ticks dropped) while inputs keep coming.
+    advance(1000, () => runner.handleMessage(clients[0].id, { t: 'input', inputs: [input()] }));
+    for (let k = 0; k < 12; k++) runner.handleMessage(clients[0].id, { t: 'input', inputs: [input()] });
+    jump(400);
+    expect(rt.qLen).toBeGreaterThan(4);
+    advance(1500, () => runner.handleMessage(clients[0].id, { t: 'input', inputs: [input()] }));
+    expect(rt.qLen).toBeLessThanOrEqual(1);
+    expect(p.lastSeq).toBeGreaterThanOrEqual(seq - 1);
+  });
+
+  it('uses the transport RTT to bound rewinds and reports aim flags in stats()', () => {
+    const clients = [new FakeClient('c0', 'Lan', 0), new FakeClient('c1', 'Far', 1)];
+    const runner = new MatchRunner({
+      config: { ...CONFIG, botFill: false, maxPlayers: 2, teamSize: 1 },
+      clients: [
+        { id: 'c0', name: 'Lan', team: 0, send: clients[0].send, rttMs: () => 3 },
+        { id: 'c1', name: 'Far', team: 1, send: clients[1].send },
+      ],
+    });
+    runner.start(0);
+    runner.update(1500);
+    const sim = runner.sim;
+    const lan = sim.rtById.get(clients[0].init().you!)!;
+    const far = sim.rtById.get(clients[1].init().you!)!;
+    expect(lan.rttMs).toBe(3);
+    expect(far.rttMs).toBe(-1);
+    runner.setClientLatency('c1', 180);
+    expect(far.rttMs).toBe(180);
+    sim.raiseFlag({ player: lan.p.id, name: 'Lan', kind: 'aimSnap', value: 3, time: sim.time });
+    const st = runner.stats();
+    expect(st.flags.length).toBe(1);
+    expect(st.flags[0]).toMatchObject({ kind: 'aimSnap', name: 'Lan' });
+    expect(runner.stats().flags.length).toBe(0);
   });
 
   it('routes events by audience: private, ranged and global', () => {

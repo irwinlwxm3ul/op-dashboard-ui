@@ -199,8 +199,8 @@ export const MAX_CATCHUP_TICKS = 5;
 export const INPUT_QUEUE_CAPACITY = 32;
 /**
  * A tick with no queued input does not invent one: the player's input-driven step is skipped
- * ("paused") for up to this many ticks and one catch-up credit is granted per skipped tick, so the
- * late inputs can be replayed later without any input ever being applied twice or dropped.
+ * ("paused") for up to this many ticks; when the delayed inputs then arrive together they earn
+ * catch-up credit, so they are replayed without any input ever being applied twice or dropped.
  * Longer gaps (absent client) step the body with a neutral input so it still falls / lands.
  */
 export const INPUT_PAUSE_MAX_TICKS = 15;
@@ -208,8 +208,6 @@ export const INPUT_PAUSE_MAX_TICKS = 15;
 export const INPUT_CREDIT_MAX = 30;
 /** Clock drift allowance: credit earned per tick (0.2 %), so a slightly fast client clock never ratchets latency. */
 export const INPUT_DRIFT_CREDIT = 0.002;
-/** Unused credit expires at this rate (per tick with a shallow queue). */
-export const INPUT_CREDIT_DECAY = 1 / 30;
 /** Catch-up starts once the queue has been deeper than this ... */
 export const CATCHUP_DEPTH = 2;
 /** ... for this many ticks (~0.5 s), and runs (two inputs per tick) until the depth is <= 1. */

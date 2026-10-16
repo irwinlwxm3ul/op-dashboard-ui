@@ -12,7 +12,9 @@ import type { MoveEvents, MoveIntent } from '../physics';
 import type { VehicleControls } from '../vehicles';
 import type { ClientAction, EntityId, PlayerInput, PlayerState, TeamId, Vec3 } from '../types';
 import { BTN } from '../types';
-import { FLAG_HS_WINDOW, FLAG_SNAP_COUNT, FLAG_SNAP_WINDOW, GIVE_BURST, INPUT_QUEUE_CAPACITY } from './tuning';
+import {
+  FLAG_HS_WINDOW, FLAG_SNAP_COUNT, FLAG_SNAP_WINDOW, GIVE_BURST, INPUT_CREDIT_MAX, INPUT_QUEUE_CAPACITY,
+} from './tuning';
 
 /** Buttons that act on their press only (kept when an input's movement part has to be merged away). */
 export const EDGE_BUTTONS = BTN.JUMP | BTN.RELOAD;
@@ -38,8 +40,12 @@ export interface PlayerRt {
   curArrived: number;
   /** Consecutive ticks without a queued input. */
   starved: number;
-  /** Banked catch-up credit (ticks the player was paused, plus clock-drift allowance). */
+  /** Banked catch-up credit (inputs known to have been delayed in flight, plus clock drift). */
   credit: number;
+  /** Ticks starved in the current stretch whose inputs have not shown up yet. */
+  owed: number;
+  /** First input after a starved stretch has arrived (later ones in the burst earn credit). */
+  burstSeen: boolean;
   /** Consecutive ticks the queue was deeper than CATCHUP_DEPTH. */
   deepTicks: number;
   /** Transport-measured round trip time (ms) or -1 when unknown. */
@@ -173,6 +179,8 @@ export function createPlayerRt(p: PlayerState, spawnIndex: number): PlayerRt {
     curArrived: 0,
     starved: 0,
     credit: 0,
+    owed: 0,
+    burstSeen: false,
     deepTicks: 0,
     rttMs: -1,
     lagBuckets: new Float64Array(LAG_BUCKETS).fill(Infinity),
@@ -266,7 +274,24 @@ export function pushInput(rt: PlayerRt, input: PlayerInput, now: number): boolea
   copyInput(rt.queue[idx], input);
   rt.arrivedAt[idx] = now;
   rt.qLen++;
+  noteArrival(rt);
   return true;
+}
+
+/**
+ * Credit for delayed inputs: while a starved stretch is open, every input after the first one
+ * arriving in the resumption burst stands for a tick the player was paused (its input was in
+ * flight), up to the number of starved ticks. A client that simply stopped sending resumes at one
+ * input per tick and earns nothing, so idling never buys a later speed burst.
+ */
+function noteArrival(rt: PlayerRt): void {
+  if (rt.owed <= 0) return;
+  if (!rt.burstSeen) {
+    rt.burstSeen = true;
+    return;
+  }
+  rt.owed--;
+  if (rt.credit < INPUT_CREDIT_MAX) rt.credit = Math.min(INPUT_CREDIT_MAX, rt.credit + 1);
 }
 
 /**
@@ -312,6 +337,8 @@ export function resetInput(rt: PlayerRt): void {
   rt.lastQueuedSeq = -1;
   rt.starved = 0;
   rt.credit = 0;
+  rt.owed = 0;
+  rt.burstSeen = false;
   rt.deepTicks = 0;
   rt.rttMs = -1;
   rt.lagBuckets.fill(Infinity);
