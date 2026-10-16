@@ -7,7 +7,7 @@ import { DEFAULT_LOBBY_SETTINGS, type LobbySummary } from '../../../shared/proto
 import { sanitizeName, sanitizeText } from '../../../shared/validate';
 import type { UiErrorCode } from '../contracts';
 import type { ScreenView, UiCtx } from '../context';
-import { button, clear, h, placeholderTx, svgIcon, tx, txp } from '../dom';
+import { button, clear, h, isolate, placeholderTx, svgIcon, tx, txp, userText } from '../dom';
 import { isConnectionLoss, uiErrorText } from '../errors';
 import { ICONS } from '../icons';
 import { teamSizeKey } from '../options';
@@ -266,7 +266,7 @@ export class MultiplayerScreen implements ScreenView {
     this.connectedRow.classList.toggle('dz-hidden', !connected);
     this.nameInput.disabled = this.state === 'connecting';
     this.connectBtn.disabled = this.state === 'connecting';
-    if (connected) txp(this.connectedText, 'ui.mp.connectedAs', { name: this.connectedAs || settings.get().playerName });
+    if (connected) txp(this.connectedText, 'ui.mp.connectedAs', { name: isolate(this.connectedAs || settings.get().playerName) });
     this.statusLine.className = 'dz-mp-status';
     switch (this.state) {
       case 'connecting':
@@ -309,12 +309,11 @@ export class MultiplayerScreen implements ScreenView {
       const full = l.players >= l.maxPlayers;
       const joinable = l.status === 'waiting' && !full;
       row.classList.toggle('dz-row-muted', !joinable);
-      const name = h('div', 'dz-td dz-td-strong', row);
-      name.textContent = l.name;
+      const name = userText(h('div', 'dz-td dz-td-strong', row), l.name);
       name.title = l.name;
       const host = h('div', 'dz-td', row);
       host.appendChild(svgIcon(ICONS.crown, 'dz-icon dz-icon-sm dz-accent'));
-      h('span', '', host).textContent = l.host;
+      userText(h('span', '', host), l.host);
       const players = h('div', 'dz-td dz-num', row);
       txp(players, 'mp.playersOfMax', { players: l.players, max: l.maxPlayers });
       tx(h('div', 'dz-td', row), teamSizeKey(l.teamSize));

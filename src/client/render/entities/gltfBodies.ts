@@ -15,12 +15,13 @@
 
 import * as THREE from 'three';
 import {
-  CHARACTER_BONES, CHARACTER_CLIPS, CHARACTER_VARIANT_IDS, CHARACTER_VARIANTS, characterVariantFor, createCharacterInstance,
+  CHARACTER_BONES, CHARACTER_CLIPS, CHARACTER_VARIANT_IDS, CHARACTER_VARIANTS, createCharacterInstance,
   getCharacterClip, loadCharacter, type CharacterAnimKey, type CharacterAsset, type CharacterInstance,
   type CharacterVariantId,
 } from '../../assets';
 import { dirFromAngles } from '../../../shared/math';
-import type { Vec3 } from '../../../shared/types';
+import { hash32 } from '../../../shared/rng';
+import type { Vec3, WeaponId } from '../../../shared/types';
 import type { LogicalAnimState } from './animState';
 import type { BodyFrame, NearBody, NearBodyProvider } from './bodies';
 import { GeoBuilder } from './geometry';
@@ -40,13 +41,14 @@ const G_PACK1 = 6; // 6..8 pack level 1..3 (Chest)
 const G_WEAPON0 = 9; // 9..14 weapons in WEAPON_IDS order (weapon holder)
 const G_COUNT = G_WEAPON0 + WEAPON_IDS.length;
 
-function buildGearGeometry(): THREE.BufferGeometry {
+/** Gear (all helmet / vest / pack levels) + ONE weapon (null = none); swapped when the weapon changes. */
+function buildGearGeometry(weapon: WeaponId | null): THREE.BufferGeometry {
   const b = new GeoBuilder();
   const I = new THREE.Matrix4();
   for (let l = 1; l <= 3; l++) buildHelmet(l, b, I, G_HELMET1 + l - 1);
   for (let l = 1; l <= 3; l++) buildVest(l, b, I, G_VEST1 + l - 1);
   for (let l = 1; l <= 3; l++) buildPack(l, b, I, G_PACK1 + l - 1);
-  WEAPON_IDS.forEach((id, i) => buildWeapon(id, b, I, G_WEAPON0 + i));
+  if (weapon) buildWeapon(weapon, b, I, G_WEAPON0 + WEAPON_IDS.indexOf(weapon));
   return b.build({ mask: true, skin: true });
 }
 
@@ -70,6 +72,7 @@ export interface VariantData {
   /** Gear proxy local matrices: helmet under Head, vest / pack under Chest. */
   helmetLocal: THREE.Matrix4;
   torsoLocal: THREE.Matrix4;
+  packLocal: THREE.Matrix4;
   /** Slung long gun under Chest, per backpack level 0..3. */
   slungLocal: THREE.Matrix4[];
   /** Average outfit colours (linear) for tinting the procedural mid LOD. */
@@ -149,18 +152,26 @@ function fitVariant(id: CharacterVariantId, asset: CharacterAsset): VariantData 
     const torsoFit = new THREE.Matrix4()
       .makeTranslation(tc.x, tc.y, tc.z)
       .multiply(new THREE.Matrix4().makeScale(
-        clamp(th.x / PROC_TORSO_HALF.x, 0.8, 1.35), clamp(th.y / PROC_TORSO_HALF.y, 0.8, 1.35), clamp(th.z / PROC_TORSO_HALF.z, 0.8, 1.45),
+        clamp((th.x / PROC_TORSO_HALF.x) * 0.95, 0.78, 1.0), clamp(th.y / PROC_TORSO_HALF.y, 0.8, 1.05), clamp((th.z / PROC_TORSO_HALF.z) * 0.95, 0.75, 1.0),
       ))
       .multiply(new THREE.Matrix4().makeTranslation(-PROC_TORSO_CENTER.x, -PROC_TORSO_CENTER.y, -PROC_TORSO_CENTER.z));
     const chestInv = new THREE.Matrix4().copy(chest.matrixWorld).invert();
     const torsoLocal = new THREE.Matrix4().copy(chestInv).multiply(torsoFit);
+    // Backpacks keep their own (level-coded) size: rigid, against the fitted back surface.
+    const backZ = new THREE.Vector3(0, PROC_TORSO_CENTER.y, PROC_TORSO_CENTER.z + PROC_TORSO_HALF.z).applyMatrix4(torsoFit).z;
+    const packFit = new THREE.Matrix4().makeTranslation(tc.x, tc.y - PROC_TORSO_CENTER.y, backZ - (PROC_TORSO_CENTER.z + PROC_TORSO_HALF.z));
+    const packLocal = new THREE.Matrix4().copy(chestInv).multiply(packFit);
     // Slung rifle: position through the torso fit, rigid orientation.
     const slungLocal: THREE.Matrix4[] = [];
     const s = new THREE.Matrix4(), p = new THREE.Vector3(), q = new THREE.Quaternion(), sc = new THREE.Vector3();
     for (let lvl = 0; lvl < 4; lvl++) {
       slungLongGunMatrix(SLUNG_DEPTH[lvl], s);
       s.decompose(p, q, sc);
+      // x / y through the torso fit; depth = back surface + the procedural pack thickness.
+      const extra = SLUNG_DEPTH[lvl] - SLUNG_DEPTH[0];
+      p.z = PROC_TORSO_CENTER.z;
       p.applyMatrix4(torsoFit);
+      p.z = backZ + 0.02 + extra * 0.9;
       const world = new THREE.Matrix4().compose(p, q, new THREE.Vector3(1, 1, 1));
       slungLocal.push(new THREE.Matrix4().copy(chestInv).multiply(world));
     }
@@ -169,7 +180,7 @@ function fitVariant(id: CharacterVariantId, asset: CharacterAsset): VariantData 
     // The procedural mid parts' cloth base colours are light greys: compensate so the tint matches.
     up.multiplyScalar(1.15);
     lo.multiplyScalar(1.4);
-    return { id, asset, helmetLocal, torsoLocal, slungLocal, upper: up, lower: lo };
+    return { id, asset, helmetLocal, torsoLocal, packLocal, slungLocal, upper: up, lower: lo };
   } finally {
     inst.dispose();
   }
@@ -177,8 +188,19 @@ function fitVariant(id: CharacterVariantId, asset: CharacterAsset): VariantData 
 
 /** Every loaded character variant plus the shared gear geometry. */
 export class CharacterLibrary {
-  readonly gearGeometry = buildGearGeometry();
+  private readonly gear = new Map<WeaponId | 'none', THREE.BufferGeometry>();
   private readonly loaded: VariantData[] = [];
+
+  /** Gear + weapon geometry for a held weapon (built on demand, shared by every body). */
+  gearGeometryFor(weapon: WeaponId | null): THREE.BufferGeometry {
+    const key = weapon ?? 'none';
+    let g = this.gear.get(key);
+    if (!g) {
+      g = buildGearGeometry(weapon);
+      this.gear.set(key, g);
+    }
+    return g;
+  }
 
   private constructor(readonly variants: ReadonlyMap<CharacterVariantId, VariantData>) {
     variants.forEach((v) => this.loaded.push(v));
@@ -203,7 +225,8 @@ export class CharacterLibrary {
 
   /** Variant for a player (deterministic; falls back to a loaded one of the same rig, then any). */
   variantFor(playerId: number): VariantData {
-    const want = characterVariantFor(playerId);
+    // Well-mixed deterministic pick (identical on every client).
+    const want = CHARACTER_VARIANT_IDS[hash32(playerId, 0xc4a7) % CHARACTER_VARIANT_IDS.length];
     const v = this.variants.get(want);
     if (v) return v;
     const rig = CHARACTER_VARIANTS[want].rig;
@@ -212,7 +235,8 @@ export class CharacterLibrary {
   }
 
   dispose(): void {
-    this.gearGeometry.dispose();
+    for (const g of this.gear.values()) g.dispose();
+    this.gear.clear();
   }
 }
 
@@ -243,6 +267,24 @@ const FALLBACK: Partial<Record<CharacterAnimKey, CharacterAnimKey>> = {
 };
 
 type AimMode = 'none' | 'track' | 'pitch';
+
+/**
+ * Root offsets (model space) per base clip, so the clips line up with the simulation's body
+ * origin: swim clips are authored around the water line (our origin is SWIM_FEET_DEPTH below
+ * it), seated clips sit on a 0.53 m chair (our seats put the hips 0.4 m above the origin), and the
+ * crawl clips lie with the hips 0.27 m behind their origin (ours: hips at the origin).
+ */
+const ROOT_OFFSET: Partial<Record<CharacterAnimKey, readonly [number, number, number]>> = {
+  swim: [0, 1.15, 0],
+  swimIdle: [0, 1.0, 0],
+  sit: [0, -0.13, 0],
+  drive: [0, -0.13, 0],
+  ride: [0, -0.13, 0],
+  prone: [0, 0, -0.27],
+  crawl: [0, 0, -0.27], crawlBack: [0, 0, -0.27], crawlLeft: [0, 0, -0.27], crawlRight: [0, 0, -0.27],
+  downed: [0, 0, -0.27],
+  downedCrawl: [0, 0, -0.27],
+};
 
 const _m = new THREE.Matrix4();
 const _m2 = new THREE.Matrix4();
@@ -282,8 +324,13 @@ class GltfNearBody implements NearBody {
   private overlayKey: CharacterAnimKey | null = null;
   private orientW = 0;
   private slungLevel = -1;
+  private readonly offset = new THREE.Vector3();
+  /** Just (re)assigned to a player: snap smoothed values instead of easing from the old owner. */
+  fresh = true;
 
-  constructor(readonly variant: VariantData, gearGeometry: THREE.BufferGeometry) {
+  private gearWeapon: WeaponId | null | undefined = undefined;
+
+  constructor(readonly variant: VariantData, private readonly lib: CharacterLibrary) {
     this.inst = createCharacterInstance(variant.asset);
     const root = this.inst.root;
     root.matrixAutoUpdate = false;
@@ -314,7 +361,7 @@ class GltfNearBody implements NearBody {
     const gearMat = new THREE.MeshLambertMaterial({ vertexColors: true });
     applyEntityShader(gearMat, { mask: true, dither: true, rim: true }, this.uniforms);
     this.materials.push(gearMat);
-    this.gear = new THREE.SkinnedMesh(gearGeometry, gearMat);
+    this.gear = new THREE.SkinnedMesh(lib.gearGeometryFor(null), gearMat);
     this.gear.name = 'dz_gear';
     this.gear.frustumCulled = false;
     this.gear.castShadow = true;
@@ -370,7 +417,8 @@ class GltfNearBody implements NearBody {
 
   private chooseBaseKey(f: BodyFrame): CharacterAnimKey {
     const st = f.logical.state;
-    if (st === 'death') return f.anim.deathFallSign < 0 ? 'death2' : 'death';
+    // Killed while lying (downed / prone): stay on the ground instead of replaying a standing death.
+    if (st === 'death') return f.anim.deathFromLying ? 'downed' : f.anim.deathFallSign < 0 ? 'death2' : 'death';
     // Parachute: legs from the airborne loop under the hanging upper body.
     if (st === 'parachute') return 'jump';
     const dirs = DIRECTIONAL[st];
@@ -423,22 +471,6 @@ class GltfNearBody implements NearBody {
       return;
     }
     root.visible = true;
-    // --- Root (free-fall body pitch from the procedural pose; clips are upright) ---------------
-    const freefall = f.logical.state === 'freefall' || f.logical.state === 'dive';
-    this.orientW += ((freefall ? 1 : 0) - this.orientW) * (1 - Math.exp(-5 * Math.min(0.1, f.dt)));
-    root.matrix.copy(f.root);
-    if (this.orientW > 0.002) {
-      const pose = f.anim.pose;
-      _m.makeTranslation(0, HIP_PIVOT, 0);
-      _q.setFromEuler(_e.set(pose[P.HPITCH] * this.orientW, 0, pose[P.HROLL] * this.orientW, 'YXZ'));
-      _m2.makeRotationFromQuaternion(_q);
-      _m.multiply(_m2);
-      _m2.makeTranslation(0, -HIP_PIVOT, 0);
-      _m.multiply(_m2);
-      root.matrix.multiply(_m);
-    }
-    root.matrixWorldNeedsUpdate = true;
-
     // --- Look: team colour, fade, gear ---------------------------------------------------------
     const look = f.look;
     this.uniforms.uAccent.value.copy(look.accent);
@@ -451,7 +483,7 @@ class GltfNearBody implements NearBody {
     for (let l = 1; l <= 3; l++) {
       this.proxies[G_HELMET1 + l - 1].matrix.copy(l === helmet ? this.variant.helmetLocal : ZERO);
       this.proxies[G_VEST1 + l - 1].matrix.copy(l === vest ? this.variant.torsoLocal : ZERO);
-      this.proxies[G_PACK1 + l - 1].matrix.copy(l === pack ? this.variant.torsoLocal : ZERO);
+      this.proxies[G_PACK1 + l - 1].matrix.copy(l === pack ? this.variant.packLocal : ZERO);
     }
 
     // --- Animation -------------------------------------------------------------------------------
@@ -490,13 +522,40 @@ class GltfNearBody implements NearBody {
       const spec = CHARACTER_CLIPS[this.baseKey];
       if (f.logical.state === 'death') {
         this.baseAction.timeScale = 0;
-        this.baseAction.time = Math.min(f.logical.deadFor, this.baseAction.getClip().duration - 1e-3);
+        if (!f.anim.deathFromLying) this.baseAction.time = Math.min(f.logical.deadFor, this.baseAction.getClip().duration - 1e-3);
       } else if (spec?.cycles && f.logical.cycleHz > 0) {
         this.baseAction.timeScale = clamp((f.logical.cycleHz * spec.duration) / spec.cycles, 0.35, 2.6);
       } else {
         this.baseAction.timeScale = 1;
       }
     }
+    // --- Root (free-fall body pitch from the procedural pose; clips are upright) ---------------
+    const freefall = f.logical.state === 'freefall' || f.logical.state === 'dive';
+    this.orientW += ((freefall ? 1 : 0) - this.orientW) * (this.fresh ? 1 : 1 - Math.exp(-5 * Math.min(0.1, f.dt)));
+    root.matrix.copy(f.root);
+    // Per-clip origin alignment (smoothed so state changes do not pop).
+    const off = this.baseKey ? ROOT_OFFSET[this.baseKey] : undefined;
+    const k = this.fresh ? 1 : 1 - Math.exp(-8 * Math.min(0.1, f.dt));
+    this.fresh = false;
+    this.offset.x += ((off ? off[0] : 0) - this.offset.x) * k;
+    this.offset.y += ((off ? off[1] : 0) - this.offset.y) * k;
+    this.offset.z += ((off ? off[2] : 0) - this.offset.z) * k;
+    if (this.offset.lengthSq() > 1e-8) {
+      _m.makeTranslation(this.offset.x, this.offset.y, this.offset.z);
+      root.matrix.multiply(_m);
+    }
+    if (this.orientW > 0.002) {
+      const pose = f.anim.pose;
+      _m.makeTranslation(0, HIP_PIVOT, 0);
+      _q.setFromEuler(_e.set(pose[P.HPITCH] * this.orientW, 0, pose[P.HROLL] * this.orientW, 'YXZ'));
+      _m2.makeRotationFromQuaternion(_q);
+      _m.multiply(_m2);
+      _m2.makeTranslation(0, -HIP_PIVOT, 0);
+      _m.multiply(_m2);
+      root.matrix.multiply(_m);
+    }
+    root.matrixWorldNeedsUpdate = true;
+
     this.inst.mixer.update(Math.min(0.1, f.dt));
 
     // --- Weapon placement ------------------------------------------------------------------------
@@ -504,6 +563,11 @@ class GltfNearBody implements NearBody {
     const inHands = weapon !== null && this.overlayKey !== null && this.overlayKey !== 'parachuteHang';
     const slung = weapon !== null && !inHands && !WEAPON_HOLD[weapon].pistol;
     const wIdx = weapon !== null && (inHands || slung) ? WEAPON_IDS.indexOf(weapon) : -1;
+    const gw = wIdx >= 0 ? weapon : null;
+    if (gw !== this.gearWeapon) {
+      this.gearWeapon = gw;
+      this.gear.geometry = this.lib.gearGeometryFor(gw);
+    }
     for (let i = 0; i < WEAPON_IDS.length; i++) {
       this.proxies[G_WEAPON0 + i].matrix.copy(i === wIdx ? _identity : ZERO);
     }
@@ -643,11 +707,12 @@ export class GltfNearProvider implements NearBodyProvider {
         if (!idle) return null;
         this.destroy(idle);
       }
-      body = new GltfNearBody(v, this.lib.gearGeometry);
+      body = new GltfNearBody(v, this.lib);
       this.all.push(body);
       this.parent.add(body.inst.root);
     }
     body.ownerId = ownerId;
+    body.fresh = true;
     return body;
   }
 

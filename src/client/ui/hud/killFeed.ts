@@ -5,7 +5,7 @@
 import { fmtNumber, itemName, t, type TKey } from '../../i18n';
 import type { DamageSource, EntityId, WeaponId } from '../../../shared/types';
 import type { ClientEventOf, FrameState } from '../../game/types';
-import { h, svgIcon } from '../dom';
+import { h, svgIcon, userText } from '../dom';
 import { ICONS, weaponIcon } from '../icons';
 import type { HudEnv, Widget } from './shared';
 
@@ -175,8 +175,7 @@ export class KillFeed implements Widget {
   }
 
   private nameSpan(parent: HTMLElement, id: EntityId | null, role: 'me' | 'mate' | 'other'): void {
-    const s = h('span', `dz-feed-name dz-feed-name-${role}`, parent);
-    s.textContent = this.name(id);
+    const s = userText(h('span', `dz-feed-name dz-feed-name-${role}`, parent), this.name(id));
     if (role === 'mate' && this.env && id !== null) {
       const c = this.env.memberColor(id);
       if (c) s.style.setProperty('--c', c);

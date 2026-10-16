@@ -7,7 +7,7 @@ import { MAX_CHAT_LEN } from '../../../shared/constants';
 import type { LobbyMember, LobbyState } from '../../../shared/protocol';
 import { sanitizeText } from '../../../shared/validate';
 import type { ScreenView, UiCtx } from '../context';
-import { ariaTx, button, clear, h, placeholderTx, svgIcon, tx, txp } from '../dom';
+import { ariaTx, button, clear, h, placeholderTx, svgIcon, tx, txp, userText } from '../dom';
 import { ICONS } from '../icons';
 import { difficultyKey, teamSizeKey, zoneSpeedKey } from '../options';
 import { menuBackdrop } from './mainMenu';
@@ -140,12 +140,11 @@ export class LobbyRoomScreen implements ScreenView {
     const me = this.me();
     if (!from) {
       line.classList.add('dz-chat-system');
-      h('span', 'dz-chat-text', line).textContent = text;
+      userText(h('span', 'dz-chat-text', line), text);
     } else {
-      const who = h('span', 'dz-chat-from', line);
-      who.textContent = from;
+      const who = userText(h('span', 'dz-chat-from', line), from);
       if (me && me.name === from) who.classList.add('dz-chat-me');
-      h('span', 'dz-chat-text', line).textContent = text;
+      userText(h('span', 'dz-chat-text', line), text);
     }
     while (this.chatLog.childElementCount > MAX_CHAT_LINES) this.chatLog.firstElementChild?.remove();
     if (atBottom) this.chatLog.scrollTop = this.chatLog.scrollHeight;
@@ -209,7 +208,7 @@ export class LobbyRoomScreen implements ScreenView {
     }
     const host = this.isHost();
     const me = this.me();
-    this.title.textContent = s.settings.name;
+    userText(this.title, s.settings.name);
 
     // Status chip.
     this.statusChip.className = `dz-chip dz-status-${s.status}`;
@@ -291,8 +290,7 @@ export class LobbyRoomScreen implements ScreenView {
           crown.title = t('lobby.host');
           slot.appendChild(crown);
         }
-        const name = h('span', 'dz-slot-name', slot);
-        name.textContent = m.name;
+        userText(h('span', 'dz-slot-name', slot), m.name);
         const ready = h('span', `dz-slot-ready${m.ready || m.isHost ? ' dz-on' : ''}`, slot);
         if (m.isHost) tx(ready, 'lobby.host');
         else if (m.ready) {

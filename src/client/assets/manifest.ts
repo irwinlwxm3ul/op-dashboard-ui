@@ -312,12 +312,100 @@ const weapon = (id: WeaponId, source: string, tris: number, length: number, pist
  * drawn as one InstancedMesh for loot and attached under CharacterInstance.weaponSocket in hand.
  */
 export const WEAPON_MODELS: Record<WeaponId, WeaponModel> = {
+  // <generated:weapons> (scripts/assets/sync-manifest.mjs)
   pistol: weapon('pistol', 'Pistol_1', 1040, 0.21, true, 'iron', [0, 0, 0], [-0.03, -0.02, 0.01], [0, 0.0633, -0.17], [0, 0.085, 0.01]),
   smg: weapon('smg', 'SubmachineGun_5', 1440, 0.66, false, 'iron', [0, 0.025, 0.235], [0, 0.035, -0.215], [0, 0.0674, -0.425], [0, 0.11, 0.005]),
   ar: weapon('ar', 'AssaultRifle2_1', 1930, 0.9, false, 'iron', [0, 0.04, 0.27], [0, 0.045, -0.3], [0, 0.0767, -0.63], [0, 0.13, -0.03]),
   shotgun: weapon('shotgun', 'Shotgun_3', 978, 1.02, false, 'iron', [0, -0.04, 0.27], [0, -0.015, -0.36], [0, 0.0224, -0.75], [0, 0.043, -0.06]),
   dmr: weapon('dmr', 'SniperRifle_2', 1732, 1.1, false, 'scope', [0, 0, 0.29], [0, 0.025, -0.33], [0, 0.0568, -0.81], [0, 0.105, 0.01]),
   sniper: weapon('sniper', 'SniperRifle_3', 1722, 1.2, false, 'scope', [0, 0.01, 0.325], [0, 0.025, -0.375], [0, 0.0598, -0.875], [0, 0.12, -0.015]),
+  // </generated:weapons>
+};
+
+// ================================================================================================
+// Items (loot + wearable gear)
+// ================================================================================================
+
+/** Every non-weapon item id (weapons use WEAPON_MODELS on the ground too). */
+export type ItemModelId = AmmoId | ConsumableId | ThrowableId | GearId;
+
+export interface ItemModel {
+  id: ItemModelId;
+  category: 'ammo' | 'consumable' | 'throwable' | 'gear';
+  file: string;
+  /** Source model ('authored' = built from primitives by scripts/assets/build-items.mjs). */
+  source: string;
+  tris: number;
+  /** Bounding size (m) of the item standing on y = 0, centred on X/Z, front -Z. */
+  size: Vec3;
+}
+
+const item = (id: ItemModelId, category: ItemModel['category'], source: string, tris: number, size: Vec3): ItemModel =>
+  ({ id, category, file: `items/${id}.glb`, source, tris, size });
+
+/** One GLB per item: a single vertex-coloured mesh, one material ('item'), instancing friendly. */
+export const ITEM_MODELS: Record<ItemModelId, ItemModel> = {
+  // <generated:items> (scripts/assets/sync-manifest.mjs)
+  bandage: item('bandage', 'consumable', 'Survival Pack: Bandages', 156, [0.092, 0.11, 0.097]),
+  firstaid: item('firstaid', 'consumable', 'Survival Pack: FirstAidKit', 754, [0.26, 0.226, 0.122]),
+  medkit: item('medkit', 'consumable', 'Survival Pack: FirstAidKit_Hard', 268, [0.36, 0.244, 0.129]),
+  energy: item('energy', 'consumable', 'Survival Pack: Can_Red', 332, [0.093, 0.125, 0.093]),
+  fuel: item('fuel', 'consumable', 'Survival Pack: GasCan (recoloured olive)', 788, [0.357, 0.47, 0.117]),
+  frag: item('frag', 'throwable', 'Toon Shooter Game Kit: Grenade (recoloured olive)', 820, [0.102, 0.11, 0.083]),
+  ammo_9mm: item('ammo_9mm', 'ammo', 'Zsky Weapons Pack V.1: PistolAmmo_Box', 596, [0.119, 0.117, 0.2]),
+  ammo_556: item('ammo_556', 'ammo', 'Zsky Weapons Pack V.1: AssaultRifleAmmo_Box', 740, [0.07, 0.26, 0.259]),
+  ammo_762: item('ammo_762', 'ammo', 'Zsky Weapons Pack V.1: SniperAmmo_Box', 1328, [0.11, 0.26, 0.196]),
+  ammo_12g: item('ammo_12g', 'ammo', 'Zsky Weapons Pack V.1: ShotgunAmmo_Box', 436, [0.15, 0.148, 0.22]),
+  ammo_300: item('ammo_300', 'ammo', 'Zsky Weapons Pack V.1: SniperAmmo_Box (recoloured olive)', 1328, [0.118, 0.28, 0.211]),
+  helmet1: item('helmet1', 'gear', 'Toon Shooter Game Kit: Character_Soldier helmet (tan)', 632, [0.257, 0.187, 0.27]),
+  helmet2: item('helmet2', 'gear', 'Toon Shooter Game Kit: Character_Soldier helmet + goggles (olive)', 896, [0.267, 0.194, 0.28]),
+  helmet3: item('helmet3', 'gear', 'Toon Shooter Game Kit: Character_Soldier helmet + goggles (black)', 896, [0.276, 0.2, 0.29]),
+  vest1: item('vest1', 'gear', 'authored: soft vest (procedural)', 256, [0.358, 0.42, 0.304]),
+  vest2: item('vest2', 'gear', 'authored: plate carrier (procedural)', 600, [0.375, 0.44, 0.371]),
+  vest3: item('vest3', 'gear', 'authored: heavy carrier (procedural)', 900, [0.299, 0.48, 0.298]),
+  pack1: item('pack1', 'gear', 'Survival Pack: Backpack (sand)', 1748, [0.45, 0.42, 0.235]),
+  pack2: item('pack2', 'gear', 'Survival Pack: Backpack (olive)', 1748, [0.557, 0.52, 0.291]),
+  pack3: item('pack3', 'gear', 'Survival Pack: Backpack (black)', 1748, [0.664, 0.62, 0.347]),
+  // </generated:items>
+};
+
+/**
+ * How to wear gear: add the item model as a child of `bone` with this local transform (bone-local
+ * space of the rig; already accounts for the rig's Root scale). Fitted to each rig's bulkiest
+ * outfit so it clears every variant. Use loader `attachGear()`.
+ */
+export interface GearWear {
+  bone: 'Head' | 'Torso' | 'Chest';
+  position: Vec3;
+  quaternion: Quat;
+  scale: Vec3;
+}
+
+export const GEAR_WEAR: Record<CharacterRigId, Record<GearId, GearWear>> = {
+  // <generated:wear> (scripts/assets/sync-manifest.mjs)
+  male: {
+    helmet1: { bone: 'Head', position: [0.0003, 0.0808, 0.006], quaternion: [0, 1, 0, -0.0003], scale: [1.0521, 1.0521, 1.0521] },
+    helmet2: { bone: 'Head', position: [0.0003, 0.0808, 0.006], quaternion: [0, 1, 0, -0.0003], scale: [1.0145, 1.0145, 1.0145] },
+    helmet3: { bone: 'Head', position: [0.0003, 0.0808, 0.006], quaternion: [0, 1, 0, -0.0003], scale: [0.9796, 0.9796, 0.9796] },
+    vest1: { bone: 'Torso', position: [0.0003, -0.0428, 0.0283], quaternion: [0, 1, -0.0058, 0], scale: [0.9127, 0.9489, 1.0079] },
+    vest2: { bone: 'Torso', position: [0.0003, -0.0428, 0.0283], quaternion: [0, 1, -0.0058, 0], scale: [0.8712, 0.9058, 0.8247] },
+    vest3: { bone: 'Torso', position: [0.0003, -0.0428, 0.0283], quaternion: [0, 1, -0.0058, 0], scale: [1.0945, 0.8303, 1.0283] },
+    pack1: { bone: 'Chest', position: [0.0003, -0.3044, -0.182], quaternion: [0, 1, -0.0095, 0], scale: [1, 1, 1] },
+    pack2: { bone: 'Chest', position: [0.0003, -0.4049, -0.2081], quaternion: [0, 1, -0.0095, 0], scale: [1, 1, 1] },
+    pack3: { bone: 'Chest', position: [0.0003, -0.5054, -0.2342], quaternion: [0, 1, -0.0095, 0], scale: [1, 1, 1] },
+  },
+  female: {
+    helmet1: { bone: 'Head', position: [0.0003, 0.0795, 0.0067], quaternion: [0, 1, 0, 0], scale: [0.9353, 0.9353, 0.9353] },
+    helmet2: { bone: 'Head', position: [0.0003, 0.0795, 0.0067], quaternion: [0, 1, 0, 0], scale: [0.9019, 0.9019, 0.9019] },
+    helmet3: { bone: 'Head', position: [0.0003, 0.0795, 0.0067], quaternion: [0, 1, 0, 0], scale: [0.8708, 0.8708, 0.8708] },
+    vest1: { bone: 'Torso', position: [0.0003, -0.0631, 0.0371], quaternion: [0, 1, -0.0097, 0], scale: [0.7973, 0.7298, 0.7704] },
+    vest2: { bone: 'Torso', position: [0.0003, -0.0631, 0.0371], quaternion: [0, 1, -0.0097, 0], scale: [0.7611, 0.6966, 0.6303] },
+    vest3: { bone: 'Torso', position: [0.0003, -0.0631, 0.0371], quaternion: [0, 1, -0.0097, 0], scale: [0.9561, 0.6385, 0.7859] },
+    pack1: { bone: 'Chest', position: [0.0003, -0.3305, -0.1439], quaternion: [0, 1, -0.0095, 0], scale: [1, 1, 1] },
+    pack2: { bone: 'Chest', position: [0.0003, -0.431, -0.1699], quaternion: [0, 1, -0.0095, 0], scale: [1, 1, 1] },
+    pack3: { bone: 'Chest', position: [0.0003, -0.5315, -0.196], quaternion: [0, 1, -0.0095, 0], scale: [1, 1, 1] },
+  },
+  // </generated:wear>
 };
 
 // ================================================================================================
@@ -346,7 +434,7 @@ export function assetFilesFor(category: AssetCategory): string[] {
       return [...Object.values(CHARACTER_VARIANTS).map((v) => v.file), ...Object.values(CHARACTER_RIGS).map((r) => r.animations)];
     case 'weapons':
       return Object.values(WEAPON_MODELS).map((w) => w.file);
-    default:
-      return [];
+    case 'items':
+      return Object.values(ITEM_MODELS).map((i) => i.file);
   }
 }

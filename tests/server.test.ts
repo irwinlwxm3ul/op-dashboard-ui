@@ -660,7 +660,26 @@ describe('servers with custom options', () => {
   });
 });
 
-describe('match worker threads (real MatchRunner)', () => {
+describe('real MatchRunner', () => {
+  it('in-process fallback (matchWorkers: false) runs a match on the main loop', async () => {
+    const s = await startServer({ port: 0, log: false, matchWorkers: false });
+    try {
+      const a = await TestClient.hello(s.port, 'Solo');
+      a.send({ t: 'createLobby', settings: settings({ maxPlayers: 4, botFill: true, botDifficulty: 'easy' }) });
+      await a.next('lobbyState');
+      a.send({ t: 'startMatch' });
+      const init = (await a.next('matchInit', () => true, 20_000)).init;
+      expect(init.roster).toHaveLength(4);
+      const first = await a.next('snap', () => true, 5000);
+      await a.next('snap', (m) => m.s.time >= first.s.time + 300, 5000);
+      a.send({ t: 'leaveMatch' });
+      await a.next('backToLobby');
+      await a.next('lobbyState', (m) => m.lobby.status === 'waiting');
+    } finally {
+      await s.close();
+    }
+  }, 60_000);
+
   it('runs the match in a worker: matchInit, snapshots, routed ping/loaded, crash aborts back to the lobby', async () => {
     const workers = createWorkerRunnerFactory();
     const created: MatchRunnerLike[] = [];

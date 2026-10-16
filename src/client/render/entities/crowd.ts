@@ -47,9 +47,11 @@ export class NearSoldier implements NearBody {
   readonly bones: THREE.Bone[] = [];
   readonly uniforms: EntityUniforms;
   ownerId = -1;
+  /** Weapon whose geometry the mesh currently uses (undefined = not assigned yet). */
+  geometryWeapon: WeaponId | null | undefined = undefined;
   private readonly material: EntityMaterial;
 
-  constructor(geometry: THREE.BufferGeometry) {
+  constructor(private readonly pool: NearPool, geometry: THREE.BufferGeometry) {
     this.material = createEntityMaterial({ mask: true, dither: true, rim: true, fogScale: 0.35 });
     this.uniforms = this.material.userData.uniforms;
     this.mesh = new THREE.SkinnedMesh(geometry, this.material);
@@ -84,6 +86,11 @@ export class NearSoldier implements NearBody {
   apply(f: BodyFrame): void {
     const look = f.look, rig = f.rig, fade = f.fade;
     this.setLook(look);
+    const gw = f.showWeapon ? look.weapon : null;
+    if (gw !== this.geometryWeapon) {
+      this.geometryWeapon = gw;
+      this.mesh.geometry = this.pool.geometryFor(gw);
+    }
     this.mesh.matrix.copy(f.root);
     this.mesh.matrixWorldNeedsUpdate = true;
     const [helmet, vest, pack] = look.gear;
@@ -117,7 +124,8 @@ export class NearSoldier implements NearBody {
 /** Procedural near-LOD backend: pool of skinned procedural soldiers sharing one geometry. */
 export class NearPool implements NearBodyProvider {
   readonly name = 'procedural';
-  private geometry = buildNearSoldierGeometry();
+  /** Soldier geometry per held weapon ('none' = unarmed), built on demand. */
+  private readonly geometries = new Map<WeaponId | 'none', THREE.BufferGeometry>();
   private readonly all: NearSoldier[] = [];
   private readonly free: NearSoldier[] = [];
 
@@ -127,12 +135,22 @@ export class NearPool implements NearBodyProvider {
     this.capacity = n;
   }
 
-  /** Rebuild the shared soldier geometry (e.g. after real weapon models were registered). */
+  geometryFor(weapon: WeaponId | null): THREE.BufferGeometry {
+    const key = weapon ?? 'none';
+    let g = this.geometries.get(key);
+    if (!g) {
+      g = buildNearSoldierGeometry(weapon);
+      this.geometries.set(key, g);
+    }
+    return g;
+  }
+
+  /** Rebuild the soldier geometries (e.g. after real weapon models were registered). */
   rebuildGeometry(): void {
-    const old = this.geometry;
-    this.geometry = buildNearSoldierGeometry();
-    for (const s of this.all) s.mesh.geometry = this.geometry;
-    old.dispose();
+    const old = [...this.geometries.values()];
+    this.geometries.clear();
+    for (const s of this.all) s.mesh.geometry = this.geometryFor(s.geometryWeapon ?? null);
+    for (const g of old) g.dispose();
   }
 
   get inUse(): number {
@@ -144,7 +162,7 @@ export class NearPool implements NearBodyProvider {
     let s = this.free.pop();
     if (!s) {
       if (this.all.length >= this.capacity) return null;
-      s = new NearSoldier(this.geometry);
+      s = new NearSoldier(this, this.geometryFor(null));
       this.all.push(s);
       this.parent.add(s.mesh);
     }
@@ -166,7 +184,8 @@ export class NearPool implements NearBodyProvider {
     }
     this.all.length = 0;
     this.free.length = 0;
-    this.geometry.dispose();
+    for (const g of this.geometries.values()) g.dispose();
+    this.geometries.clear();
   }
 }
 

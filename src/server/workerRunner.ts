@@ -134,7 +134,6 @@ class WorkerRunner implements MatchRunnerLike {
     if (this.disposed) return;
     this.disposed = true;
     this.clients.clear();
-    this.post({ k: 'stop' });
     this.worker.terminate().catch(() => undefined);
     this.released(this.worker);
   }
@@ -164,7 +163,11 @@ class WorkerRunner implements MatchRunnerLike {
         if (m.over) this.over = true;
         break;
       case 'inited':
-        this.log.info('match world generated in worker', { threadId: this.worker.threadId, genMs: Math.round(m.genMs) });
+        this.log.info('match runner ready in worker', {
+          threadId: this.worker.threadId,
+          seed: this.opts.config.seed,
+          initMs: Math.round(m.genMs),
+        });
         break;
       case 'error':
         if (m.fatal) {
@@ -227,7 +230,13 @@ export function createWorkerRunnerFactory(options: WorkerRunnerFactoryOptions = 
 
   function bootSpare(): void {
     if (disposed || spare || !useSpare) return;
-    const w = spawnWorker(limits);
+    let w: Worker;
+    try {
+      w = spawnWorker(limits);
+    } catch (err) {
+      log.warn('cannot boot spare match worker', { err });
+      return;
+    }
     w.unref();
     w.on('error', onSpareError);
     w.on('exit', onSpareExit);

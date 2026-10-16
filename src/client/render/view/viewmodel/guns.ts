@@ -484,6 +484,14 @@ interface ModelHold {
   eject: V3;
   charge: V3;
   port: V3;
+  /** Right hand offset from the fist centre (the generic grip hand is slightly tall for low stocks). */
+  grip?: V3;
+  /**
+   * Optical axis of a built-in scope at the eyepiece (measured from the mesh). The manifest sight
+   * point of the DMR / sniper models sits ~1 cm right of / above the scope tube, which would show
+   * the eyepiece off-centre while aiming in; the scope overlay takes over at full ADS anyway.
+   */
+  scopeAxis?: V3;
 }
 
 const MODEL_HOLD: Record<WeaponId, ModelHold> = {
@@ -506,7 +514,7 @@ const MODEL_HOLD: Record<WeaponId, ModelHold> = {
     charge: [-0.012, 0.115, 0.06], port: [0, 0, 0],
   },
   shotgun: {
-    hip: [0.135, -0.155, -0.3], hipRot: [0, 0.035, 0], eyeRelief: 0.25, gripRot: [-0.45, 0, 0],
+    hip: [0.135, -0.155, -0.3], hipRot: [0, 0.035, 0], eyeRelief: 0.25, gripRot: [-0.32, 0, 0], grip: [-0.004, 0.006, 0.012],
     supportStyle: 'palm', support: [0, -0.042, -0.36], supportRot: [0, 0, 0],
     magBottom: [0, -0.07, -0.1], magDrop: [0, -1, 0], eject: [0.021, 0.02, -0.05],
     charge: [0, -0.042, -0.36], port: [0, -0.07, -0.1],
@@ -515,13 +523,13 @@ const MODEL_HOLD: Record<WeaponId, ModelHold> = {
     hip: [0.135, -0.17, -0.31], hipRot: [0, 0.035, 0], eyeRelief: 0.1, gripRot: [-0.35, 0, 0],
     supportStyle: 'palm', support: [0, 0.02, -0.34], supportRot: [0, 0, 0],
     magBottom: [0, -0.03, -0.06], magDrop: [0, -1, 0], eject: [0.024, 0.06, -0.03],
-    charge: [0.036, 0.04, -0.028], port: [0, 0, 0],
+    charge: [0.036, 0.04, -0.028], port: [0, 0, 0], scopeAxis: [-0.0092, 0.0981, 0.01],
   },
   sniper: {
     hip: [0.135, -0.17, -0.33], hipRot: [0, 0.035, 0], eyeRelief: 0.1, gripRot: [-0.35, 0, 0],
     supportStyle: 'palm', support: [0, 0.01, -0.38], supportRot: [0, 0, 0],
     magBottom: [0, -0.066, -0.03], magDrop: [0, -1, 0], eject: [0.024, 0.065, -0.03],
-    charge: [0.037, 0.042, -0.05], port: [0, 0, 0],
+    charge: [0.037, 0.042, -0.05], port: [0, 0, 0], scopeAxis: [-0.0135, 0.1055, -0.015],
   },
 };
 
@@ -553,15 +561,18 @@ export function buildModelGun(id: WeaponId, model: THREE.Object3D, proc: GunMode
   g.supportRot.set(h.supportRot[0], h.supportRot[1], h.supportRot[2]);
   g.supportStyle = h.supportStyle;
   g.gripRot.set(h.gripRot[0], h.gripRot[1], h.gripRot[2]);
-  g.gripOffset.copy(MODEL_GRIP_OFFSET);
+  if (h.grip) g.gripOffset.set(h.grip[0], h.grip[1], h.grip[2]);
+  else g.gripOffset.copy(MODEL_GRIP_OFFSET);
   g.chargeAnchor.set(h.charge[0], h.charge[1], h.charge[2]);
   g.magBottom.set(h.magBottom[0], h.magBottom[1], h.magBottom[2]);
   g.magDrop.set(h.magDrop[0], h.magDrop[1], h.magDrop[2]).normalize();
   g.port.set(h.port[0], h.port[1], h.port[2]);
-  // ADS: the manifest sight point lies on the line of sight (parallel to the bore).
-  g.sightX = wm.sight[0];
-  g.sightY = wm.sight[1];
-  g.sightZ = wm.sight[2];
+  // ADS: the manifest sight point lies on the line of sight (parallel to the bore); scoped models
+  // use the measured scope axis (see ModelHold.scopeAxis).
+  const sight = h.scopeAxis ?? wm.sight;
+  g.sightX = sight[0];
+  g.sightY = sight[1];
+  g.sightZ = sight[2];
   g.eyeRelief = h.eyeRelief;
   g.hip.set(h.hip[0], h.hip[1], h.hip[2]);
   g.hipRot.set(h.hipRot[0], h.hipRot[1], h.hipRot[2]);

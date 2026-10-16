@@ -341,6 +341,31 @@ export class NavGrid {
   }
 
   /**
+   * Search cell for a point: normally the containing cell, but a thin obstacle (fence, wall) can
+   * share a cell with the point while the cell centre lies on its other side. Then the nearest
+   * neighbouring free cell whose centre is reachable in a straight line is used. Writes the cell
+   * into out; returns false when no candidate is clear.
+   */
+  pickCell(x: number, z: number, out: { gx: number; gz: number }): boolean {
+    const cx = this.cell(x), cz = this.cell(z);
+    let bestD = Infinity;
+    for (let dz = -1; dz <= 1; dz++) {
+      for (let dx = -1; dx <= 1; dx++) {
+        const gx = cx + dx, gz = cz + dz;
+        const f = this.flags(gx, gz, true);
+        if (f & NF_BLOCKED || this.dirs(gx, gz, true) === 0) continue;
+        const px = this.center(gx), pz = this.center(gz);
+        const d = hyp(px - x, pz - z) + (dx === 0 && dz === 0 ? -0.5 : 0);
+        if (d >= bestD || !this.clearSegment(x, z, px, pz, 0.1)) continue;
+        bestD = d;
+        out.gx = gx;
+        out.gz = gz;
+      }
+    }
+    return bestD < Infinity;
+  }
+
+  /**
    * Push a waypoint away from nearby walls/trunks so it keeps ~RELAX_RADIUS clearance where the
    * space allows (doorways end up centred). Moves at most 0.6 m and never into a blocked cell.
    */

@@ -5,7 +5,7 @@ import { fmtNumber, itemName, t, vehicleName } from '../../i18n';
 import { REVIVE_TIME } from '../../../shared/constants';
 import type { ConsumableId, EntityId, ItemId, VehicleType } from '../../../shared/types';
 import type { FrameState, Interaction, InteractionKind } from '../../game/types';
-import { BarFill, h, StyleSlot, TextSlot, tx, Vis } from '../dom';
+import { BarFill, h, isolate, StyleSlot, TextSlot, tx, Vis } from '../dom';
 import { keyCapLabel } from '../keys';
 import type { HudEnv, Widget } from './shared';
 
@@ -82,7 +82,7 @@ export class Prompt implements Widget {
       case 'exit': text = t('prompt.exitVehicle'); break;
       case 'refuel': text = t('prompt.refuel'); break;
       case 'give': text = t('prompt.takeFromRack', { item }); break;
-      case 'revive': text = t('prompt.revive', { key: MARK, name: it.name ?? '' }); break;
+      case 'revive': text = t('prompt.revive', { key: MARK, name: isolate(it.name ?? '') }); break;
       default: text = '';
     }
     if (it.kind === 'revive') {
@@ -188,8 +188,8 @@ export class ActionProgress implements Widget {
       this.sig = sig;
       const kind = Math.floor(sig / 16777216);
       if (kind === 1 && self.use) this.label.set(t('hud.using', { item: itemName(self.use.item) }));
-      else if (kind === 2 && self.revive) this.label.set(t('hud.reviving', { name: frame.roster.get(self.revive.target)?.name ?? '' }));
-      else if (kind === 3 && self.revivedBy !== null) this.label.set(t('hud.beingRevived', { name: frame.roster.get(self.revivedBy)?.name ?? '' }));
+      else if (kind === 2 && self.revive) this.label.set(t('hud.reviving', { name: isolate(frame.roster.get(self.revive.target)?.name ?? '') }));
+      else if (kind === 3 && self.revivedBy !== null) this.label.set(t('hud.beingRevived', { name: isolate(frame.roster.get(self.revivedBy)?.name ?? '') }));
       this.hint.set(kind === 1);
       this.lastTenth = -1;
     }

@@ -305,7 +305,6 @@ export class LobbyManager implements MatchLoopHost {
       maxPlayers: config.maxPlayers,
       teamSize: config.teamSize,
       botFill: config.botFill,
-      seed: config.seed,
     });
   }
 

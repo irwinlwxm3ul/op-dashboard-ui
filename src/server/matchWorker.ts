@@ -1,6 +1,7 @@
 // Worker thread entry: owns one match (MatchRunner + bot driver) and ticks it with its own
 // fixed-step loop, so world generation and simulation never block the main thread's networking
-// and every match can use its own core. See workerRunner.ts for the main-thread side.
+// and every match can use its own core. See workerRunner.ts for the main-thread side, which
+// terminates the worker when the match is disposed.
 
 import { parentPort } from 'node:worker_threads';
 import { createBotDriver } from '../shared/bots/index';
@@ -128,10 +129,6 @@ function handle(m: ToWorker): void {
       if (!runner) return;
       runner.removeClient(m.id);
       flush();
-      return;
-    case 'stop':
-      stop();
-      port.close();
       return;
   }
 }

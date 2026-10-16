@@ -8,7 +8,7 @@
 // squadmates heading for the same spot reuse one search.
 
 import { GROUND, type FloorLoc, type FloorNav } from './floors';
-import { NavGrid, NF_BLOCKED, NF_NEAR, DIR_DX, DIR_DZ } from './nav';
+import { NavGrid, NF_NEAR, DIR_DX, DIR_DZ } from './nav';
 import { hyp } from './util';
 
 export const PATH_IDLE = 0;
@@ -71,6 +71,7 @@ interface CacheEntry {
 }
 
 const tmpP = { x: 0, z: 0 };
+const tmpC = { gx: 0, gz: 0 };
 
 export class PathPlanner {
   readonly grid: NavGrid;
@@ -107,6 +108,8 @@ export class PathPlanner {
   private preCount = 0;
   private sufCount = 0;
   private composite = false;
+  private startHop = false;
+  private goalHop = false;
   private readonly locS: FloorLoc = { building: -1, level: -1, cell: -1 };
   private readonly locG: FloorLoc = { building: -1, level: -1, cell: -1 };
   private readonly cellBuf = new Int32Array(WIN_CELLS);
@@ -220,7 +223,7 @@ export class PathPlanner {
       const gNav = fl.locate(req.gx, req.gy, req.gz, this.locG, true);
       if (sNav || gNav) {
         this.composite = true;
-        if (sNav && gNav && sNav === gNav && (sNav.reachable(this.locS) || !gNav.reachable(this.locG))) {
+        if (sNav && gNav && sNav === gNav) {
           // Same building, both upstairs: indoor route only.
           const n = sNav.route(this.locS.level, this.locS.cell, this.locG.level, this.locG.cell, req.sx, req.sz, req.gx, req.gz, req.pts, 0, MAX_PATH_POINTS);
           if (n <= 0) return this.fail(req);
@@ -246,15 +249,24 @@ export class PathPlanner {
         }
       }
     }
-    // Start: nearest free cell if standing in a blocked one (e.g. hugging a wall).
-    const sf = grid.flagsAt(sx, sz);
-    if (sf & NF_BLOCKED || grid.dirs(grid.cell(sx), grid.cell(sz)) === 0) {
+    // Start cell: the containing cell, or a neighbour reachable in a straight line when the point
+    // shares its cell with a wall / fence; failing that the nearest free cell.
+    let sgx: number, sgz: number;
+    this.startHop = false;
+    this.goalHop = false;
+    if (grid.pickCell(sx, sz, tmpC)) {
+      sgx = tmpC.gx;
+      sgz = tmpC.gz;
+      this.startHop = sgx !== grid.cell(sx) || sgz !== grid.cell(sz);
+    } else {
       if (!grid.nearestFree(sx, sz, 4, tmpP)) return this.fail(req);
       sx = tmpP.x;
       sz = tmpP.z;
+      sgx = grid.cell(sx);
+      sgz = grid.cell(sz);
     }
-    // Goal: clamp very long trips (the indoor tail is then planned with a later leg), then
-    // nearest free cell.
+    // Goal: clamp very long trips (the indoor tail is then planned with a later leg), then the
+    // same cell choice.
     const dx = gx - sx, dz = gz - sz;
     const d = hyp(dx, dz);
     if (d > MAX_PLAN_DIST) {
@@ -263,15 +275,20 @@ export class PathPlanner {
       req.partial = true;
       this.sufCount = 0;
     }
-    const gf = grid.flagsAt(gx, gz);
-    if (gf & NF_BLOCKED || grid.dirs(grid.cell(gx), grid.cell(gz)) === 0) {
+    let ggx: number, ggz: number;
+    if (grid.pickCell(gx, gz, tmpC)) {
+      ggx = tmpC.gx;
+      ggz = tmpC.gz;
+      this.goalHop = ggx !== grid.cell(gx) || ggz !== grid.cell(gz);
+    } else {
       if (!grid.nearestFree(gx, gz, 8, tmpP)) return this.fail(req);
       gx = tmpP.x;
       gz = tmpP.z;
+      ggx = grid.cell(gx);
+      ggz = grid.cell(gz);
     }
-    const sgx = grid.cell(sx), sgz = grid.cell(sz), ggx = grid.cell(gx), ggz = grid.cell(gz);
-    this.startX = sx;
-    this.startZ = sz;
+    this.startX = this.startHop ? grid.center(sgx) : sx;
+    this.startZ = this.startHop ? grid.center(sgz) : sz;
     this.goalX = gx;
     this.goalZ = gz;
     // Cache lookup (goal cell + 4 m start bucket).
@@ -288,6 +305,11 @@ export class PathPlanner {
     }
     if (sgx === ggx && sgz === ggz) {
       let count = this.copyPrefix(req.pts);
+      if (this.startHop || this.goalHop) {
+        req.pts[count * 2] = grid.center(sgx);
+        req.pts[count * 2 + 1] = grid.center(sgz);
+        count++;
+      }
       req.pts[count * 2] = gx;
       req.pts[count * 2 + 1] = gz;
       count = this.appendSuffix(req, count + 1);
@@ -413,8 +435,15 @@ export class PathPlanner {
     const out = req.pts;
     let count = this.copyPrefix(out);
     let ax = this.startX, az = this.startZ;
-    const endX = reached ? this.goalX : this.cx(this.cellBuf[n - 1]);
-    const endZ = reached ? this.goalZ : this.cz(this.cellBuf[n - 1]);
+    if (this.startHop) {
+      // First step to the start cell centre (the straight line there was verified).
+      out[count * 2] = ax;
+      out[count * 2 + 1] = az;
+      count++;
+    }
+    // With a goal hop the search ends at the goal cell centre and the goal point follows.
+    const endX = reached && !this.goalHop ? this.goalX : this.cx(this.cellBuf[n - 1]);
+    const endZ = reached && !this.goalHop ? this.goalZ : this.cz(this.cellBuf[n - 1]);
     let anchorCell = this.cellBuf[0];
     for (let k = 1; k < n && count < MAX_PATH_POINTS - 1; k++) {
       const last = k === n - 1;
@@ -442,6 +471,11 @@ export class PathPlanner {
     out[count * 2] = endX;
     out[count * 2 + 1] = endZ;
     count++;
+    if (reached && this.goalHop && count < MAX_PATH_POINTS) {
+      out[count * 2] = this.goalX;
+      out[count * 2 + 1] = this.goalZ;
+      count++;
+    }
     if (reached) count = this.appendSuffix(req, count);
     req.count = count;
     req.status = PATH_DONE;

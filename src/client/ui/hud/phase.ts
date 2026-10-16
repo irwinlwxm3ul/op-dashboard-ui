@@ -6,7 +6,7 @@ import { AUTO_CHUTE_HEIGHT, PLANE_ALTITUDE } from '../../../shared/constants';
 import { VEHICLES } from '../../../shared/vehicles';
 import type { EntityId, VehicleType } from '../../../shared/types';
 import type { FrameState } from '../../game/types';
-import { BarFill, ClassFlag, h, NumSlot, StyleSlot, svgIcon, TextSlot, tx, Vis } from '../dom';
+import { BarFill, ClassFlag, h, isolate, NumSlot, StyleSlot, svgIcon, TextSlot, tx, Vis } from '../dom';
 import { ceilSeconds, clamp01, kmh } from '../format';
 import { ICONS, vehicleIcon } from '../icons';
 import { keyCapLabel, keyLabel } from '../keys';
@@ -286,7 +286,7 @@ export class StatusBanner implements Widget {
       this.tag.set('');
       this.sub.set('');
     } else if (mode === 'spectate') {
-      this.title.set(t('hud.spectating', { name: targetName }));
+      this.title.set(t('hud.spectating', { name: isolate(targetName) }));
       this.tag.set(killer ? t('hud.spectateKiller') : '');
       this.sub.set(`${t('hud.spectateSwitch', { prev: keyLabel('ArrowLeft'), next: keyLabel('ArrowRight') })} · ${t('ui.hud.eliminatedHint', { key: keyCapLabel(env.keys.menu) })}`);
     } else if (mode === 'dead') {

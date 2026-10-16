@@ -4,7 +4,7 @@
 import { fmtNumber, t } from '../../i18n';
 import type { EntityId, TeamId } from '../../../shared/types';
 import type { FrameState } from '../../game/types';
-import { clear, h, tx } from '../dom';
+import { clear, h, tx, userText } from '../dom';
 import type { HudEnv } from './shared';
 
 const REFRESH_MS = 250;
@@ -117,7 +117,7 @@ export class Scoreboard {
         const name = h('div', 'dz-td dz-td-strong', row);
         const color = env.memberColor(id);
         if (color) name.style.setProperty('--c', color);
-        h('span', color ? 'dz-name-mate' : '', name).textContent = frame.roster.get(id)?.name ?? '';
+        userText(h('span', color ? 'dz-name-mate' : '', name), frame.roster.get(id)?.name ?? '');
         if (isMe) tx(h('span', 'dz-tag', name), 'common.you');
         else if (frame.roster.get(id)?.isBot) tx(h('span', 'dz-tag dz-tag-dim', name), 'common.bot');
         const kills = isMe && localKills !== undefined ? localKills : this.kills.get(id) ?? 0;

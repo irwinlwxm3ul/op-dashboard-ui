@@ -15,18 +15,40 @@ const STUCK_TIME = 1.5;
 const STUCK_MIN_MOVE = 0.8;
 /** Repath when the destination moved this far from the planned goal. */
 const REPATH_MOVE = 3;
+/** Feet this far above the ground-level nav floor are on an upper floor / roof. */
+const UPPER_MIN = 1.5;
+/** Feet within this height of a destination are on its floor. */
+const LEVEL_TOL = 1.6;
 const FEELER_ANGLES: readonly number[] = [0.45, -0.45, 0.9, -0.9, 1.4, -1.4];
 
-export function setDest(sys: BotSystem, b: BotState, p: PlayerState, x: number, z: number, arrive: number, sprint: boolean): void {
+/**
+ * Walk to (x, z). `y` is the destination's feet height when it may lie on an upper building
+ * floor (loot, teammates, enemies); NaN means ground level.
+ */
+export function setDest(
+  sys: BotSystem, b: BotState, p: PlayerState, x: number, z: number, arrive: number, sprint: boolean, y = NaN,
+): void {
   b.arrive = arrive;
   b.sprint = sprint;
   b.walk = false;
-  if (b.hasDest && Math.abs(x - b.destX) < 0.5 && Math.abs(z - b.destZ) < 0.5) return;
+  const sameLevel = Number.isNaN(y) ? Number.isNaN(b.destY) : !Number.isNaN(b.destY) && Math.abs(y - b.destY) < 1.5;
+  if (b.hasDest && sameLevel && Math.abs(x - b.destX) < 0.5 && Math.abs(z - b.destZ) < 0.5) return;
   b.hasDest = true;
   b.destX = x;
   b.destZ = z;
+  b.destY = y;
   const moved = hyp(x - b.pathGX, z - b.pathGZ);
-  if (b.path.status === PATH_IDLE || b.path.status === PATH_FAILED || moved > REPATH_MOVE) requestPath(sys, b, p);
+  if (b.path.status === PATH_IDLE || b.path.status === PATH_FAILED || moved > REPATH_MOVE || !sameLevel) requestPath(sys, b, p);
+}
+
+/** Is a position above the ground-level nav floor (upper building floor, roof)? */
+export function aboveGround(sys: BotSystem, x: number, y: number, z: number): boolean {
+  return !Number.isNaN(y) && y - sys.grid.baseOr(x, z) > UPPER_MIN;
+}
+
+/** Is the bot on the destination's floor (ground for ground-level destinations)? */
+function onDestLevel(sys: BotSystem, b: BotState, p: PlayerState): boolean {
+  return Number.isNaN(b.destY) ? !aboveGround(sys, p.pos.x, p.pos.y, p.pos.z) : Math.abs(p.pos.y - b.destY) < LEVEL_TOL;
 }
 
 /** Walk straight to (x, z) without path planning (e.g. off a roof, where the ground grid does not apply). */
@@ -64,7 +86,8 @@ export function requestPath(sys: BotSystem, b: BotState, p: PlayerState): void {
   b.pathGZ = b.destZ;
   b.pathTime = sys.now;
   const px = p.pos.x, pz = p.pos.z;
-  if (hyp(b.destX - px, b.destZ - pz) <= DIRECT_DIST && sys.grid.lineOfWalk(px, pz, b.destX, b.destZ, false, false) &&
+  const upper = aboveGround(sys, px, p.pos.y, pz) || aboveGround(sys, b.destX, b.destY, b.destZ);
+  if (!upper && hyp(b.destX - px, b.destZ - pz) <= DIRECT_DIST && sys.grid.lineOfWalk(px, pz, b.destX, b.destZ, false, false) &&
       sys.grid.clearSegment(px, pz, b.destX, b.destZ, 0.3)) {
     // Straight shot: a one-point "path" without touching the planner.
     sys.planner.cancel(b.path);
@@ -75,7 +98,7 @@ export function requestPath(sys: BotSystem, b: BotState, p: PlayerState): void {
     b.path.status = PATH_DONE;
     return;
   }
-  sys.planner.request(b.path, px, pz, b.destX, b.destZ);
+  sys.planner.request(b.path, px, pz, b.destX, b.destZ, upper ? p.pos.y : NaN, b.destY);
 }
 
 /** True when (x, z) is a destination the bot recently gave up on. */
@@ -92,19 +115,24 @@ export function followPath(sys: BotSystem, b: BotState, p: PlayerState): void {
   if (!b.hasDest) return;
   const px = p.pos.x, pz = p.pos.z;
   const dd = hyp(b.destX - px, b.destZ - pz);
-  if (dd <= b.arrive) return;
+  const sameLevel = onDestLevel(sys, b, p);
+  if (dd <= b.arrive && sameLevel) return;
   let tx = b.destX, tz = b.destZ;
   const path = b.path;
   let direct = true;
   if (path.status === PATH_DONE && path.count > 0) {
     // Advance past reached waypoints; look ahead one waypoint when it is directly walkable.
+    // Indoor routes (stairs, upper floors) have tight waypoints everywhere.
+    const indoor = !Number.isNaN(b.destY) || aboveGround(sys, px, p.pos.y, pz);
     let i = b.pathIdx;
     while (i < path.count) {
       const wx = path.pts[i * 2], wz = path.pts[i * 2 + 1];
       const d = hyp(wx - px, wz - pz);
-      // Tight waypoints (doorways, corners) must really be reached before turning.
-      const reach = i === path.count - 1 ? b.arrive : sys.grid.flagsAt(wx, wz, false) & NF_NEAR ? 0.4 : 0.75;
-      if (d > reach) break;
+      // Tight waypoints (doorways, corners, stairs) must really be reached before turning; the
+      // final one only counts on the destination's floor.
+      const last = i === path.count - 1;
+      const reach = last ? b.arrive : indoor || sys.grid.flagsAt(wx, wz, false) & NF_NEAR ? 0.45 : 0.75;
+      if (d > reach || (last && !sameLevel)) break;
       i++;
     }
     b.pathIdx = i;
@@ -115,7 +143,7 @@ export function followPath(sys: BotSystem, b: BotState, p: PlayerState): void {
       tx = path.pts[i * 2];
       tz = path.pts[i * 2 + 1];
       direct = false;
-    } else if (path.partial || dd > b.arrive + 1.5) {
+    } else if (path.partial || dd > b.arrive + 1.5 || !sameLevel) {
       // Path exhausted short of the goal (long trip leg or partial result): plan the next leg.
       if (sys.now - b.pathTime > 0.5) requestPath(sys, b, p);
     }

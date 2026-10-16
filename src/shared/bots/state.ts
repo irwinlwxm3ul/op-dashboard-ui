@@ -49,6 +49,8 @@ export interface BotState {
   hasDest: boolean;
   destX: number;
   destZ: number;
+  /** Destination feet height for upper floors (NaN = ground level). */
+  destY: number;
   /** Distance at which the destination counts as reached. */
   arrive: number;
   /** Sprint while travelling. */
@@ -205,6 +207,7 @@ export function createBotState(p: PlayerState, seed: number, thinkSlot: number, 
     hasDest: false,
     destX: 0,
     destZ: 0,
+    destY: NaN,
     arrive: 1,
     sprint: false,
     walk: false,

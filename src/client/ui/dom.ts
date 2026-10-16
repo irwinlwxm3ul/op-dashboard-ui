@@ -98,6 +98,28 @@ export function button(opts: ButtonOpts): HTMLButtonElement {
   return b;
 }
 
+/**
+ * User-generated text (player / lobby names, chat): direction detected from the content and
+ * isolated from the surrounding bidi context, so an Arabic UI shows Latin names (and vice versa)
+ * in the right place.
+ */
+export function userText<E extends HTMLElement>(el: E, text: string): E {
+  el.textContent = text;
+  markUserText(el);
+  return el;
+}
+
+/** Mark an element whose content is user-generated (see userText). */
+export function markUserText(el: HTMLElement): void {
+  el.dir = 'auto';
+  el.classList.add('dz-user');
+}
+
+/** Wrap user text interpolated into a translated sentence in Unicode first-strong isolates. */
+export function isolate(text: string): string {
+  return `\u2068${text}\u2069`;
+}
+
 export function clear(el: HTMLElement): void {
   while (el.firstChild) el.removeChild(el.firstChild);
 }

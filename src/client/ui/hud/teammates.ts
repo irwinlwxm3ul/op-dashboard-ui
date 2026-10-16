@@ -5,7 +5,7 @@ import { t } from '../../i18n';
 import { DOWNED_HEALTH, MAX_HEALTH } from '../../../shared/constants';
 import type { EntityId, LifeState } from '../../../shared/types';
 import type { FrameState } from '../../game/types';
-import { BarFill, ClassFlag, h, NumSlot, StyleSlot, svgIcon, TextSlot, Vis } from '../dom';
+import { BarFill, ClassFlag, h, markUserText, NumSlot, StyleSlot, svgIcon, TextSlot, Vis } from '../dom';
 import { ICONS } from '../icons';
 import { viewPos, type HudEnv, type Widget } from './shared';
 
@@ -31,7 +31,9 @@ class MateRow {
     this.num = new TextSlot(h('span', 'dz-mate-num', this.el));
     const main = h('div', 'dz-mate-main', this.el);
     const top = h('div', 'dz-mate-top', main);
-    this.name = new TextSlot(h('span', 'dz-mate-name', top));
+    const nameEl = h('span', 'dz-mate-name', top);
+    markUserText(nameEl);
+    this.name = new TextSlot(nameEl);
     const veh = svgIcon(ICONS.car, 'dz-icon dz-icon-xs dz-mate-veh');
     top.appendChild(veh);
     this.vehicle = new Vis(veh);

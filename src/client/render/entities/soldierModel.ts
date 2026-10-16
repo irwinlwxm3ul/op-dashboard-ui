@@ -15,6 +15,7 @@
 import * as THREE from 'three';
 import { GeoBuilder, M_ACCENT, M_CLOTH, M_SKIN, type PartStyle, xform } from './geometry';
 import { B, BONE_COUNT, DIM } from './rig';
+import type { WeaponId } from '../../../shared/types';
 import { WEAPON_IDS, buildWeapon } from './weaponModels';
 
 // ---------------------------------------------------------------------------
@@ -263,7 +264,12 @@ function buildShin(b: GeoBuilder, bone: number): void {
 // Near LOD skinned geometry
 // ---------------------------------------------------------------------------
 
-export function buildNearSoldierGeometry(): THREE.BufferGeometry {
+/**
+ * Near soldier geometry: body + every gear variant + ONE weapon (null = unarmed). One geometry per
+ * held weapon keeps the vertex count low (only the active gun is processed) while the bone layout
+ * stays identical, so a soldier just swaps geometry when the weapon changes.
+ */
+export function buildNearSoldierGeometry(weapon: WeaponId | null): THREE.BufferGeometry {
   const b = new GeoBuilder();
   buildPelvis(b, B.HIPS);
   buildAbdomen(b, B.SPINE);
@@ -280,7 +286,7 @@ export function buildNearSoldierGeometry(): THREE.BufferGeometry {
   for (let l = 0; l < 4; l++) buildHelmet(l, b, I, NB_HELMET0 + l);
   for (let l = 1; l <= 3; l++) buildVest(l, b, I, NB_VEST1 + l - 1);
   for (let l = 1; l <= 3; l++) buildPack(l, b, I, NB_PACK1 + l - 1);
-  WEAPON_IDS.forEach((id, i) => buildWeapon(id, b, I, NB_WEAPON0 + i));
+  if (weapon) buildWeapon(weapon, b, I, NB_WEAPON0 + WEAPON_IDS.indexOf(weapon));
   return b.build({ mask: true, skin: true });
 }
 

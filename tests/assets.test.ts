@@ -13,6 +13,8 @@ import {
   CHARACTER_VARIANTS,
   UPPER_BODY_BONES,
   WEAPON_MODELS,
+  ITEM_MODELS,
+  GEAR_WEAR,
   assetFilesFor,
   characterVariantFor,
   modelUrl,
@@ -30,7 +32,7 @@ interface GltfJson {
   meshes?: { primitives: { indices?: number; attributes: Record<string, number>; mode?: number; material?: number }[] }[];
   skins?: { joints: number[] }[];
   animations?: { name?: string; channels: { target: { node?: number; path: string } }[] }[];
-  accessors?: { count: number }[];
+  accessors?: { count: number; min?: number[]; max?: number[] }[];
   materials?: { name?: string }[];
   images?: unknown[];
 }
@@ -191,5 +193,41 @@ describe('asset library', () => {
         expect(Math.abs(w.muzzle[2] - (w.pistol ? 0 : w.butt[2]))).toBeLessThanOrEqual(w.length + 1e-3);
       });
     }
+  });
+
+  describe('items', () => {
+    for (const model of Object.values(ITEM_MODELS)) {
+      it(`${model.id}: one vertex-coloured mesh standing on the ground at its real size`, () => {
+        const { json } = readGlb(model.file);
+        const meshNodes = (json.nodes ?? []).filter((n) => n.mesh !== undefined);
+        expect(meshNodes.length).toBe(1);
+        const prims = json.meshes![meshNodes[0].mesh!].primitives;
+        expect(prims.length).toBe(1);
+        expect(prims[0].attributes.COLOR_0).toBeDefined();
+        expect((json.materials ?? []).map((m) => m.name)).toEqual(['item']);
+        expect(triangles(json)).toBe(model.tris);
+        const pos = json.accessors![prims[0].attributes.POSITION];
+        expect(pos.min![1]).toBeCloseTo(0, 3);
+        for (let i = 0; i < 3; i++) expect(pos.max![i] - pos.min![i]).toBeCloseTo(model.size[i], 2);
+        expect(Math.abs(pos.max![0] + pos.min![0])).toBeLessThan(0.01);
+        expect(Math.abs(pos.max![2] + pos.min![2])).toBeLessThan(0.01);
+      });
+    }
+
+    it('every gear item has a wear transform on every rig, on a bone the characters have', () => {
+      const gear = Object.values(ITEM_MODELS).filter((i) => i.category === 'gear').map((i) => i.id);
+      expect(gear.length).toBe(9);
+      for (const rig of Object.values(CHARACTER_RIGS)) {
+        const variant = Object.values(CHARACTER_VARIANTS).find((v) => v.rig === rig.id)!;
+        const names = new Set((readGlb(variant.file).json.nodes ?? []).map((n) => n.name));
+        for (const g of gear) {
+          const w = GEAR_WEAR[rig.id][g as keyof (typeof GEAR_WEAR)['male']];
+          expect(w, `${rig.id} ${g}`).toBeDefined();
+          expect(names.has(w.bone)).toBe(true);
+          expect(Math.hypot(...w.quaternion)).toBeCloseTo(1, 3);
+          for (const v of w.scale) expect(v).toBeGreaterThan(0.3);
+        }
+      }
+    });
   });
 });

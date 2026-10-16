@@ -24,8 +24,7 @@ export type ToWorker =
   /** Start the match (matchInit to every client) and the worker's own fixed-step loop. */
   | { k: 'start' }
   | { k: 'msg'; id: string; msg: ClientMessage }
-  | { k: 'remove'; id: string }
-  | { k: 'stop' };
+  | { k: 'remove'; id: string };
 
 /** Worker -> main thread. */
 export type FromWorker =
@@ -33,7 +32,7 @@ export type FromWorker =
   | { k: 'ready' }
   /** Prewarm finished (world generated in `genMs`). */
   | { k: 'prewarmed'; seed: number; genMs: number }
-  /** Runner constructed (world generated) in `genMs`. */
+  /** Runner constructed in `genMs` (world generation included unless prewarmed). */
   | { k: 'inited'; genMs: number }
   /** Outgoing ServerMessages batched per loop iteration: msgs[i] goes to client ids[i]. */
   | { k: 'out'; ids: string[]; msgs: ServerMessage[] }

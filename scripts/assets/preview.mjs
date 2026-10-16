@@ -21,6 +21,7 @@ const data = {
   clips: M.CHARACTER_CLIPS,
   weapons: M.WEAPON_MODELS ?? {},
   items: M.ITEM_MODELS ?? {},
+  wear: M.GEAR_WEAR ?? {},
   upper: M.UPPER_BODY_BONES,
 };
 
@@ -102,7 +103,7 @@ if (Object.keys(weapons).length) {
     const dot = new THREE.Mesh(new THREE.SphereGeometry(0.008), new THREE.MeshBasicMaterial({ color: 0xff0000 })); dot.position.set(0, y, 0.05); stage.scene.add(dot);
     proj.push(new THREE.Vector3(-0.45, y - 0.08, 0)); y -= 0.3;
   }
-  stage.camera.position.set(0.15, y / 2 + 0.15, 2.1); stage.camera.lookAt(0.15, y / 2 + 0.15, 0);
+  stage.camera.position.set(0.1, y / 2 + 0.15, 3.1); stage.camera.lookAt(0.1, y / 2 + 0.15, 0);
   stage.renderer.render(stage.scene, stage.camera);
   addLabels(ids, proj.map((p) => p.project(stage.camera)), W, H);
   document.querySelectorAll('.lbl').forEach((e, i) => { e.style.top = ((1 - proj[i].clone().project(stage.camera).y) / 2 * H) + 'px'; e.style.left = '120px'; e.style.transform = 'none'; });
@@ -118,19 +119,48 @@ if (Object.keys(weapons).length) {
   await window.__shot(OUT + '/held.png');
   stage.renderer.domElement.remove();
 }
-// 4. items
+// 4. items (grid) and worn gear
 if (Object.keys(D.items).length) {
   const stage = makeStage({ width: W, height: H });
   const ids = Object.keys(D.items);
-  const objs = [];
-  for (const id of ids) { const g = await loadGltf('/models/' + D.items[id].file); const o = g ? g.scene.clone(true) : new THREE.Group(); o.scale.setScalar(2.2); objs.push(o); }
-  let x = 0; const proj = [];
-  for (const o of objs) { o.position.x = x; enableShadows(o); stage.scene.add(o); proj.push(new THREE.Vector3(x, 0, 0)); x += 0.75; }
-  const cx = (x - 0.75) / 2;
-  stage.camera.position.set(cx, 1.6, x * 0.75 + 0.6); stage.camera.lookAt(cx, 0.2, 0);
+  const cols = 7; const proj = [];
+  for (let i = 0; i < ids.length; i++) {
+    const g = await loadGltf('/models/' + D.items[ids[i]].file);
+    const o = g ? g.scene.clone(true) : new THREE.Group();
+    o.scale.setScalar(1.5);
+    o.rotation.y = 0.6;
+    o.position.set((i % cols) * 0.75, 0, Math.floor(i / cols) * 0.9);
+    enableShadows(o); stage.scene.add(o);
+    proj.push(new THREE.Vector3((i % cols) * 0.75, 0, Math.floor(i / cols) * 0.9 + 0.3));
+  }
+  const cx = (cols - 1) * 0.375;
+  stage.camera.position.set(cx, 2.6, 4.6); stage.camera.lookAt(cx, 0, 0.9);
+  stage.sun.target.position.set(cx, 0, 1); stage.scene.add(stage.sun.target); stage.sun.position.set(cx + 3, 8, 6);
   stage.renderer.render(stage.scene, stage.camera);
   addLabels(ids, proj.map((p) => p.project(stage.camera)), W, H);
+  document.querySelectorAll('.lbl').forEach((e, i) => { const p = proj[i].clone().project(stage.camera); e.style.top = ((1 - p.y) / 2 * H + 6) + 'px'; });
   await window.__shot(OUT + '/items.png');
+  stage.renderer.domElement.remove();
+  document.querySelectorAll('.lbl').forEach((e) => e.remove());
+}
+if (Object.keys(D.wear).length) {
+  const stage = makeStage({ width: W, height: H });
+  const looks = [['male_casual', 1], ['female_casual', 1], ['male_hoodie', 2], ['female_adventurer', 2], ['male_tactical', 3], ['female_tactical', 3]];
+  const objs = [];
+  for (const [vid, lvl] of looks) {
+    const v = D.variants.find((x) => x.id === vid);
+    const o = pose(vid, 'idle', lvl === 3 ? 'holdRifle' : null, 0.4, lvl === 3 ? 'ar' : null);
+    const bones = {}; o.traverse((b) => { if (b.isBone) bones[b.name] = b; });
+    for (const kind of ['helmet', 'vest', 'pack']) {
+      const id = kind + lvl; const w = D.wear[v.rig][id];
+      const g = await loadGltf('/models/' + D.items[id].file);
+      const m = g.scene.clone(true); m.position.fromArray(w.position); m.quaternion.fromArray(w.quaternion); m.scale.fromArray(w.scale);
+      bones[w.bone].add(m);
+    }
+    objs.push(o);
+  }
+  frame(stage, objs, looks.map(([v, l]) => v + ' L' + l), { rotY: Math.PI + 0.5, y: 1.0, dist: 0.7 });
+  await window.__shot(OUT + '/gear.png');
 }
 window.__done(true);
 `;

@@ -19,9 +19,12 @@ import {
   type CharacterVariant,
   type CharacterVariantId,
   WEAPON_MODELS,
+  ITEM_MODELS,
+  GEAR_WEAR,
   assetFilesFor,
+  type ItemModelId,
 } from './manifest';
-import type { WeaponId } from '../../shared/types';
+import type { GearId, WeaponId } from '../../shared/types';
 
 export type { GLTF };
 
@@ -175,6 +178,7 @@ export function getCharacterClip(asset: CharacterAsset, key: CharacterAnimKey, p
 }
 
 export interface CharacterInstance {
+  asset: CharacterAsset;
   root: THREE.Object3D;
   mixer: THREE.AnimationMixer;
   /** Bones by logical name (CHARACTER_BONES). */
@@ -221,6 +225,7 @@ export function createCharacterInstance(asset: CharacterAsset): CharacterInstanc
   let ownMaterial: THREE.MeshStandardMaterial | null = null;
   const mixer = new THREE.AnimationMixer(root);
   return {
+    asset,
     root,
     mixer,
     bones,
@@ -270,4 +275,27 @@ export async function loadMeshParts(file: string): Promise<MeshParts | null> {
 /** A copy of the weapon model (weapon frame: grip at origin, barrel -Z), or null. */
 export function instantiateWeapon(id: WeaponId): Promise<THREE.Object3D | null> {
   return instantiate(WEAPON_MODELS[id].file);
+}
+
+/** A copy of an item model (standing on y = 0, front -Z), or null. */
+export function instantiateItem(id: ItemModelId): Promise<THREE.Object3D | null> {
+  return instantiate(ITEM_MODELS[id].file);
+}
+
+/**
+ * Puts a gear item (helmet / vest / backpack) on a character instance using GEAR_WEAR. Returns the
+ * attached object (remove it with `removeFromParent()`), or null when the model failed to load.
+ */
+export async function attachGear(instance: CharacterInstance, gear: GearId): Promise<THREE.Object3D | null> {
+  const w = GEAR_WEAR[instance.asset.rig.id][gear];
+  const bone = instance.root.getObjectByName(w.bone);
+  if (!bone) return null;
+  const obj = await instantiateItem(gear);
+  if (!obj) return null;
+  obj.name = `gear:${gear}`;
+  obj.position.fromArray(w.position);
+  obj.quaternion.fromArray(w.quaternion);
+  obj.scale.fromArray(w.scale);
+  bone.add(obj);
+  return obj;
 }

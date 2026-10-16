@@ -13,35 +13,7 @@ import { fileURLToPath } from 'node:url';
 import { runInPage, MODELS_DIR } from './harness.mjs';
 import { DL, ITEMS_SRC, UMM, UMW } from './sources.mjs';
 
-const C = { olive: 0x4f5a3a, oliveDark: 0x3c4530, tan: 0x9a8762, black: 0x232527, grey: 0x55595e, khaki: 0x7d7a52, navy: 0x2b3442, sand: 0xa89670 };
-
-/**
- * size: target extent (m) of the item's largest dimension (or its height with fit: 'height').
- * parts: optional filter on "<node>/<material>" for multi-part sources. recolor: material
- * name -> hex (applied before baking). rotate: Euler (deg) applied to the source first.
- */
-const ITEMS = {
-  bandage: { src: 'surv_Bandages.fbx', size: 0.11 },
-  firstaid: { src: 'surv_FirstAidKit.fbx', size: 0.26 },
-  medkit: { src: 'surv_FirstAidKit_Hard.fbx', size: 0.36 },
-  energy: { src: 'surv_Can_Red.fbx', size: 0.125, fit: 'height' },
-  fuel: { src: 'surv_GasCan.fbx', size: 0.47, fit: 'height', recolor: { Red: 0x4f5a3a, DarkRed: 0x3c4530 } },
-  frag: { src: 'toon_Grenade.gltf', size: 0.11, fit: 'height', recolor: { Green: 0x4f5a3a } },
-  ammo_9mm: { src: 'zsky_PistolAmmo_Box.fbx', size: 0.2 },
-  ammo_556: { src: 'zsky_AssaultRifleAmmo_Box.fbx', size: 0.26 },
-  ammo_762: { src: 'zsky_SniperAmmo_Box.fbx', size: 0.26 },
-  ammo_12g: { src: 'zsky_ShotgunAmmo_Box.fbx', size: 0.22 },
-  ammo_300: { src: 'zsky_SniperAmmo_Box.fbx', size: 0.28, recolor: { BlueSniper_AmmoBox: 0x4f5a3a, BlueScreenSniper_AmmoBox: 0x6b7650 } },
-  helmet1: { src: 'toon_Character_Soldier.gltf', parts: '^Head_1/Character_Main$', size: 0.27, gear: 'helmet', recolor: { Character_Main: C.tan } },
-  helmet2: { src: 'toon_Character_Soldier.gltf', parts: '^Head_1/(Character_Main|Grey)$', size: 0.28, gear: 'helmet', recolor: { Character_Main: C.olive, Grey: C.black } },
-  helmet3: { src: 'toon_Character_Soldier.gltf', parts: '^Head_1/(Character_Main|Grey)$', size: 0.29, gear: 'helmet', recolor: { Character_Main: C.black, Grey: C.grey } },
-  vest1: { src: 'toon_Character_Soldier.gltf', parts: '^Body/Character_Main$', size: 0.5, fit: 'height', gear: 'vest', recolor: { Character_Main: C.navy } },
-  vest2: { src: 'toon_Character_Soldier.gltf', parts: '^Body/(Character_Main|DarkGrey)$', size: 0.52, fit: 'height', gear: 'vest', recolor: { Character_Main: C.olive, DarkGrey: C.oliveDark } },
-  vest3: { src: 'toon_Character_Soldier.gltf', parts: '^Body/(Character_Main|DarkGrey)$', size: 0.54, fit: 'height', gear: 'vest', recolor: { Character_Main: C.black, DarkGrey: C.grey } },
-  pack1: { src: 'surv_Backpack.fbx', size: 0.42, fit: 'height', gear: 'pack', recolor: { Brown: C.sand, LightGreen: C.khaki, Gold: C.grey, Green: C.oliveDark } },
-  pack2: { src: 'surv_Backpack.fbx', size: 0.52, fit: 'height', gear: 'pack', recolor: { Brown: C.olive, LightGreen: C.oliveDark, Gold: C.grey, Green: C.black } },
-  pack3: { src: 'surv_Backpack.fbx', size: 0.62, fit: 'height', gear: 'pack', recolor: { Brown: C.black, LightGreen: C.grey, Gold: C.olive, Green: C.oliveDark } },
-};
+import { ITEMS } from './build-items.config.mjs';
 
 /** Rigs to fit gear on: the bulkiest outfit of each (gear must clear the tactical kit too). */
 const FIT_RIGS = { male: `${UMM}/Swat.gltf`, female: `${UMW}/Soldier.gltf` };
@@ -54,6 +26,7 @@ import * as THREE from 'three';
 import { FBXLoader } from 'three/addons/loaders/FBXLoader.js';
 import { loadGltf, toBase64 } from '/scripts/page-lib.js';
 import { bakeToSingleGeometry, geometryTris, weaponObject } from '/scripts/weapons.page.js';
+import { mergeGeometries, mergeVertices } from 'three/addons/utils/BufferGeometryUtils.js';
 import { exportGlb } from '/scripts/characters.page.js';
 const ITEMS = ${JSON.stringify(ITEMS)};
 const FIT_RIGS = ${JSON.stringify(FIT_RIGS)};
@@ -94,10 +67,64 @@ function bake(root, spec) {
   };
   return bakeToSingleGeometry(holder, colorOf);
 }
+/** Low-poly plate carrier (item space: centred, y up, front -Z) built from bevelled plates. */
+function proceduralVest(level, [main, dark]) {
+  const parts = [];
+  const colorize = (g, color) => {
+    const c = new THREE.Color(color);
+    const n = g.attributes.position.count;
+    const col = new Float32Array(n * 3);
+    for (let i = 0; i < n; i++) { col[i * 3] = c.r; col[i * 3 + 1] = c.g; col[i * 3 + 2] = c.b; }
+    g.setAttribute('color', new THREE.BufferAttribute(col, 3));
+    for (const k of Object.keys(g.attributes)) if (!['position', 'normal', 'color'].includes(k)) g.deleteAttribute(k);
+    parts.push(g.index ? g.toNonIndexed() : g);
+  };
+  const box = (w, h, d, x, y, z, color, rx = 0) => {
+    const g = new THREE.BoxGeometry(w, h, d);
+    if (rx) g.rotateX(rx);
+    g.translate(x, y, z);
+    colorize(g, color);
+  };
+  // Rounded, bevelled plate (w x h, thickness d) centred at (x, y, z), facing -Z.
+  const plate = (w, h, d, x, y, z, color, r = 0.035) => {
+    const s = new THREE.Shape();
+    const hw = w / 2 - r, hh = h / 2 - r;
+    s.moveTo(-hw, -h / 2); s.lineTo(hw, -h / 2); s.quadraticCurveTo(w / 2, -h / 2, w / 2, -hh);
+    s.lineTo(w / 2, hh); s.quadraticCurveTo(w / 2, h / 2, hw, h / 2); s.lineTo(-hw, h / 2);
+    s.quadraticCurveTo(-w / 2, h / 2, -w / 2, hh); s.lineTo(-w / 2, -hh); s.quadraticCurveTo(-w / 2, -h / 2, -hw, -h / 2);
+    const bevel = Math.min(0.008, d * 0.3);
+    const g = new THREE.ExtrudeGeometry(s, { depth: d - bevel * 2, bevelEnabled: true, bevelThickness: bevel, bevelSize: bevel, bevelSegments: 1, curveSegments: 2 });
+    g.translate(x, y, z - (d - bevel * 2) / 2);
+    colorize(g, color);
+  };
+  const W = 0.32, D = 0.24, H = 0.36, t = level === 1 ? 0.035 : 0.05;
+  plate(W, H, t, 0, H / 2, -D / 2, main);                   // front plate
+  plate(W, H * 1.05, t, 0, H * 0.525, D / 2, main);         // back plate
+  for (const sx of [-1, 1]) {
+    box(t * 0.8, H * 0.4, D, sx * (W / 2 - t / 2), H * 0.23, 0, dark);   // side cummerbund
+    box(0.07, t * 0.7, D + t * 0.6, sx * 0.095, H - t * 0.35, 0, dark);  // shoulder strap
+  }
+  if (level === 1) {
+    for (const y of [0.12, 0.22]) box(W * 0.86, 0.035, 0.012, 0, y, -D / 2 - t / 2 - 0.004, dark); // velcro straps
+  }
+  if (level >= 2) {
+    for (const px of [-0.09, 0, 0.09]) plate(0.075, 0.1, 0.045, px, 0.09, -D / 2 - t / 2 - 0.02, dark, 0.012);   // mag pouches
+    plate(0.2, 0.06, 0.035, 0, 0.2, -D / 2 - t / 2 - 0.015, dark, 0.012);                                       // admin pouch
+  }
+  if (level >= 3) {
+    box(0.26, 0.06, 0.05, 0, H + 0.02, -D / 2 + 0.04, main, -0.5);       // collar front
+    box(0.3, 0.07, 0.05, 0, H + 0.03, D / 2 - 0.02, main, 0.4);          // collar back
+    plate(0.14, 0.1, t, 0, -0.05, -D / 2 - 0.005, main, 0.02);           // groin plate
+    for (const sx of [-1, 1]) plate(0.06, 0.12, 0.05, sx * 0.13, 0.22, -D / 2 - t / 2 - 0.02, dark, 0.012);
+  }
+  const merged = mergeGeometries(parts, false);
+  merged.computeVertexNormals();
+  return mergeVertices(merged, 1e-5);
+}
 const report = {};
 const geos = {};
 for (const [id, spec] of Object.entries(ITEMS)) {
-  const geo = bake(await source(spec.src), spec);
+  const geo = spec.procedural ? proceduralVest(spec.level, spec.colors) : bake(await source(spec.src), spec);
   geo.computeBoundingBox();
   let b = geo.boundingBox;
   const s = b.getSize(new THREE.Vector3());
@@ -157,15 +184,16 @@ for (const [rig, file] of Object.entries(FIT_RIGS)) {
     const gb = geos[id].boundingBox; const gs = gb.getSize(new THREE.Vector3());
     let world;
     if (spec.gear === 'helmet') {
-      // Uniform fit to the head width (+15 %), shell top 2.5 cm above the head top.
-      const k = (Math.max(headW, headD * 0.92) * 1.15) / Math.max(gs.x, gs.z);
-      const pos = new THREE.Vector3((head.min.x + head.max.x) / 2, head.max.y + 0.025 - gs.y * k, (head.min.z + head.max.z) / 2 - 0.005);
+      // Uniform fit to the head width (+12 %); the shell top sits just above the scalp / hair.
+      const k = (Math.max(headW, headD * 0.92) * 1.12) / Math.max(gs.x, gs.z);
+      const pos = new THREE.Vector3((head.min.x + head.max.x) / 2, head.max.y + 0.012 - gs.y * k, (head.min.z + head.max.z) / 2 - 0.005);
       world = new THREE.Matrix4().compose(pos, face, new THREE.Vector3(k, k, k));
       wear[rig][id] = local(bones.Head, world);
     } else if (spec.gear === 'vest') {
-      // Non-uniform fit around the rib cage: width +10 %, depth +30 %, from waist to armpits.
-      const top = torso.max.y - 0.05, bottom = torso.min.y + (torso.max.y - torso.min.y) * 0.22;
-      const sc = new THREE.Vector3((torsoW * 0.62) / gs.x, (top - bottom) / gs.y, (torsoD * 1.3) / gs.z);
+      // Non-uniform fit around the rib cage: width +18 %, depth +22 %, from the waist to the
+      // shoulders (collar of the level-3 carrier above that).
+      const top = torso.max.y - 0.02, bottom = torso.min.y + (torso.max.y - torso.min.y) * 0.18;
+      const sc = new THREE.Vector3((torsoW * 1.18) / gs.x, (top - bottom) / gs.y, (torsoD * 1.22) / gs.z);
       const pos = new THREE.Vector3((torso.min.x + torso.max.x) / 2, bottom, (torso.min.z + torso.max.z) / 2);
       world = new THREE.Matrix4().compose(pos, face, sc);
       wear[rig][id] = local(bones.Torso, world);
@@ -188,4 +216,4 @@ const reports = path.join(path.dirname(fileURLToPath(import.meta.url)), 'reports
 fs.mkdirSync(reports, { recursive: true });
 fs.writeFileSync(path.join(reports, 'items.json'), JSON.stringify(result, null, 1));
 console.log(JSON.stringify(result.items).replace(/\},"/g, '},\n"'));
-console.log(JSON.stringify(result.wear, null, 0).slice(0, 3000));
+console.log('next: node scripts/assets/sync-manifest.mjs');

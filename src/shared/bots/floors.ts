@@ -40,7 +40,7 @@ const LEVEL_EPS = 0.08;
 /** A stair run has at least this many step boxes (entrance treads have fewer and lie outside). */
 const MIN_RUN_STEPS = 5;
 /** Entry point distance in front of the first step / exit point past the last step (m). */
-const ENTRY_BACK = 0.6;
+const ENTRY_BACK = 0.45;
 const EXIT_AHEAD = 0.65;
 /** A position counts as "on" a level when its feet are within this height above the slab. */
 const ON_LEVEL_ABOVE = 2.6;

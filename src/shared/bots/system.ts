@@ -5,6 +5,7 @@ import { TICK_DT } from '../constants';
 import { lineOfSight } from '../physics';
 import type { SimView } from '../sim/view';
 import type { EntityId, LootItem, PlayerState, TeamId, Vec3, VehicleState, World } from '../types';
+import { floorNavFor, type FloorNav } from './floors';
 import { mapInfoFor, type MapInfo } from './mapinfo';
 import { navGridFor, type NavGrid } from './nav';
 import { PathPlanner } from './pathfind';
@@ -36,6 +37,8 @@ export class BotSystem {
   readonly sim: SimView;
   readonly world: World;
   readonly grid: NavGrid;
+  /** Upper floors of buildings (stairs). */
+  readonly floors: FloorNav;
   readonly planner: PathPlanner;
   readonly info: MapInfo;
   readonly skill: BotSkill;
@@ -70,7 +73,8 @@ export class BotSystem {
     this.sim = sim;
     this.world = sim.world;
     this.grid = navGridFor(sim.world);
-    this.planner = new PathPlanner(this.grid);
+    this.floors = floorNavFor(sim.world, this.grid);
+    this.planner = new PathPlanner(this.grid, this.floors);
     this.info = mapInfoFor(sim.world);
     this.skill = skillFor(sim.config.botDifficulty);
   }
