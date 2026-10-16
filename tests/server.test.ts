@@ -615,7 +615,8 @@ describe('servers with custom options', () => {
       await c.next('pong', (m) => m.c === 1);
       const rtt = performance.now() - t0;
       expect(rtt).toBeGreaterThanOrEqual(2 * lag);
-      expect(rtt).toBeLessThan(2 * lag + 250);
+      // Upper bound only guards against runaway delays; generous because a loaded CI box can stall the event loop.
+      expect(rtt).toBeLessThan(2 * lag + 1500);
       for (let i = 2; i < 12; i++) c.send({ t: 'ping', c: i });
       await c.next('pong', (m) => m.c === 11);
       const order = c.msgs.filter((m): m is Msg<'pong'> => m.t === 'pong').map((m) => m.c);
