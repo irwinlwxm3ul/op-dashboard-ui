@@ -85,7 +85,16 @@ tests/          vitest suites, integration soak tests, Playwright e2e
 
 ## Credits
 
-* Sound effects, sprites: [Kenney](https://kenney.nl) Starter Kit FPS. The assets are CC0 and the
-  kit's code is MIT; see `public/assets/LICENSE-Kenney-StarterKitFPS.md`.
+* **3D models.** Characters, animations (Universal Animation Library 1 & 2), weapons (Ultimate Guns
+  Pack), survival items and backpacks (Survival Pack), grenade and helmets (Toon Shooter Game Kit) by
+  **Quaternius** (quaternius.com), CC0 1.0. Ammo boxes from "Low Poly Weapons Pack V.1" by **Zsky**
+  (@Zsky_01, https://zsky2000.itch.io/low-poly-weapons-pack-v1), licensed under
+  [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/); the ammo box models were rescaled,
+  re-coloured and merged into single meshes. Rifle and parachute animations and the body-armour models
+  were made for DROPZONE. Per-asset sources, commits, licences and modifications:
+  [docs/ASSETS.md](docs/ASSETS.md) (and [docs/ASSETS-world.md](docs/ASSETS-world.md) for vehicles,
+  props and nature).
+* Sound effects and sprites: [Kenney](https://kenney.nl) Starter Kit FPS. The assets are CC0 and the kit's
+  code is MIT; see `public/assets/LICENSE-Kenney-StarterKitFPS.md`.
 * Font: Lilita One by Juan Montoreano (SIL Open Font License); see `public/assets/fonts/`.
-* Terrain, buildings, characters, vehicles, weapons and gunshot sounds are generated in code.
+* Terrain, buildings and gunshot sounds are generated in code.

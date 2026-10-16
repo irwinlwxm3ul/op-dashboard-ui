@@ -11,7 +11,7 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { GLTFExporter } from 'three/addons/exporters/GLTFExporter.js';
-import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
+import { mergeGeometries, mergeVertices, toCreasedNormals } from 'three/addons/utils/BufferGeometryUtils.js';
 import { MeshoptSimplifier } from '/meshopt/meshopt_simplifier.js';
 
 export { THREE };
@@ -125,6 +125,25 @@ export function compact(g, indices) {
   return out;
 }
 
+/** Indexed copy with vertices merged by position (+uv when present); normals dropped. */
+export function weldGeometry(g) {
+  const c = g.clone();
+  c.deleteAttribute('normal');
+  for (const k of Object.keys(c.attributes)) if (k !== 'position' && k !== 'uv') c.deleteAttribute(k);
+  const m = mergeVertices(c, 1e-5);
+  m.computeVertexNormals();
+  return m;
+}
+
+/** Normals with hard edges above `angle` degrees (re-indexed). */
+export function creased(g, angle = 40) {
+  const keep = {};
+  for (const k of Object.keys(g.attributes)) if (k !== 'position' && k !== 'normal' && k !== 'uv') keep[k] = true;
+  const nonIdx = toCreasedNormals(g, (angle * Math.PI) / 180);
+  const m = mergeVertices(nonIdx, 1e-6);
+  return m;
+}
+
 export function tris(g) {
   return g.index ? g.index.count / 3 : g.getAttribute('position').count / 3;
 }
@@ -167,9 +186,16 @@ export function bboxOf(geos) {
  * step by step until the target is reached (or `maxError`). UV / normal seams stay intact.
  * Returns the new geometry (input untouched).
  */
-export async function simplify(g, target, { uvWeight = 1, normalWeight = 0.5, maxError = 0.25, lockBorder = false, regularize = false } = {}) {
+export async function simplify(g, target, { uvWeight = 1, normalWeight = 0.5, maxError = 0.25, lockBorder = false, regularize = false, weld = false, crease = 40 } = {}) {
   await MeshoptSimplifier.ready;
   if (tris(g) <= target) return g;
+  if (weld) {
+    // Flat-shaded sources split every vertex per face, which makes every edge a seam. Weld by
+    // position (+uv), simplify, then rebuild creased normals.
+    const w = weldGeometry(g);
+    const s = await simplify(w, target, { uvWeight, normalWeight: 0, maxError, lockBorder, regularize });
+    return creased(s, crease);
+  }
   const pos = g.getAttribute('position').array;
   const nrm = g.getAttribute('normal').array;
   const uv = g.getAttribute('uv') ? g.getAttribute('uv').array : null;

@@ -64,6 +64,8 @@ export interface CharacterVariant {
    */
   bodyMesh: 'Body';
   teamMesh: 'TeamBand';
+  /** The outfit already includes a small backpack (a worn pack item covers / overlaps it). */
+  builtInBackpack?: boolean;
 }
 
 /** Logical attachment points -> bone names (identical on both rigs). */
@@ -132,7 +134,7 @@ export const CHARACTER_VARIANTS: Record<CharacterVariantId, CharacterVariant> = 
   male_casual: { id: 'male_casual', rig: 'male', file: 'characters/male_casual.glb', tris: 5776, bodyMesh: 'Body', teamMesh: 'TeamBand' },
   male_hoodie: { id: 'male_hoodie', rig: 'male', file: 'characters/male_hoodie.glb', tris: 6206, bodyMesh: 'Body', teamMesh: 'TeamBand' },
   female_tactical: { id: 'female_tactical', rig: 'female', file: 'characters/female_tactical.glb', tris: 7900, bodyMesh: 'Body', teamMesh: 'TeamBand' },
-  female_adventurer: { id: 'female_adventurer', rig: 'female', file: 'characters/female_adventurer.glb', tris: 6812, bodyMesh: 'Body', teamMesh: 'TeamBand' },
+  female_adventurer: { id: 'female_adventurer', rig: 'female', file: 'characters/female_adventurer.glb', tris: 6812, bodyMesh: 'Body', teamMesh: 'TeamBand', builtInBackpack: true },
   female_casual: { id: 'female_casual', rig: 'female', file: 'characters/female_casual.glb', tris: 6424, bodyMesh: 'Body', teamMesh: 'TeamBand' },
 };
 

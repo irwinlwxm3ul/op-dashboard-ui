@@ -1,0 +1,115 @@
+[
+  {
+    "file": "/home/user/op-dashboard-ui/public/assets/models/vehicles/uaz.glb",
+    "bytes": 383896,
+    "tris": 4108,
+    "scale": 1.1683,
+    "wheels": {
+      "Wheel_FR": {
+        "center": [
+          0.727,
+          -0.814,
+          -1.047
+        ],
+        "radius": 0.386,
+        "width": 0.326
+      },
+      "Wheel_FL": {
+        "center": [
+          -0.728,
+          -0.814,
+          -1.033
+        ],
+        "radius": 0.386,
+        "width": 0.326
+      },
+      "Wheel_RL": {
+        "center": [
+          -0.759,
+          -0.814,
+          1.131
+        ],
+        "radius": 0.386,
+        "width": 0.326
+      },
+      "Wheel_RR": {
+        "center": [
+          0.777,
+          -0.814,
+          1.117
+        ],
+        "radius": 0.386,
+        "width": 0.326
+      }
+    },
+    "bbox": {
+      "min": [
+        -1.007,
+        -1.2,
+        -2
+      ],
+      "max": [
+        1.007,
+        0.909,
+        2
+      ]
+    }
+  },
+  {
+    "file": "/home/user/op-dashboard-ui/public/assets/models/vehicles/bike.glb",
+    "bytes": 263452,
+    "tris": 4279,
+    "scale": 1.013,
+    "parts": {
+      "body": 2288,
+      "fork": 600,
+      "wheelF": 699,
+      "wheelR": 692
+    },
+    "wheels": {
+      "Wheel_F": {
+        "center": [
+          -0.008,
+          -0.409,
+          -0.711
+        ],
+        "radius": 0.341,
+        "width": 0.131
+      },
+      "Wheel_R": {
+        "center": [
+          0.005,
+          -0.403,
+          0.716
+        ],
+        "radius": 0.334,
+        "width": 0.085
+      }
+    },
+    "fork": {
+      "pivot": [
+        -0.008,
+        -0.409,
+        -0.711
+      ],
+      "axis": [
+        0.012,
+        0.314,
+        0.949
+      ],
+      "rake": 1.2513
+    },
+    "bbox": {
+      "min": [
+        -0.447,
+        -0.74,
+        -1.05
+      ],
+      "max": [
+        0.447,
+        0.478,
+        1.05
+      ]
+    }
+  }
+]
