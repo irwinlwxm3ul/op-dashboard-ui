@@ -36,18 +36,20 @@ const MIX_HEADROOM = 0.8;
 
 const GUN_REF = 10;
 const GUN_ROLLOFF = 0.5;
-const LOCAL_GUN_BOOST = 1.12;
+const LOCAL_GUN_BOOST = 1.3;
 const IMPACT_FALLOFF: Falloff = { ref: 3, rolloff: 1, range: 95 };
 const CRACK_FALLOFF: Falloff = { ref: 2, rolloff: 1, range: 25 };
 const STEP_FALLOFF: Falloff = { ref: 2, rolloff: 0.9, range: 35 };
 const LAND_FALLOFF: Falloff = { ref: 2, rolloff: 0.9, range: 45 };
 const EXPLOSION_FALLOFF: Falloff = { ref: 15, rolloff: 0.5, range: 1600 };
+/** Loops are released when update(dt) has not been called for this long (game loop stopped). */
+const LOOP_WATCHDOG_S = 1.0;
 /** Blasts closer than this duck the world and ring the ears. */
 const BLAST_DEAFEN_DIST = 15;
 
-const HITMARKER_GAIN: Record<HitmarkerKind, number> = { body: 0.5, head: 0.6, armor: 0.5, knock: 0.65, kill: 0.75 };
+const HITMARKER_GAIN: Record<HitmarkerKind, number> = { body: 0.75, head: 0.6, armor: 0.62, knock: 0.75, kill: 0.75 };
 const UI_GAIN: Record<UiSoundName, number> = {
-  click: 0.32, hover: 0.12, ready: 0.42, start: 0.5, countdown: 0.42, error: 0.38, zone: 0.5, win: 0.6, lose: 0.55,
+  click: 0.32, hover: 0.12, ready: 0.42, start: 0.5, countdown: 0.3, error: 0.36, zone: 0.35, win: 0.6, lose: 0.55,
 };
 const UI_MIN_INTERVAL: Partial<Record<UiSoundName, number>> = { hover: 0.035, click: 0.02 };
 
@@ -82,7 +84,6 @@ const validPos = (p: Vec3 | null | undefined): p is Vec3 =>
 export class AudioEngine {
   private ctx: AudioContext | null = null;
   private initPromise: Promise<void> | null = null;
-  private mix: GainNode | null = null;
   private master: GainNode | null = null;
   private sfx: GainNode | null = null;
   private uiBus: GainNode | null = null;
@@ -111,6 +112,8 @@ export class AudioEngine {
   private readonly lastUi: Partial<Record<UiSoundName, number>> = {};
   private stepSide = 1;
   private unlockBound = false;
+  /** Context time of the last update(dt). */
+  private lastUpdate = 0;
 
   // ------------------------------------------------------------------------------------------
   // Lifecycle
@@ -138,10 +141,19 @@ export class AudioEngine {
         return this.initPromise;
       }
     }
+    try {
+      this.buildGraph(ctx);
+    } catch (e) {
+      // Partial WebAudio implementation: stay silent rather than half-working.
+      console.warn('[audio] WebAudio graph unavailable', e);
+      try { void ctx.close().catch(() => undefined); } catch { /* ignore */ }
+      this.initPromise = Promise.resolve();
+      return this.initPromise;
+    }
     this.ctx = ctx;
-    this.buildGraph(ctx);
     this.resume();
     this.bindUnlock();
+    this.startWatchdog();
     void loadSamples(ctx, this.samples);
     this.initPromise = Offline
       ? this.bank.renderAll(Offline, ctx.sampleRate).catch((e) => { console.warn('[audio] synthesis failed', e); })
@@ -177,7 +189,6 @@ export class AudioEngine {
     ui.connect(mix);
     const world = ctx.createGain();
     world.connect(sfx);
-    this.mix = mix;
     this.master = master;
     this.sfx = sfx;
     this.uiBus = ui;
@@ -200,6 +211,22 @@ export class AudioEngine {
       // Never awaited: outside a user gesture the promise may stay pending until one happens.
       void ctx.resume().catch(() => undefined);
     } catch { /* ignore */ }
+  }
+
+  /**
+   * If the game stops calling update(dt) (menus after a match, hidden tab, a crashed frame loop)
+   * the continuous loops must not keep blowing / humming / revving at their last level.
+   */
+  private startWatchdog(): void {
+    if (typeof setInterval !== 'function') return;
+    const id = setInterval(() => {
+      const ctx = this.ctx;
+      if (!ctx || ctx.state !== 'running' || ctx.currentTime - this.lastUpdate < LOOP_WATCHDOG_S) return;
+      this.wind.dispose(ctx);
+      this.zone.dispose(ctx);
+      this.engines.releaseAll();
+    }, 500);
+    (id as unknown as { unref?: () => void }).unref?.();
   }
 
   /** Browsers suspend contexts created without a gesture; resume on the next interaction. */
@@ -258,7 +285,10 @@ export class AudioEngine {
     this.wind.update(host, d);
     this.zone.update(host, d);
     this.engines.update(host, d);
-    if (this.ctx) this.sweep(this.ctx.currentTime);
+    if (this.ctx) {
+      this.lastUpdate = this.ctx.currentTime;
+      this.sweep(this.lastUpdate);
+    }
   }
 
   setWind(intensity: number): void {
@@ -468,13 +498,13 @@ export class AudioEngine {
     const set = this.bank.reload[kind]?.[phase];
     if (!set) return;
     this.layer(set.pick());
-    this.emit(this.world, 0.5, NaN, 0, 0, rand1(0.03), 3);
+    this.emit(this.world, 0.4, NaN, 0, 0, rand1(0.03), 3);
   }
 
   weaponSwitch(): void {
     if (!this.live) return;
     const sample = this.samples.weaponChange;
-    if (sample) this.layer(sample, 0.55);
+    if (sample) this.layer(sample, 1.6);
     else this.layer(this.bank.weaponSwitch.pick());
     this.emit(this.world, 0.5, NaN, 0, 0, rand1(0.03), 3);
   }
@@ -503,7 +533,7 @@ export class AudioEngine {
     const sp = spatialize(this.listener, pos, CRACK_FALLOFF, this.sp);
     if (sp.gain < 0.01) return;
     this.layer(this.bank.bulletCrack.pick());
-    this.emit(this.world, 0.7 * sp.gain, sp.pan, 0, 0, rand1(0.05), 2);
+    this.emit(this.world, 0.9 * sp.gain, sp.pan, 0, 0, rand1(0.05), 2);
   }
 
   footstep(material: SurfaceMaterial, pos: Vec3, local: boolean, intensity: number): void {
@@ -529,7 +559,7 @@ export class AudioEngine {
     this.layer(set.pick());
     if (shoe) this.layer(shoe, 0.35);
     const cutoff = Math.min(sp.cutoff, i < 0.45 ? 2500 + i * 9000 : 20000);
-    this.emit(this.world, 0.8 * loud * sp.gain, sp.pan, cutoff, sp.delay, rate, 1.2);
+    this.emit(this.world, 1.1 * loud * sp.gain, sp.pan, cutoff, sp.delay, rate, 1.2);
   }
 
   jump(local: boolean, pos: Vec3): void {
@@ -554,7 +584,7 @@ export class AudioEngine {
     this.layer(this.bank.land.pick(), 0.15 + 0.85 * i);
     const rate = (1.05 - 0.15 * i) * rand1(0.03);
     if (local || !validPos(pos)) {
-      this.emit(this.world, 0.6, NaN, 0, 0, rate, 2);
+      this.emit(this.world, 0.5, NaN, 0, 0, rate, 2);
       return;
     }
     const sp = spatialize(this.listener, pos, LAND_FALLOFF, this.sp);
@@ -612,7 +642,7 @@ export class AudioEngine {
     const a = clamp01(finiteOr(amount, 20) / 40);
     if (this.samples.hurt) this.layer(this.samples.hurt, 0.35 + 0.35 * a);
     this.layer(this.bank.hurtThud.pick(), 0.3 + 0.7 * a);
-    this.emit(this.sfx, 0.7, NaN, 0, 0, rand1(0.06), 4);
+    this.emit(this.sfx, 0.5, NaN, 0, 0, rand1(0.06), 4);
   }
 
   armorBreak(): void {
@@ -630,7 +660,7 @@ export class AudioEngine {
   pickup(): void {
     if (!this.live) return;
     this.layer(this.bank.pickup.pick());
-    this.emit(this.world, 0.42, NaN, 0, 0, rand1(0.06), 2);
+    this.emit(this.world, 0.3, NaN, 0, 0, rand1(0.06), 2);
   }
 
   ui(name: UiSoundName): void {

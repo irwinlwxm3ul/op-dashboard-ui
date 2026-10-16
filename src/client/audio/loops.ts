@@ -117,7 +117,7 @@ export class WindLoop {
       this.n = this.build(host);
     }
     const n = this.n, t = host.ctx.currentTime, L = this.level, g = this.gust, ps = this.ps;
-    ps.set(0, n.out.gain, Math.pow(L, 1.15) * (0.6 + 0.4 * g) * 0.55, t, 0.08);
+    ps.set(0, n.out.gain, Math.pow(L, 0.8) * (0.6 + 0.4 * g) * 1.2, t, 0.08);
     ps.set(1, n.body.frequency, 300 + 950 * L + 380 * g, t, 0.12);
     ps.set(2, n.rumbleG.gain, 0.55 + 0.35 * g, t, 0.1);
     ps.set(3, n.whistle.frequency, 1500 + 1500 * g * L, t, 0.2);
@@ -189,9 +189,9 @@ export class ZoneLoop {
 
   update(host: LoopHost | null, dt: number): void {
     const i = this.target;
-    const humT = this.inside ? 0.1 + 0.14 * i : 0.07 * i;
-    const crackT = this.inside ? 0.3 + 0.5 * i : 0.12 * i;
-    const sizzleT = this.inside ? 0.05 + 0.08 * i : 0.02 * i;
+    const humT = this.inside ? 0.045 + 0.065 * i : 0.035 * i;
+    const crackT = this.inside ? 0.13 + 0.23 * i : 0.06 * i;
+    const sizzleT = this.inside ? 0.022 + 0.036 * i : 0.01 * i;
     const k = damp(this.inside ? 4 : 2, dt);
     this.hum += (humT - this.hum) * k;
     this.crack += (crackT - this.crack) * k;
@@ -279,8 +279,12 @@ export const MAX_ACTIVE_ENGINES = 8;
 const ENGINE_STALE = 1.0;
 /** ...and is forgotten entirely after this long. */
 const ENGINE_FORGET = 15;
-const IDLE_RPM = 800;
+/** Matches the shared vehicle model (idle 900, red line ~6500; rpm 0 = engine off). */
+const IDLE_RPM = 900;
 const MAX_RPM = 6500;
+/** Below this the engine is (nearly) stopped: the loop fades out while spinning down. */
+const STALL_RPM = 120;
+const RUN_RPM = 500;
 
 interface EngineNodes {
   o1: OscillatorNode; o2: OscillatorNode; o3: OscillatorNode; lfo: OscillatorNode;
@@ -308,6 +312,8 @@ export class EngineVoice implements EngineSoundHandle {
   private sRpm = IDLE_RPM;
   private sThrottle = 0;
   private sGain = 0;
+  /** First update snaps the smoothed values (no fake rev-up / idle blip on creation). */
+  private fresh = true;
   private n: EngineNodes | null = null;
   private readonly sp: Spatial = createSpatial();
   private readonly ps = new ParamSetter(9);
@@ -322,12 +328,14 @@ export class EngineVoice implements EngineSoundHandle {
     if (pos && Number.isFinite(pos.x) && Number.isFinite(pos.y) && Number.isFinite(pos.z)) {
       this.pos.x = pos.x; this.pos.y = pos.y; this.pos.z = pos.z;
     }
-    if (Number.isFinite(rpm)) {
-      // Real RPM expected; values <= 2 are treated as a normalised 0..1 fraction of the rev range.
-      this.rpm = rpm <= 2 ? IDLE_RPM + Math.max(0, rpm) * (MAX_RPM - IDLE_RPM) : Math.min(rpm, 9000);
-    }
+    if (Number.isFinite(rpm)) this.rpm = rpm < 0 ? 0 : rpm > 9000 ? 9000 : rpm;
     if (Number.isFinite(throttle)) this.throttle = clamp01(Math.abs(throttle));
     this.local = !!local;
+    if (this.fresh) {
+      this.fresh = false;
+      this.sRpm = this.rpm;
+      this.sThrottle = this.throttle;
+    }
     this.touched = this.mgr.clock;
     if (this.stopped) {
       this.stopped = false;
@@ -357,7 +365,10 @@ export class EngineVoice implements EngineSoundHandle {
       this.dist = 0;
     }
     const rpmN = clamp01((this.sRpm - IDLE_RPM) / (MAX_RPM - IDLE_RPM));
-    const level = stale ? 0 : (0.22 + 0.5 * this.sThrottle + 0.18 * rpmN) * distGain * (this.local ? 0.75 : 1.1);
+    // Spinning down after the engine is switched off (or out of fuel) fades to silence.
+    const running = clamp01((this.sRpm - STALL_RPM) / (RUN_RPM - STALL_RPM));
+    const level = stale ? 0
+      : (0.3 + 0.5 * this.sThrottle + 0.18 * rpmN) * running * distGain * (this.local ? 0.75 : 1.1);
     this.sGain = level;
     if (!host) return;
     if (!this.n) {
@@ -369,7 +380,7 @@ export class EngineVoice implements EngineSoundHandle {
       return;
     }
     const n = this.n, t = host.ctx.currentTime, ps = this.ps;
-    const f = this.sRpm / 30;
+    const f = Math.max(4, this.sRpm / 30);
     ps.set(0, n.o1.frequency, f, t, 0.03);
     ps.set(1, n.o2.frequency, f * 0.5, t, 0.03);
     ps.set(2, n.o3.frequency, f * 2, t, 0.03);
@@ -378,7 +389,7 @@ export class EngineVoice implements EngineSoundHandle {
     ps.set(5, n.noiseG.gain, 0.04 + 0.22 * this.sThrottle, t, TAU_PARAM);
     const lpF = Math.min(cutoff, 260 + 1700 * this.sThrottle + f * 3.5);
     ps.set(6, n.lp.frequency, Math.max(120, lpF), t, 0.05);
-    ps.set(7, n.out.gain, level * 0.5, t, TAU_PARAM);
+    ps.set(7, n.out.gain, level * 0.65, t, TAU_PARAM);
     ps.set(8, n.pan.pan, pan, t, 0.05);
   }
 
@@ -387,7 +398,7 @@ export class EngineVoice implements EngineSoundHandle {
 
   private build(host: LoopHost): EngineNodes {
     const ctx = host.ctx;
-    const f = this.sRpm / 30;
+    const f = Math.max(4, this.sRpm / 30);
     const mk = (type: OscillatorType, freq: number, detune: number): OscillatorNode => {
       const o = ctx.createOscillator();
       o.type = type;
@@ -497,7 +508,8 @@ export class EngineManager {
     }
   }
 
-  dispose(): void {
-    for (let i = this.list.length - 1; i >= 0; i--) this.forget(this.list[i]);
+  /** Free every running graph but keep the handles (they rebuild on their next update). */
+  releaseAll(): void {
+    for (const e of this.list) e.release(this.ctx);
   }
 }

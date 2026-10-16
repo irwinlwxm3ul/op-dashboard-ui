@@ -123,7 +123,7 @@ export const audio = {
   },
   /**
    * Engine loop for vehicle `id` (the same handle is returned for the same id until stop()).
-   * update(pos, rpm, throttle, local) every frame; rpm is real RPM (values <= 2 are read as 0..1).
+   * update(pos, rpm, throttle, local) every frame; rpm is real engine RPM (idle ~900, 0 = off).
    */
   engine(id: number): EngineSoundHandle {
     try { return safeHandle(engine.engine(id)); } catch (e) { report('engine', e); return safeHandle(null); }

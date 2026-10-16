@@ -375,6 +375,21 @@ describe('engine with a fake WebAudio implementation', () => {
     expect(zone.n).toBeNull();
   });
 
+  it('releases loops when the game stops calling update(dt)', async () => {
+    const wind = (engine as unknown as { wind: { n: unknown } }).wind;
+    engine.setWind(1);
+    for (let f = 0; f < 30; f++) engine.update(1 / 60);
+    expect(wind.n).not.toBeNull();
+    ctx.currentTime += 5;                                     // audio clock runs on, no update() calls
+    await new Promise((r) => setTimeout(r, 700));
+    expect(wind.n).toBeNull();
+    engine.update(1 / 60);                                    // the game loop comes back: wind resumes
+    expect(wind.n).not.toBeNull();
+    engine.setWind(0);
+    for (let f = 0; f < 60 * 8; f++) engine.update(1 / 60);
+    expect(wind.n).toBeNull();
+  });
+
   it('skips one-shots while the context is suspended', () => {
     ctx.currentTime += 60;
     engine.update(1 / 60);
