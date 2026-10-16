@@ -311,3 +311,39 @@ artificial latency (order preserving). After a match: results, then `backToLobby
   interaction prompt resolution (nearest loot / vehicle / revive target / plane jump / chute); loot map from
   `MatchInit` + deltas; typed event bus for `GameEvent`s and local predicted events. Exposes a per-frame
   `FrameState` (defined in `src/client/game/types.ts`) consumed by rendering, UI, audio and feel.
+
+---
+
+## Parallel build: file ownership (strict)
+
+Every path has exactly one owner. Agents only write inside their own paths.
+
+| Owner | Paths |
+|---|---|
+| **integrator (main thread)** | `src/shared/{types,protocol,constants,math,rng,validate}.ts`, `src/shared/sim/view.ts`, `src/client/game/types.ts`, `src/client/render/contracts.ts`, `src/client/ui/contracts.ts`, `src/client/main.ts`, `src/client/app/**`, `index.html`, configs, `tests/e2e/**`, `README.md`, `PLAN.md`, `ARCHITECTURE.md` |
+| world | `src/shared/world/**`, `tests/world.test.ts` |
+| physics | `src/shared/physics/**`, `tests/physics.test.ts` |
+| items | `src/shared/items/**`, `tests/items.test.ts` |
+| vehicles | `src/shared/vehicles/**`, `tests/vehicles.test.ts` |
+| sim | `src/shared/sim/**` (except `view.ts`), `tests/sim.test.ts`, `tests/runner.test.ts` |
+| bots | `src/shared/bots/**`, `tests/bots.test.ts` |
+| server | `src/server/**`, `tests/server.test.ts`, `tests/cheats.test.ts` |
+| client-net | `src/client/net/**`, `src/client/game/**` (except `types.ts`), `tests/client-net.test.ts` |
+| audio | `src/client/audio/**`, `tests/audio.test.ts` |
+| i18n | `src/client/i18n/**`, `scripts/check-i18n.ts`, `tests/i18n.test.ts` |
+| render-world | `src/client/render/core/**`, `src/client/render/world/**` |
+| render-entities | `src/client/render/entities/**` |
+| render-view-fx | `src/client/render/view/**`, `src/client/render/fx/**` |
+| ui | `src/client/ui/**` (except `contracts.ts`), `src/client/styles/**` |
+| feel | `src/client/feel/**` |
+
+i18n string fragments: `src/client/i18n/locales/en.ts` = core keys (i18n owner) merged with
+`src/client/ui/strings.en.ts` (`ui.*`, ui owner) and `src/client/feel/strings.en.ts` (`feel.*`, feel owner).
+Non-English locales are `Partial` during the parallel build (English fallback); the final i18n pass
+completes them and `npm run check:i18n` enforces completeness.
+
+Client module factories (each module `index.ts`): `createRenderCore`, `createWorldRenderer`
+(render/core + render/world), `createEntityRenderer` (render/entities), `createViewRig`
+(render/view), `createFxRenderer` (render/fx), `createFeel` (feel), `createUI` (ui),
+`ClientGame`/`LocalTransport`/`WsTransport`/`settings`/`InputController` (client-net). Signatures in
+`src/client/render/contracts.ts`, `src/client/ui/contracts.ts`, `src/client/game/types.ts`.
