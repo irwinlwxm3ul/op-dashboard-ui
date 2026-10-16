@@ -344,7 +344,8 @@ export class RenderCoreImpl implements RenderCore {
       const gpuMs = this.gpuTimer.poll();
       if (gpuMs > 0) {
         this.lastGpuSampleAt = now;
-        this.gpuMsEma = this.gpuMsEma < 0 ? gpuMs : this.gpuMsEma + (gpuMs - this.gpuMsEma) * 0.1;
+        // Stats EMA ignores hitches (shader compiles, uploads) like the controller does.
+        if (gpuMs < 1000) this.gpuMsEma = this.gpuMsEma < 0 ? gpuMs : this.gpuMsEma + (gpuMs - this.gpuMsEma) * 0.1;
         if (this.timing !== 'gpu') {
           this.timing = 'gpu';
           this.drs.reset();

@@ -235,9 +235,14 @@ export async function benchmarkMediumFrame(core: RenderCore): Promise<number | n
     // where available), so shader compilation is not timed; wait at most COMPILE_WAIT_MS.
     const prev = r.getRenderTarget();
     r.setRenderTarget(target);
-    const compiled = r.compileAsync(bench.scene, bench.camera);
-    r.setRenderTarget(prev);
-    await Promise.race([compiled, new Promise<void>((res) => setTimeout(res, COMPILE_WAIT_MS))]);
+    if (r.extensions.has('KHR_parallel_shader_compile')) {
+      const compiled = r.compileAsync(bench.scene, bench.camera);
+      r.setRenderTarget(prev);
+      await Promise.race([compiled, new Promise<void>((res) => setTimeout(res, COMPILE_WAIT_MS))]);
+    } else {
+      r.compile(bench.scene, bench.camera);
+      r.setRenderTarget(prev);
+    }
     const measureStart = performance.now();
     for (let frame = 0; frame < BENCH_WARMUP + BENCH_MAX_FRAMES; frame++) {
       if (performance.now() - measureStart > BENCH_DEADLINE_MS - (measureStart - start) * 0.5) break;

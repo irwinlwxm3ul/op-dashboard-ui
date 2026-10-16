@@ -22,6 +22,14 @@ export interface RenderStats {
   triangles: number;
   geometries: number;
   textures: number;
+  /** Dynamic resolution multiplier currently applied (0.6..1), when supported. */
+  resolutionScale?: number;
+  /** Effective scene pixel ratio. */
+  pixelRatio?: number;
+  /** Smoothed GPU frame time in ms, -1 when unavailable. */
+  gpuMs?: number;
+  /** Which signal drives dynamic resolution. */
+  timing?: 'gpu' | 'frame';
 }
 
 /** Owned by src/client/render/core (render-world track). */

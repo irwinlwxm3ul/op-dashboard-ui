@@ -2,7 +2,9 @@
 // the app keeps building and running while a module is missing or broken: we fall back to the
 // minimal implementations in fallbacks.ts and log a warning. This keeps every increment playable.
 
+import type { Quality } from '../game/types';
 import type {
+  RenderCore,
   CreateEntityRenderer, CreateFeel, CreateFxRenderer, CreateRenderCore, CreateViewRig, CreateWorldRenderer,
 } from '../render/contracts';
 import {
@@ -16,6 +18,8 @@ export interface RenderModules {
   createViewRig: CreateViewRig;
   createFxRenderer: CreateFxRenderer;
   createFeel: CreateFeel;
+  /** First-run quality recommendation (render/core), when available. */
+  recommendQuality: ((core: RenderCore) => Promise<Quality>) | null;
   /** Names of modules that fell back to the minimal implementation */
   fallbacks: string[];
 }
@@ -61,6 +65,13 @@ export function loadRenderModules(): Promise<RenderModules> {
       load<CreateFxRenderer>('../render/fx/index.ts', 'createFxRenderer', () => noopFx, fallbacks),
       load<CreateFeel>('../feel/index.ts', 'createFeel', () => noopFeel(), fallbacks),
     ]);
+    let recommendQuality: RenderModules['recommendQuality'] = null;
+    try {
+      const coreMod = await loaders['../render/core/index.ts']?.();
+      if (coreMod && typeof coreMod.recommendQuality === 'function') {
+        recommendQuality = coreMod.recommendQuality as RenderModules['recommendQuality'];
+      }
+    } catch { /* optional */ }
     if (fallbacks.length) console.warn('[app] using fallback modules for:', fallbacks.join(', '));
     return {
       createRenderCore: core,
@@ -69,6 +80,7 @@ export function loadRenderModules(): Promise<RenderModules> {
       createViewRig: view,
       createFxRenderer: fx,
       createFeel: feel,
+      recommendQuality,
       fallbacks,
     };
   })();

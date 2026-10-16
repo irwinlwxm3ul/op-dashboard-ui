@@ -141,9 +141,21 @@ export class App implements AppActions {
       this.core = safeCreate('render core', () => modules.createRenderCore(host), () => fallbackRenderCore(host));
       const s = settings.get();
       this.core.setQuality(s.quality, s.renderScale);
+      if (this.firstRun && modules.recommendQuality) {
+        // First launch on this device: benchmark once and pick a preset that holds 60 FPS.
+        const core = this.core;
+        void modules.recommendQuality(core).then((q) => {
+          if (settings.get().quality !== q) settings.set({ quality: q });
+        }).catch(() => { /* keep defaults */ });
+      }
     }
     return this.core;
   }
+
+  /** True when the player has never saved settings on this device. */
+  private readonly firstRun: boolean = (() => {
+    try { return localStorage.getItem('dz.settings') === null; } catch { return false; }
+  })();
 
   private async beginMatch(hub: MessageHub, init: MatchInit, context: MatchContext): Promise<void> {
     this.context = context;
