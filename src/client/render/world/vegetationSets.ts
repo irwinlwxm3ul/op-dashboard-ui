@@ -50,6 +50,8 @@ export interface VegetationModelSet {
   trees: Record<TreeKind, SpeciesVariant[]>;
   bushes: SpeciesVariant[];
   rocks: SpeciesVariant[];
+  /** Cheap shared rock model for the far band (null = each variant's mid model). */
+  rockFar: BandModel | null;
   impostorMaterial: THREE.MeshStandardMaterial;
   /** Impostor quad width / tree height per kind, and the bush impostor size at scale 1 (m). */
   impostorWidth: Record<TreeKind, number>;
@@ -183,6 +185,7 @@ export function proceduralVegetationSet(shared: WorldUniforms): VegetationModelS
     trees,
     bushes,
     rocks,
+    rockFar: null,
     impostorMaterial,
     impostorWidth: { ...IMPOSTOR_WIDTH },
     bushImpostor: { w: BUSH_IMPOSTOR_W, h: BUSH_IMPOSTOR_H },
@@ -319,6 +322,12 @@ export function assetVegetationSet(src: NatureGltfs, shared: WorldUniforms): Veg
   // The PNG atlas is shared app-wide (never disposed here); without it use an owned canvas atlas.
   ownAtlas = src.impostorAtlas ? null : createImpostorAtlas();
   const atlas = src.impostorAtlas ?? ownAtlas;
+  // Far rocks: 20-triangle procedural rock (same unit shape) tinted like the scanned set.
+  const farRockGeo = buildRockModel(5, 0);
+  geometries.push(farRockGeo);
+  const farRockMat = new THREE.MeshStandardMaterial({ name: 'dz-rock-far', vertexColors: true, color: 0xa39a86, roughness: 0.95, metalness: 0 });
+  materials.push(farRockMat);
+  const rockFar: BandModel = { parts: [{ geometry: farRockGeo, material: farRockMat, depth: null, castShadow: false }] };
   const impostorMaterial = createImpostorMaterial(atlas);
   materials.push(impostorMaterial);
   alphaTested.push(impostorMaterial);
@@ -332,6 +341,7 @@ export function assetVegetationSet(src: NatureGltfs, shared: WorldUniforms): Veg
     trees,
     bushes,
     rocks,
+    rockFar,
     impostorMaterial,
     impostorWidth: { pine: wr.pine, oak: wr.oak, birch: wr.birch, dead: wr.dead },
     bushImpostor: { w: wr.bush, h: NATURE_MODELS.impostors.bushHeight },

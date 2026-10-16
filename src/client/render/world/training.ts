@@ -32,6 +32,8 @@ export class TrainingRenderer {
   private readonly geometries: THREE.BufferGeometry[] = [];
   private readonly materials: THREE.Material[] = [];
   private readonly texture: THREE.CanvasTexture | null = null;
+  /** Own shadow depth material (three's shared default is also used by other object types). */
+  private readonly depth = new THREE.MeshDepthMaterial({ depthPacking: THREE.RGBADepthPacking });
 
   constructor(world: World) {
     this.group.name = 'training-range';
@@ -168,6 +170,7 @@ export class TrainingRenderer {
     this.materials.push(mat);
     const mesh = new THREE.Mesh(geo, mat);
     mesh.name = name;
+    if (shadows) mesh.customDepthMaterial = this.depth;
     mesh.castShadow = shadows;
     mesh.receiveShadow = true;
     mesh.matrixAutoUpdate = false;
@@ -284,6 +287,7 @@ export class TrainingRenderer {
   dispose(): void {
     for (const g of this.geometries) g.dispose();
     for (const m of this.materials) m.dispose();
+    this.depth.dispose();
     this.texture?.dispose();
     this.group.removeFromParent();
   }

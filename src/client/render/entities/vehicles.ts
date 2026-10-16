@@ -544,9 +544,9 @@ export class VehicleRenderer {
     } else {
       return;
     }
-    // Vehicle-local -> rider root space.
+    // Vehicle-local -> rider root space (only the entries written above).
     const so = def.seatOffsets[seat];
-    for (let i = 0; i < 12; i += 3) {
+    for (let i = info.hands ? 0 : 6, n = info.feet ? 12 : 6; i < n; i += 3) {
       c[i] -= so.x;
       c[i + 1] -= so.y + lift;
       c[i + 2] -= so.z;

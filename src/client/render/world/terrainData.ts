@@ -275,8 +275,11 @@ export function buildChunkArrays(
   i0: number, i1: number, j0: number, j1: number,
   step: number,
   skirtDepth: number,
+  /** Vertex heights to use (coarse LODs: conservativeLodHeights for this step); default = true heights. */
+  lodHeights: Float32Array = f.heights,
 ): ChunkArrays {
-  const { res, cell, half, heights } = f;
+  const { res, cell, half } = f;
+  const heights = lodHeights;
   const xs = lattice(i0, i1, step, []);
   const zs = lattice(j0, j1, step, []);
   const nx = xs.length, nz = zs.length;
@@ -392,6 +395,86 @@ export function buildChunkArrays(
   skirt(east, 1, 0);
 
   return { positions, normals, colors, surf, indices, minY, maxY };
+}
+
+/**
+ * Vertex heights for a coarse LOD (vertex step `s`) that never put the coarse surface above the
+ * true heightfield. A coarse triangle linearly interpolates its corners and so floats over concave
+ * ground (valleys, ditches) - enough to bury a prone player at range. For every coarse triangle on
+ * the global s-lattice we measure its worst overshoot above the fine surface (the fine mesh refines
+ * the coarse one, so checking fine vertices is exact) and lower all three corners by it; a vertex
+ * takes the largest lowering of its (up to six) triangles. The coarse surface then lies at or below
+ * the true ground everywhere while convex terrain (hills) keeps its exact vertex heights.
+ * Computed on the global lattice, so neighbouring chunks of one LOD share identical edge heights.
+ */
+export function conservativeLodHeights(f: HeightFieldData, s: number): Float32Array {
+  const { res, heights } = f;
+  const out = Float32Array.from(heights);
+  if (s <= 1) return out;
+  const last = res - 1;
+  const lower = new Float32Array(res * res);
+  const H = (i: number, j: number): number => heights[j * res + i];
+  const bump = (i: number, j: number, v: number): void => {
+    const k = j * res + i;
+    if (v > lower[k]) lower[k] = v;
+  };
+  for (let j0 = 0; j0 < last; j0 += s) {
+    const j1 = Math.min(last, j0 + s), sz = j1 - j0;
+    for (let i0 = 0; i0 < last; i0 += s) {
+      const i1 = Math.min(last, i0 + s), sx = i1 - i0;
+      const h00 = H(i0, j0), h10 = H(i1, j0), h01 = H(i0, j1), h11 = H(i1, j1);
+      let v1 = 0, v2 = 0;
+      for (let dj = 0; dj <= sz; dj++) {
+        const tz = dj / sz;
+        for (let di = 0; di <= sx; di++) {
+          const tx = di / sx;
+          const fine = H(i0 + di, j0 + dj);
+          // Same split as the physics heightfield: diagonal from (i1, j0) to (i0, j1).
+          if (tx + tz <= 1 + 1e-9) {
+            const c = h00 + (h10 - h00) * tx + (h01 - h00) * tz;
+            if (c - fine > v1) v1 = c - fine;
+          }
+          if (tx + tz >= 1 - 1e-9) {
+            const c = h11 + (h01 - h11) * (1 - tx) + (h10 - h11) * (1 - tz);
+            if (c - fine > v2) v2 = c - fine;
+          }
+        }
+      }
+      if (v1 > 0) {
+        bump(i0, j0, v1);
+        bump(i1, j0, v1);
+        bump(i0, j1, v1);
+      }
+      if (v2 > 0) {
+        bump(i1, j0, v2);
+        bump(i0, j1, v2);
+        bump(i1, j1, v2);
+      }
+    }
+  }
+  for (let k = 0; k < out.length; k++) out[k] -= lower[k];
+  return out;
+}
+
+/**
+ * Fallback for chunk lattices that do not start on multiples of `s`: each vertex takes the
+ * minimum true height within +-s cells (the region of every coarse triangle touching it), which
+ * is also never above the ground, only lower than necessary.
+ */
+export function neighbourhoodMinHeights(f: HeightFieldData, s: number): Float32Array {
+  const { res, heights } = f;
+  const out = new Float32Array(res * res);
+  const last = res - 1;
+  for (let j = 0; j < res; j++) {
+    for (let i = 0; i < res; i++) {
+      let m = Infinity;
+      for (let jj = Math.max(0, j - s); jj <= Math.min(last, j + s); jj++) {
+        for (let ii = Math.max(0, i - s); ii <= Math.min(last, i + s); ii++) m = Math.min(m, heights[jj * res + ii]);
+      }
+      out[j * res + i] = m;
+    }
+  }
+  return out;
 }
 
 /** Chunk grid layout: 8x8 chunks over the heightmap cells. */

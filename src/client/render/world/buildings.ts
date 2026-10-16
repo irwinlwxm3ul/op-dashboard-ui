@@ -19,8 +19,12 @@ import type { PropVisibility } from './props';
 import { NOISE_GLSL, patchShader } from './shaders';
 
 const PROP_CHUNK = 128;
-/** Prop chunks farther than this (zoom-scaled) are not drawn: crates/fences are a few pixels in the haze. */
-const PROP_DRAW_EDGES = [450];
+/**
+ * Prop chunks closer than this (zoom-scaled) use their detailed meshes (ribbed containers, model
+ * swap pids); farther chunks are drawn by one merged plain-box mesh. Props are cover, so they are
+ * drawn as far as players are (PLAYER_RENDER_DISTANCE) - the far mesh is never distance-culled.
+ */
+const PROP_DETAIL_EDGES = [450];
 const LOD_HYSTERESIS = 15;
 const SHELL_TEX_WIDTH = 256;
 const INTERIOR_CORE = linearRgb(0x1f1d1b);
@@ -38,7 +42,7 @@ interface BuildingEntry {
   band: number;
 }
 
-type BoxMaterialMode = 'full' | 'shell' | 'props';
+type BoxMaterialMode = 'full' | 'shell' | 'props' | 'farProps';
 
 /**
  * Building/prop material: per-vertex roughness/metalness + subtle world-space weathering. The
@@ -92,6 +96,30 @@ function createBoxMaterial(mode: BoxMaterialMode): THREE.MeshStandardMaterial {
     shader.fragmentShader = 'varying vec2 vDzRM;\nvarying vec3 vDzWorld;\n' + NOISE_GLSL + fs;
   };
   mat.customProgramCacheKey = () => `dz-building-${mode}-v2`;
+  return mat;
+}
+
+/** Shadow depth material honouring the same `vid` visibility mask as the box material. */
+function createMaskedDepthMaterial(visTex: THREE.Texture): THREE.MeshDepthMaterial {
+  const mat = new THREE.MeshDepthMaterial({ depthPacking: THREE.RGBADepthPacking });
+  mat.name = 'dz-masked-depth';
+  const uVis = { value: visTex };
+  mat.onBeforeCompile = (shader) => {
+    shader.uniforms.uVis = uVis;
+    shader.vertexShader =
+      'attribute float vid;\nuniform sampler2D uVis;\n' +
+      patchShader(
+        shader.vertexShader,
+        'project_vertex',
+        `#include <project_vertex>
+{
+  int vi = int(vid + 0.5);
+  float vis = texelFetch(uVis, ivec2(vi % ${SHELL_TEX_WIDTH}, vi / ${SHELL_TEX_WIDTH}), 0).r;
+  if (vis < 0.5) gl_Position = vec4(2.0, 2.0, 2.0, 1.0);
+}`,
+      );
+  };
+  mat.customProgramCacheKey = () => 'dz-masked-depth-v1';
   return mat;
 }
 
@@ -159,7 +187,15 @@ export class BuildingRenderer {
   private readonly edges = [220];
   private shellDirty = true;
   /** Prop chunk meshes with bounds for distance culling (props are tiny beyond ~650 m in haze). */
-  private readonly propChunks: { mesh: THREE.Mesh; minX: number; minY: number; minZ: number; maxX: number; maxY: number; maxZ: number; band: number }[] = [];
+  private readonly propChunks: { mesh: THREE.Mesh; farIdx: number; minX: number; minY: number; minZ: number; maxX: number; maxY: number; maxZ: number; band: number }[] = [];
+  /** Plain merged boxes of every prop chunk, shown per chunk (vid = chunk index) when it is far. */
+  private readonly farPropMaterial: THREE.MeshStandardMaterial;
+  private readonly farPropData = new Uint8Array(SHELL_TEX_WIDTH);
+  private readonly farPropTex: THREE.DataTexture;
+  private farPropMesh: THREE.Mesh | null = null;
+  /** Own shadow depth materials (not three's shared default, which other object types also use). */
+  private readonly meshDepth = new THREE.MeshDepthMaterial({ depthPacking: THREE.RGBADepthPacking });
+  private readonly propChunkDepth: THREE.MeshDepthMaterial;
 
   /**
    * `propPids` maps prop boxes that may be swapped for 3D models (props.ts) to their visibility
@@ -171,6 +207,15 @@ export class BuildingRenderer {
     this.shellMaterial = createBoxMaterial('shell');
     this.propMaterial = createBoxMaterial('props');
     (this.propMaterial.userData.visTex as { value: THREE.Texture | null }).value = propVis.texture;
+    this.propChunkDepth = createMaskedDepthMaterial(propVis.texture);
+    this.farPropTex = new THREE.DataTexture(this.farPropData, SHELL_TEX_WIDTH, 1, THREE.RedFormat, THREE.UnsignedByteType);
+    this.farPropTex.minFilter = THREE.NearestFilter;
+    this.farPropTex.magFilter = THREE.NearestFilter;
+    this.farPropTex.generateMipmaps = false;
+    this.farPropTex.needsUpdate = true;
+    this.farPropMaterial = createBoxMaterial('farProps');
+    (this.farPropMaterial.userData.visTex as { value: THREE.Texture | null }).value = this.farPropTex;
+    this.meshDepth.name = 'dz-building-depth';
     this.propPids = propPids;
     this.targetTexture = world.kind === 'training' ? createTargetTexture() : null;
     if (this.targetTexture) {
@@ -222,13 +267,14 @@ export class BuildingRenderer {
           emitBox(shellBuilder, b, mask, style);
         }
       }
-      this.emitInteriorCores(shellBuilder, bd, list, index);
+      this.emitInteriorCores(shellBuilder, bd, list, index, ctx);
       let mesh: THREE.Mesh | null = null;
       if (!full.isEmpty) {
         const geo = full.build();
         this.geometries.push(geo);
         mesh = new THREE.Mesh(geo, this.material);
         mesh.name = `building-${bd.id}`;
+        mesh.customDepthMaterial = this.meshDepth;
         mesh.castShadow = true;
         mesh.receiveShadow = true;
         mesh.matrixAutoUpdate = false;
@@ -289,17 +335,18 @@ export class BuildingRenderer {
     );
   }
 
-  /** Dark boxes filling each storey (floor slab with a ceiling above) so windows of shells read dark. */
-  private emitInteriorCores(out: GeoBuilder, bd: BuildingDef, list: readonly WorldBox[], index: number): void {
-    const style: FaceStyle = {
-      color: INTERIOR_CORE,
-      rm: [1, 0],
-      faceShade: [1, 1, 1, 1, 1, 1],
-      bottomShade: 1,
-      ribbed: false,
-      bld: index,
-    };
-    const inset = 0.32;
+  /**
+   * Dark backdrops so the shell's window openings read as dark rooms: for each storey (a floor
+   * slab with a ceiling above) four quads just inside the exterior walls, each facing INTO the
+   * room. Seen from outside through a window, only the far walls' backdrops face the viewer
+   * (the near one is back-face culled), so anything inside the room - a player at a window - stays
+   * visible in front of them. No volumes: nothing can hide inside the shell.
+   */
+  private emitInteriorCores(out: GeoBuilder, bd: BuildingDef, list: readonly WorldBox[], index: number, ctx: BuildingContext): void {
+    const inset = 0.27; // just inside 0.25 m exterior walls
+    // Only backdrops on the exterior walls: slab pieces around stairwells have inner edges.
+    const onEdge = (a: number, b: number): boolean => Math.abs(a - b) < 0.6;
+    const [r, g, b] = INTERIOR_CORE;
     for (const f of list) {
       if (f.kind !== 'floor') continue;
       const fx = f.max.x - f.min.x, fz = f.max.z - f.min.z;
@@ -312,12 +359,24 @@ export class BuildingRenderer {
         ceil = Math.min(ceil, c.min.y);
       }
       if (!Number.isFinite(ceil) || ceil > bd.max.y + 0.01) continue;
-      const core: Aabb = {
-        min: { x: f.min.x + inset, y: f.max.y, z: f.min.z + inset },
-        max: { x: f.max.x - inset, y: ceil, z: f.max.z - inset },
+      const x0 = f.min.x + inset, x1 = f.max.x - inset, z0 = f.min.z + inset, z1 = f.max.z - inset;
+      const y0 = f.max.y, y1 = ceil;
+      const quad = (
+        ax: number, az: number, bx: number, bz: number, nx: number, nz: number,
+      ): void => {
+        // (a, b) bottom edge counter-clockwise seen from the room side (normal n points inward).
+        const v = (x: number, y: number, z: number): number => {
+          const i = out.vertex(x, y, z, nx, 0, nz, r, g, b);
+          out.extra('rm', 1, 0);
+          out.extra('vid', index);
+          return i;
+        };
+        out.quad(v(ax, y0, az), v(bx, y0, bz), v(bx, y1, bz), v(ax, y1, az));
       };
-      // Only the four sides: top/bottom are never visible from outside.
-      emitBox(out, core, 0b110011, style);
+      if (onEdge(f.min.x, ctx.min.x)) quad(x0, z1, x0, z0, 1, 0); // west wall, faces +X
+      if (onEdge(f.max.x, ctx.max.x)) quad(x1, z0, x1, z1, -1, 0); // east wall, faces -X
+      if (onEdge(f.min.z, ctx.min.z)) quad(x0, z0, x1, z0, 0, 1); // north wall, faces +Z
+      if (onEdge(f.max.z, ctx.max.z)) quad(x1, z1, x0, z1, 0, -1); // south wall, faces -Z
     }
   }
 
@@ -341,34 +400,52 @@ export class BuildingRenderer {
     }
     const shade: number[] = [1, 1, 1, 1, 1, 1];
     const neighbours: Aabb[] = [];
+    const far = new GeoBuilder().addAttribute('rm', 2).addAttribute('vid', 1);
     for (const [key, list] of buckets) {
+      const farIdx = this.propChunks.length + 1;
+      if (farIdx >= SHELL_TEX_WIDTH) throw new Error('too many prop chunks');
       const gb = new GeoBuilder().addAttribute('rm', 2).addAttribute('vid', 1);
       const near = new BoxNeighbourhood(list);
       for (const b of list) {
         const mask = visibleFaces(b, near.touching(b, 0.03, neighbours), world.heightAt);
         if (!mask) continue;
+        const color = boxBaseColor(b);
+        const rm = materialRM(b.material);
         emitBox(gb, b, mask, {
-          color: boxBaseColor(b),
-          rm: materialRM(b.material),
-          faceShade: shade,
-          bottomShade: 0.86,
-          ribbed: b.kind === 'container',
+          color, rm, faceShade: shade, bottomShade: 0.86, ribbed: b.kind === 'container',
           bld: this.propPids.get(b.id) ?? 0,
         });
+        // Far version: plain boxes; see-through chain-link fences are left out (they hide nobody).
+        if (!(b.kind === 'fence' && b.material === 'metal')) {
+          emitBox(far, b, mask, { color, rm, faceShade: shade, bottomShade: 0.86, ribbed: false, bld: farIdx });
+        }
       }
       if (gb.isEmpty) continue;
       const geo = gb.build();
       this.geometries.push(geo);
       const mesh = new THREE.Mesh(geo, this.propMaterial);
       mesh.name = `props-${key}`;
+      mesh.customDepthMaterial = this.propChunkDepth;
       mesh.castShadow = true;
       mesh.receiveShadow = true;
       mesh.matrixAutoUpdate = false;
       this.group.add(mesh);
       const bb = geo.boundingBox!;
       this.propChunks.push({
-        mesh, minX: bb.min.x, minY: bb.min.y, minZ: bb.min.z, maxX: bb.max.x, maxY: bb.max.y, maxZ: bb.max.z, band: 0,
+        mesh, farIdx, minX: bb.min.x, minY: bb.min.y, minZ: bb.min.z, maxX: bb.max.x, maxY: bb.max.y, maxZ: bb.max.z, band: -1,
       });
+    }
+    if (!far.isEmpty) {
+      const geo = far.build();
+      this.geometries.push(geo);
+      const mesh = new THREE.Mesh(geo, this.farPropMaterial);
+      mesh.name = 'props-far';
+      mesh.frustumCulled = false;
+      mesh.castShadow = false;
+      mesh.receiveShadow = false;
+      mesh.matrixAutoUpdate = false;
+      this.group.add(mesh);
+      this.farPropMesh = mesh;
     }
     if (targets.length && this.targetMaterial) this.buildTargets(world, targets);
   }
@@ -422,6 +499,7 @@ export class BuildingRenderer {
       this.geometries.push(geo);
       const mesh = new THREE.Mesh(geo, this.targetMaterial);
       mesh.name = 'target-faces';
+      mesh.customDepthMaterial = this.meshDepth;
       mesh.castShadow = true;
       mesh.receiveShadow = true;
       mesh.matrixAutoUpdate = false;
@@ -432,6 +510,7 @@ export class BuildingRenderer {
       this.geometries.push(geo);
       const mesh = new THREE.Mesh(geo, this.material);
       mesh.name = 'target-plates';
+      mesh.customDepthMaterial = this.meshDepth;
       mesh.castShadow = true;
       mesh.receiveShadow = true;
       mesh.matrixAutoUpdate = false;
@@ -468,11 +547,19 @@ export class BuildingRenderer {
       this.shellTex.needsUpdate = true;
     }
     if (this.shell) this.shell.visible = shells > 0;
+    let anyFar = false, farDirty = false;
     for (const pc of this.propChunks) {
       const d = distanceToAabb(cx, cy, cz, pc.minX, pc.minY, pc.minZ, pc.maxX, pc.maxY, pc.maxZ) * lodScale;
-      pc.band = selectBand(d, pc.band, PROP_DRAW_EDGES, LOD_HYSTERESIS);
-      pc.mesh.visible = pc.band === 0;
+      const band = selectBand(d, pc.band, PROP_DETAIL_EDGES, LOD_HYSTERESIS);
+      if (band !== 0) anyFar = true;
+      if (band === pc.band) continue;
+      pc.band = band;
+      pc.mesh.visible = band === 0;
+      this.farPropData[pc.farIdx] = band === 0 ? 0 : 255;
+      farDirty = true;
     }
+    if (farDirty) this.farPropTex.needsUpdate = true;
+    if (this.farPropMesh) this.farPropMesh.visible = anyFar;
   }
 
   dispose(): void {
@@ -480,6 +567,10 @@ export class BuildingRenderer {
     this.material.dispose();
     this.shellMaterial.dispose();
     this.propMaterial.dispose();
+    this.farPropMaterial.dispose();
+    this.farPropTex.dispose();
+    this.meshDepth.dispose();
+    this.propChunkDepth.dispose();
     this.shellTex.dispose();
     this.targetMaterial?.dispose();
     this.targetTexture?.dispose();

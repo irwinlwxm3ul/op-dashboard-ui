@@ -8,7 +8,7 @@ import * as THREE from 'three';
 import { distanceToAabb, selectBand } from './lod';
 import { NOISE_GLSL, patchShader } from './shaders';
 import {
-  TERRAIN_CHUNKS, buildChunkArrays, chunkCellRange, mergeChunkArrays, type ChunkArrays, type HeightFieldData,
+  TERRAIN_CHUNKS, buildChunkArrays, chunkCellRange, conservativeLodHeights, mergeChunkArrays, neighbourhoodMinHeights, type ChunkArrays, type HeightFieldData,
   type TerrainShading,
 } from './terrainData';
 import { linearRgb } from './geoBuilder';
@@ -114,6 +114,12 @@ export class TerrainRenderer {
     this.group.name = 'terrain';
     this.material = createTerrainMaterial();
     const { res, cell, half } = field;
+    // Coarse LOD vertex heights that never rise above the true ground (see conservativeLodHeights).
+    // Exact per-triangle correction needs chunk lattices aligned to the global step lattice
+    // (true for TERRAIN_RES); otherwise use the cruder neighbourhood minimum.
+    const per = chunkCellRange(res, TERRAIN_CHUNKS, 1)[0];
+    const lodHeights = LOD_STEPS.map((st) =>
+      per % st === 0 ? conservativeLodHeights(field, st) : neighbourhoodMinHeights(field, st));
     const farArrays = new Map<number, Map<TerrainChunk, ChunkArrays>>();
     for (let l = 1; l < LOD_STEPS.length; l++) farArrays.set(l, new Map());
     for (let cz = 0; cz < TERRAIN_CHUNKS; cz++) {
@@ -138,7 +144,7 @@ export class TerrainRenderer {
         };
         for (let l = 0; l < LOD_STEPS.length; l++) {
           const step = LOD_STEPS[l];
-          const arrays = buildChunkArrays(field, shade, i0, i1, j0, j1, step, 3 + step * cell * 1.5);
+          const arrays = buildChunkArrays(field, shade, i0, i1, j0, j1, step, 3 + step * cell * 1.5, lodHeights[l]);
           if (l === 0) {
             chunk.minY = arrays.minY;
             chunk.maxY = arrays.maxY;

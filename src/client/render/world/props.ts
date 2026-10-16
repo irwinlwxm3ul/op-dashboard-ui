@@ -74,6 +74,8 @@ export class PropRenderer {
   private readonly edges = [140];
   private readonly materials: THREE.Material[] = [];
   private readonly geometries: THREE.BufferGeometry[] = [];
+  /** Own shadow depth material for the instanced models (not three's shared default). */
+  private readonly depth = new THREE.MeshDepthMaterial({ depthPacking: THREE.RGBADepthPacking });
   private timer = UPDATE_INTERVAL;
   private force = true;
   private shadows = true;
@@ -109,6 +111,7 @@ export class PropRenderer {
         mesh.frustumCulled = false;
         mesh.matrixAutoUpdate = false;
         mesh.receiveShadow = true;
+        mesh.customDepthMaterial = this.depth;
         if (lead) {
           mesh.instanceMatrix = lead.instanceMatrix;
           mesh.instanceColor = lead.instanceColor;
@@ -225,6 +228,7 @@ export class PropRenderer {
     for (const s of this.slots.values()) s.lead.dispose();
     for (const g of this.geometries) g.dispose();
     for (const m of this.materials) m.dispose();
+    this.depth.dispose();
     this.group.removeFromParent();
   }
 }

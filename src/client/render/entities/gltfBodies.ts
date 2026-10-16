@@ -348,15 +348,16 @@ type AimMode = 'none' | 'track' | 'pitch';
 /**
  * Root offsets (model space) per base clip, so the clips line up with the simulation's body
  * origin: swim clips are authored around the water line (our origin is SWIM_FEET_DEPTH below
- * it), seated clips sit on a 0.53 m chair (our seats put the hips 0.4 m above the origin), and the
- * crawl clips lie with the hips 0.27 m behind their origin (ours: hips at the origin).
+ * it), seated clips sit on a 0.53 m chair with the hips 0.34 m behind their origin (our seats put
+ * the hips 0.4 m straight above the origin), and the crawl clips lie with the hips 0.27 m behind
+ * their origin (ours: hips at the origin).
  */
 const ROOT_OFFSET: Partial<Record<CharacterAnimKey, readonly [number, number, number]>> = {
   swim: [0, 1.15, 0],
   swimIdle: [0, 1.0, 0],
-  sit: [0, -0.13, 0],
-  drive: [0, -0.13, 0],
-  ride: [0, -0.13, 0],
+  sit: [0, -0.13, -0.34],
+  drive: [0, -0.13, -0.34],
+  ride: [0, -0.13, -0.34],
   prone: [0, 0, -0.27],
   crawl: [0, 0, -0.27], crawlBack: [0, 0, -0.27], crawlLeft: [0, 0, -0.27], crawlRight: [0, 0, -0.27],
   downed: [0, 0, -0.27],
@@ -711,8 +712,7 @@ class GltfNearBody implements NearBody {
         : k === 'holdRifle' || k === 'holdPistol' ? 'pitch' : 'none';
     }
     this.correctSpine(f, mode);
-    const DBG = (globalThis as unknown as { __rideDbg?: number }).__rideDbg ?? 0;
-    if (!(DBG & 1) && f.seat && f.logical.state !== 'death' && (f.seat.hands || f.seat.feet)) this.rideIK(f, f.seat, inHands);
+    if (f.seat && f.logical.state !== 'death' && (f.seat.hands || f.seat.feet)) this.rideIK(f, f.seat, inHands);
   }
 
   /**
@@ -754,6 +754,32 @@ class GltfNearBody implements NearBody {
       }
     }
     if (seat.hands && !inHands) {
+      // Reach assist: lean the upper body forward while the contacts are beyond the arms' reach
+      // (the characters' arms are short for the real UAZ's steering wheel and the bike's bars).
+      let excess = 0;
+      for (let i = 0; i < 2; i++) {
+        const arm = this.arms[i];
+        if (!arm) continue;
+        arm.upper.updateWorldMatrix(true, false);
+        _end.setFromMatrixPosition(arm.upper.matrixWorld);
+        _tgt.set(c[i * 3], c[i * 3 + 1], c[i * 3 + 2]).applyMatrix4(f.root);
+        excess = Math.max(excess, _tgt.distanceTo(_end) - PALM_REACH - 0.96 * arm.reach);
+      }
+      const spine = this.spine;
+      if (excess > 0 && spine && spine.parent) {
+        const ang = Math.min(REACH_LEAN_MAX, excess * REACH_LEAN_PER_M);
+        spine.parent.updateWorldMatrix(true, false);
+        _qp.setFromRotationMatrix(_m.extractRotation(spine.parent.matrixWorld));
+        _axis.set(1, 0, 0).applyQuaternion(_qRoot);
+        _q.setFromAxisAngle(_axis, -ang);
+        applyWorldRotation(spine, _qp, _q);
+        if (this.neck && this.neck.parent) {
+          this.neck.parent.updateWorldMatrix(true, false);
+          _qp.setFromRotationMatrix(_m.extractRotation(this.neck.parent.matrixWorld));
+          _q.setFromAxisAngle(_axis, 0.7 * ang);
+          applyWorldRotation(this.neck, _qp, _q);
+        }
+      }
       for (let i = 0; i < 2; i++) {
         const arm = this.arms[i];
         if (!arm) continue;
@@ -798,7 +824,7 @@ class GltfNearBody implements NearBody {
     // Lean (roll about the facing axis), hit flinch and fire kick (pitch about the right axis).
     let lean = a.lean * 0.24;
     let pitchExtra = 0.22 * a.flinchBz * a.flinchX + 0.05 * a.kickX;
-    if (!(((globalThis as unknown as { __rideDbg?: number }).__rideDbg ?? 0) & 2) && f.seat && f.seat.type === 'bike' && f.logical.state !== 'death') {
+    if (f.seat && f.seat.type === 'bike' && f.logical.state !== 'death') {
       // Bike riders lean forward with speed and into turns beyond the bike's roll.
       const bl = bikeLean(f.seat);
       pitchExtra -= bl.pitch;
@@ -866,10 +892,13 @@ function applyWorldRotation(bone: THREE.Object3D, parentWorld: THREE.Quaternion,
 // ---------------------------------------------------------------------------
 
 /** Wrist stops this far short of a palm contact (wrist -> palm centre). */
-const PALM_REACH = 0.07;
+const PALM_REACH = 0.08;
+/** Reach assist: extra forward spine lean per metre the grips are out of reach, and its cap. */
+const REACH_LEAN_PER_M = 2.2;
+const REACH_LEAN_MAX = 0.5;
 /** Foot bone origin (ankle) above / behind a footpeg top. */
-const FOOT_ABOVE_PEG = 0.06;
-const FOOT_BEHIND_PEG = 0.09;
+const FOOT_ABOVE_PEG = 0.015;
+const FOOT_BEHIND_PEG = 0.15;
 
 /** Two-bone chain: upper -> lower -> end point (lower-local), plus the leg's root-parented foot. */
 interface Limb {
@@ -878,6 +907,8 @@ interface Limb {
   /** End effector in the lower bone's local space (wrist joint / ankle). */
   end: THREE.Vector3;
   foot: THREE.Bone | null;
+  /** Bind-pose chain length (upper + lower), world units. */
+  reach: number;
 }
 
 /** Build a limb from bind-pose world matrices (root.updateMatrixWorld(true) done by the caller). */
@@ -895,7 +926,10 @@ function limbFor(root: THREE.Object3D, upperName: string, lowerName: string, end
   } else {
     return null;
   }
-  return { upper, lower, end, foot: footObj?.isBone ? footObj : null };
+  _A.setFromMatrixPosition(upper.matrixWorld);
+  _B.setFromMatrixPosition(lower.matrixWorld);
+  _C.copy(end).applyMatrix4(lower.matrixWorld);
+  return { upper, lower, end, foot: footObj?.isBone ? footObj : null, reach: _A.distanceTo(_B) + _B.distanceTo(_C) };
 }
 
 const _lean = { pitch: 0, roll: 0 };

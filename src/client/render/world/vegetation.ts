@@ -22,6 +22,8 @@ const MAX_REAL_DISTANCE = 1060;
 const UPDATE_INTERVAL = 0.25;
 const NO_BAND = 255;
 const ONE: readonly [number, number, number] = [1, 1, 1];
+/** Rocks lower than this (m) cannot hide a prone player and are not drawn in the far band. */
+const TINY_ROCK = 0.3;
 const GROUPS: readonly SpeciesGroup[] = ['tree', 'bush', 'rock'];
 /** Distance histogram for the instance budgets: 2 m buckets up to MAX_REAL_DISTANCE. */
 const BUCKET = 2;
@@ -100,6 +102,7 @@ export class VegetationRenderer {
   private readonly layers: Layer[] = [];
   private readonly slots: Slot[] = [];
   private readonly geometries: THREE.BufferGeometry[] = [];
+  private readonly instDepth = new THREE.MeshDepthMaterial({ depthPacking: THREE.RGBADepthPacking });
   /** Profile-derived band edges per group (near, mid, far), before budgets. */
   private readonly baseEdges = new Float64Array(9);
   /** Effective (budget-limited, smoothed) edges per group, as selectBand edge arrays. */
@@ -107,7 +110,6 @@ export class VegetationRenderer {
   private readonly budgets = new Float64Array(6);
   private readonly hist = new Uint32Array(3 * BUCKETS);
   private readonly profile: { near: number; mid: number; far: number; budgetScale: number } = { near: 0, mid: 0, far: 0, budgetScale: 0 };
-  private density = 1;
   private shadows = true;
   private bushShadows = false;
   private readonly bushSlots = new Set<Slot>();
@@ -119,7 +121,7 @@ export class VegetationRenderer {
 
   /**
    * `profile` fixes the variant counts (a profile with other counts needs a new renderer);
-   * distances / density can change later through setProfile().
+   * distances / budgets can change later through setProfile().
    */
   constructor(world: World, set: VegetationModelSet, profile: Readonly<VegetationProfile>) {
     this.group.name = 'vegetation';
@@ -215,14 +217,18 @@ export class VegetationRenderer {
       const near = this.makeSlot(`bush-${vi}-near`, v.near, items.length, true, false, false);
       const mid = this.makeSlot(`bush-${vi}-mid`, v.mid, items.length, false, false, false);
       if (near) this.bushSlots.add(near);
-      this.addLayer('bush', items, [near, mid, farSlot], IMPOSTOR_CELL.bush, true);
+      this.addLayer('bush', items, [near, mid, farSlot], IMPOSTOR_CELL.bush);
     });
+    // Far rocks: one cheap shared model (rocks are cover and are drawn to the far edge).
+    const rockFar = set.rockFar && world.rocks.length
+      ? this.makeSlot('rock-far', set.rockFar, world.rocks.length, false, false, false)
+      : null;
     rockItems.forEach((items, vi) => {
       if (items.length === 0) return;
       const v = set.rocks[vi];
       const near = this.makeSlot(`rock-${vi}-near`, v.near, items.length, true, false, false);
       const mid = this.makeSlot(`rock-${vi}-mid`, v.mid, items.length, false, false, false);
-      this.addLayer('rock', items, [near, mid, mid], 0, false, true);
+      this.addLayer('rock', items, [near, mid, rockFar ?? mid], 0, true);
     });
     this.applyShadowFlags();
   }
@@ -260,7 +266,9 @@ export class VegetationRenderer {
       mesh.castShadow = near && part.castShadow;
       mesh.receiveShadow = near;
       mesh.userData.castable = near && part.castShadow;
-      if (part.depth) mesh.customDepthMaterial = part.depth;
+      // Own depth material for every caster (three's shared default is also used by skinned /
+      // batched objects, which makes it re-resolve programs every frame).
+      mesh.customDepthMaterial = part.depth ?? this.instDepth;
       if (lead) {
         mesh.instanceMatrix = lead.instanceMatrix;
         mesh.instanceColor = lead.instanceColor;
@@ -280,7 +288,7 @@ export class VegetationRenderer {
   }
 
   /** Sort items by terrain chunk and store them as typed arrays. */
-  private addLayer(group: SpeciesGroup, items: RawItem[], slots: [Slot | null, Slot | null, Slot | null], cell: number, densityCulled = false, smallCulled = false): void {
+  private addLayer(group: SpeciesGroup, items: RawItem[], slots: [Slot | null, Slot | null, Slot | null], cell: number, tinyCulled = false): void {
     const n = items.length;
     const chunks = GRID * GRID;
     const chunkOf = (it: RawItem): number => {
@@ -326,11 +334,9 @@ export class VegetationRenderer {
       layer.cols[i * 3 + 1] = it.col[1];
       layer.cols[i * 3 + 2] = it.col[2];
       if (layer.trunk) layer.trunk[i] = it.trunk;
-      // keepFar code: 0 = never in the far band (small rocks), 1 = always kept,
-      // 128 + rank (0..99) = kept while rank < density * 100.
-      const rank = Math.floor(hashFloat(Math.round(it.x * 10), Math.round(it.z * 10), 0x5eed) * 100);
-      const small = smallCulled && it.h < 1.2;
-      layer.keepFar[i] = small ? 0 : densityCulled ? 128 + Math.min(99, rank) : 1;
+      // keepFar: 0 = never in the far band (pebbles too small to hide even a prone player),
+      // 1 = drawn to the far edge. Cover is never density-thinned.
+      layer.keepFar[i] = tinyCulled && it.h < TINY_ROCK ? 0 : 1;
       layer.chunkMinY[c] = Math.min(layer.chunkMinY[c], it.y - 1);
       layer.chunkMaxY[c] = Math.max(layer.chunkMaxY[c], it.y + it.h);
     });
@@ -339,12 +345,11 @@ export class VegetationRenderer {
 
   private applyProfile(v: Readonly<VegetationProfile>): boolean {
     const p = this.profile;
-    if (p.near === v.near && p.mid === v.mid && p.far === v.far && p.budgetScale === v.budgetScale && this.density === v.density) return false;
+    if (p.near === v.near && p.mid === v.mid && p.far === v.far && p.budgetScale === v.budgetScale) return false;
     p.near = v.near;
     p.mid = v.mid;
     p.far = v.far;
     p.budgetScale = v.budgetScale;
-    this.density = v.density;
     GROUPS.forEach((g, gi) => {
       const sc = this.set.bandScale[g];
       const near = v.near * sc[0];
@@ -374,7 +379,7 @@ export class VegetationRenderer {
     return Infinity;
   }
 
-  /** Distances / density (variant counts are fixed per renderer, see constructor). */
+  /** Distances / budgets (variant counts are fixed per renderer, see constructor). */
   setProfile(v: Readonly<VegetationProfile>): void {
     if (this.applyProfile(v)) this.forceUpdate = true;
     if (this.bushShadows !== v.bushShadows) {
@@ -396,9 +401,7 @@ export class VegetationRenderer {
   }
 
   private keptFar(code: number): boolean {
-    if (code === 0) return false;
-    if (code < 128) return true;
-    return code - 128 < this.density * 100;
+    return code !== 0;
   }
 
   update(cx: number, cy: number, cz: number, lodScale: number, dt: number): void {
@@ -520,6 +523,7 @@ export class VegetationRenderer {
   dispose(): void {
     for (const s of this.slots) s.lead.dispose();
     for (const g of this.geometries) g.dispose();
+    this.instDepth.dispose();
     this.group.removeFromParent();
   }
 }

@@ -412,15 +412,16 @@ function genChute(p: Pose, g: GenParams): void {
 
 /** The rig's arm IK targets wrists: pull a palm contact back toward the shoulder by this much. */
 const PALM_REACH = 0.065;
-/** Ankle above / behind a footpeg top (sole under the ankle, ball of the foot on the peg). */
-const ANKLE_ABOVE_PEG = 0.085;
-const ANKLE_BEHIND_PEG = 0.05;
+/** Boot sole below the ankle and ball of the foot ahead of the shin axis (shin space, see soldierModel). */
+const SOLE_BELOW_ANKLE = 0.075;
+const BALL_AHEAD = 0.09;
 
 const _hq = new THREE.Quaternion();
 const _hqi = new THREE.Quaternion();
 const _he = new THREE.Euler(0, 0, 0, 'YXZ');
 const _hj = new THREE.Vector3();
 const _lt = new THREE.Vector3();
+const _lt0 = new THREE.Vector3();
 const _lp = new THREE.Vector3();
 const _ln = new THREE.Vector3();
 const _lm = new THREE.Vector3();
@@ -445,36 +446,53 @@ function seatHand(p: Pose, left: boolean, c: Float32Array, at: number, sx: numbe
 }
 
 /**
- * Two-bone leg IK onto a footpeg, written as the rig's thigh (pitch, yaw, abduction) and knee
- * channels. Uses the hips placement already in the pose; the knee bends toward `pole` (model
- * space). side: -1 left, +1 right.
+ * Two-bone solve in the hips frame: ankle target t (from the hip joint), knee toward `pole`.
+ * Leaves the thigh direction in _lu, the shin direction in _ls and the knee hinge in _lh; returns
+ * the knee bend.
+ */
+function legSolve(t: THREE.Vector3, pole: THREE.Vector3): number {
+  const a = DIM.thigh, b = DIM.shin;
+  let d = t.length();
+  if (d < 1e-4) t.set(0, -1e-4, 0), (d = 1e-4);
+  _ln.copy(t).multiplyScalar(1 / d);
+  d = Math.min(a + b - 1e-3, Math.max(Math.abs(a - b) + 0.02, d));
+  const along = (a * a - b * b + d * d) / (2 * d);
+  const up = Math.sqrt(Math.max(0, a * a - along * along));
+  _lm.copy(pole).addScaledVector(_ln, -pole.dot(_ln));
+  if (_lm.lengthSq() < 1e-8) _lm.set(0, 0, -1).addScaledVector(_ln, _ln.z);
+  _lm.normalize();
+  _lk.copy(_ln).multiplyScalar(along).addScaledVector(_lm, up); // knee
+  _lu.copy(_lk).normalize(); // thigh direction
+  _ls.copy(_ln).multiplyScalar(d).sub(_lk).normalize(); // shin direction
+  // Knee hinge = thigh-local X (the shin bends toward thigh-local +Z).
+  _lh.crossVectors(_ls, _lu);
+  if (_lh.lengthSq() < 1e-8) _lh.crossVectors(_lu, _lm);
+  _lh.normalize();
+  return Math.acos(Math.max(-1, Math.min(1, _lu.dot(_ls))));
+}
+
+/**
+ * Leg IK onto a footpeg (ball of the boot on the peg top), written as the rig's thigh (pitch, yaw,
+ * abduction) and knee channels. Uses the hips placement already in the pose; the knee bends toward
+ * `pole` (model space). side: -1 left, +1 right.
  */
 function seatLeg(p: Pose, side: number, px: number, py: number, pz: number, poleX: number, poleY: number, poleZ: number): void {
   _hq.setFromEuler(_he.set(p[P.HPITCH], p[P.HYAW], p[P.HROLL], 'YXZ'));
   _hqi.copy(_hq).invert();
   _hj.set(side * DIM.hipJointX, DIM.hipJointY, 0).applyQuaternion(_hq);
   _hj.x += p[P.HX]; _hj.y += p[P.HY]; _hj.z += p[P.HZ];
-  // Ankle target and knee pole in the hips frame.
-  _lt.set(px, py + ANKLE_ABOVE_PEG, pz + ANKLE_BEHIND_PEG).sub(_hj).applyQuaternion(_hqi);
+  // Peg and knee pole in the hips frame.
+  _lt0.set(px, py, pz).sub(_hj).applyQuaternion(_hqi);
   _lp.set(poleX, poleY, poleZ).applyQuaternion(_hqi);
-  const a = DIM.thigh, b = DIM.shin;
-  let d = _lt.length();
-  if (d < 1e-4) return;
-  _ln.copy(_lt).multiplyScalar(1 / d);
-  d = Math.min(a + b - 1e-3, Math.max(Math.abs(a - b) + 0.02, d));
-  const along = (a * a - b * b + d * d) / (2 * d);
-  const up = Math.sqrt(Math.max(0, a * a - along * along));
-  _lm.copy(_lp).addScaledVector(_ln, -_lp.dot(_ln));
-  if (_lm.lengthSq() < 1e-8) _lm.set(0, 0, -1).addScaledVector(_ln, _ln.z);
-  _lm.normalize();
-  _lk.copy(_ln).multiplyScalar(along).addScaledVector(_lm, up); // knee
-  _lu.copy(_lk).normalize(); // thigh direction
-  _ls.copy(_ln).multiplyScalar(d).sub(_lk).normalize(); // shin direction
-  const knee = Math.acos(Math.max(-1, Math.min(1, _lu.dot(_ls))));
-  // Thigh basis: local -Y along the thigh, local X = knee hinge (shin bends toward local +Z).
-  _lh.crossVectors(_ls, _lu);
-  if (_lh.lengthSq() < 1e-8) _lh.crossVectors(_lu, _lm);
-  _lh.normalize();
+  // First guess: ankle straight above the peg; then put the ball of the boot (rigid with the shin)
+  // onto the peg for that shin orientation and solve again.
+  _lt.copy(_lt0);
+  _lt.y += SOLE_BELOW_ANKLE;
+  legSolve(_lt, _lp);
+  _lz.crossVectors(_ls, _lh); // shin-local +Z
+  _lt.copy(_lt0).addScaledVector(_ls, -SOLE_BELOW_ANKLE).addScaledVector(_lz, BALL_AHEAD);
+  const knee = legSolve(_lt, _lp);
+  // Thigh basis: local -Y along the thigh, local X = knee hinge.
   _ly.copy(_lu).negate();
   _lz.crossVectors(_lh, _ly).normalize();
   _lh.crossVectors(_ly, _lz);
