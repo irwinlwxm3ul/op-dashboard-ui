@@ -5,7 +5,7 @@ import type { MatchResults, PlayerResult } from '../../../shared/types';
 import type { FrameState } from '../../game/types';
 import type { MatchContext } from '../contracts';
 import type { ScreenView, UiCtx } from '../context';
-import { button, clear, h, isolate, svgIcon, tx, txp, userText } from '../dom';
+import { ariaTx, button, clear, h, isolate, svgIcon, titleTx, tx, txp, userText } from '../dom';
 import { ICONS } from '../icons';
 import { loadSpOptions } from './singlePlayer';
 
@@ -145,8 +145,16 @@ export class ResultsScreen implements ScreenView {
     clear(this.table);
     const head = h('div', 'dz-tr dz-th', this.table);
     head.setAttribute('role', 'row');
-    for (const k of ['results.placement', 'results.player', 'results.kills', 'results.knocks', 'results.damage', 'results.survivalTime'] as const) {
-      tx(h('div', 'dz-td', head), k).setAttribute('role', 'columnheader');
+    // Placement column header is the universal "#" (full label for assistive tech and tooltip).
+    const placeHead = h('div', 'dz-td', head);
+    placeHead.setAttribute('role', 'columnheader');
+    placeHead.textContent = '#';
+    ariaTx(placeHead, 'results.placement');
+    titleTx(placeHead, 'results.placement');
+    for (const k of ['results.player', 'results.kills', 'results.knocks', 'results.damage', 'results.survivalTime'] as const) {
+      const cell = tx(h('div', 'dz-td', head), k);
+      cell.setAttribute('role', 'columnheader');
+      titleTx(cell, k);
     }
     const ordered = Array.from(teams.entries()).sort((a, b) => {
       const pa = Math.min(...a[1].map((p) => p.placement || 999));

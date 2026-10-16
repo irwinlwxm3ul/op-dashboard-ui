@@ -53,6 +53,8 @@ vehicles → downed/revive → final circle → winner → results → back to t
 | Camera FPP/TPP | V | Free look | Alt |
 | Quick heal | 7 bandage, 8 first aid, 9 medkit, 0 energy | Refuel | T |
 | Vehicle | W/S throttle, A/D steer, Space handbrake, Shift boost, 1–4 seats, F exit | Stats overlay | F3 |
+| Scoreboard | P | Spectate next / previous | ← / → |
+| Training: respawn | K | Pause menu | Esc |
 
 ## Languages
 

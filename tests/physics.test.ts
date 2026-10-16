@@ -740,10 +740,12 @@ describe('raycastWorld / lineOfSight', () => {
     lineOfSight(w, pairs[0][0], pairs[0][1]); // build the acceleration grid
     const hit: RayHit = { dist: 0, point: { x: 0, y: 0, z: 0 }, normal: { x: 0, y: 0, z: 0 }, kind: 'terrain', material: 'grass' };
     const d = { x: 0, y: 0, z: 0 };
-    let t0 = performance.now();
+    // CPU time (not wall clock) so the budget check is robust on a loaded machine.
+    const cpuUs = () => { const u = process.cpuUsage(); return u.user + u.system; };
+    let t0 = cpuUs();
     for (let rep = 0; rep < 5; rep++) for (const [a, b] of pairs) lineOfSight(w, a, b);
-    const losUs = ((performance.now() - t0) * 1000) / (pairs.length * 5);
-    t0 = performance.now();
+    const losUs = (cpuUs() - t0) / (pairs.length * 5);
+    t0 = cpuUs();
     for (let rep = 0; rep < 5; rep++) {
       for (const [a, b] of pairs) {
         const l = Math.hypot(b.x - a.x, b.y - a.y, b.z - a.z);
@@ -751,7 +753,7 @@ describe('raycastWorld / lineOfSight', () => {
         raycastWorld(w, a, d, 1200, hit);
       }
     }
-    const castUs = ((performance.now() - t0) * 1000) / (pairs.length * 5);
+    const castUs = (cpuUs() - t0) / (pairs.length * 5);
     expect(losUs).toBeLessThan(50);
     expect(castUs).toBeLessThan(150);
   });

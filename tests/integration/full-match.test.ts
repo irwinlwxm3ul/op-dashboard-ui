@@ -51,7 +51,7 @@ describe('full match soak (bots only)', () => {
     expect(r.avgMs).toBeLessThan(12);
   });
 
-  it('squads: 32 bots in teams of 4 finish with one winning team and use downed/revive', () => {
+  it('squads: 32 bots in teams of 4 finish with one winning team and players get knocked (downed state)', () => {
     const r = runMatch({
       mode: 'br', seed: 777, maxPlayers: 32, teamSize: 4, botFill: true,
       botDifficulty: 'hard', zoneSpeed: 0.25, infiniteAmmo: false,
@@ -64,6 +64,38 @@ describe('full match soak (bots only)', () => {
     const knocks = res.players.reduce((a, p) => a + p.knocks, 0);
     expect(knocks).toBeGreaterThan(0);
     console.log(`[soak squads] ticks=${r.ticks} avg=${r.avgMs.toFixed(2)}ms worst=${r.worstMs.toFixed(1)}ms knocks=${knocks}`);
+  });
+
+  it('64 players play a full match to a single winner within the CPU tick budget', () => {
+    const sim = new GameSim({
+      mode: 'br', seed: 2026, maxPlayers: 64, teamSize: 2, botFill: true,
+      botDifficulty: 'normal', zoneSpeed: 0.25, infiniteAmmo: false,
+    });
+    sim.fillBots();
+    const driver = createBotDriver(sim);
+    sim.start();
+    const cpu = () => { const u = process.cpuUsage(); return (u.user + u.system) / 1000; };
+    const samples: number[] = [];
+    const maxTicks = Math.ceil((25 * 60) / TICK_DT);
+    for (let i = 0; i < maxTicks && !sim.isOver(); i++) {
+      const t0 = cpu();
+      driver.update(TICK_DT);
+      sim.step();
+      samples.push(cpu() - t0);
+      sim.drainEvents();
+      sim.drainLootDelta();
+    }
+    expect(sim.isOver()).toBe(true);
+    const res = sim.results();
+    expect(res.players.filter((p) => p.placement === 1).length).toBeGreaterThanOrEqual(1);
+    expect(new Set(res.players.filter((p) => p.placement === 1).map((p) => p.team)).size).toBe(1);
+    const sorted = [...samples].sort((a, b) => a - b);
+    const avg = samples.reduce((a, b) => a + b, 0) / samples.length;
+    const p99 = sorted[Math.floor(sorted.length * 0.99)];
+    console.log(`[soak 64p] ticks=${samples.length} cpu avg=${avg.toFixed(2)}ms p99=${p99.toFixed(2)}ms max=${sorted[sorted.length - 1].toFixed(1)}ms`);
+    // PLAN §5: ≤ 8 ms per tick for 64 players incl. bots (CPU time, robust to machine load).
+    expect(avg).toBeLessThan(8);
+    expect(p99).toBeLessThan(16);
   });
 
   it('64-player match stays within the server tick budget while everyone is alive', () => {

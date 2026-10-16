@@ -4,16 +4,22 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import WebSocket from 'ws';
 import { PROTOCOL_VERSION } from '../../src/shared/constants';
 import type { ClientMessage, LobbyState, ServerMessage, Snapshot } from '../../src/shared/protocol';
+import { SnapshotDecoder } from '../../src/shared/netcodec';
 import { startServer } from '../../src/server';
 
 class Client {
+  /** When set, the client announces codec 'delta1' (like the real browser client) and decodes snapd. */
+  constructor(readonly codec = false) {}
+  private decoder = new SnapshotDecoder();
   ws!: WebSocket;
   msgs: ServerMessage[] = [];
   private waiters: Array<{ pred: (m: ServerMessage) => boolean; resolve: (m: ServerMessage) => void }> = [];
   async open(url: string) {
     this.ws = new WebSocket(url);
     this.ws.on('message', (data) => {
-      const m = JSON.parse(String(data)) as ServerMessage;
+      let m = JSON.parse(String(data)) as ServerMessage;
+      if (m.t === 'matchInit') this.decoder.reset();
+      if (m.t === 'snapd') m = { t: 'snap', s: this.decoder.decode(m.d) };
       this.msgs.push(m);
       this.waiters = this.waiters.filter((w) => (w.pred(m) ? (w.resolve(m), false) : true));
     });
@@ -49,9 +55,10 @@ afterAll(async () => { await server?.close(); });
 
 describe('online match end to end', () => {
   it('two clients: lobby → match → snapshots/acks → leave → back to lobby', async () => {
-    const a = new Client(); const b = new Client();
+    // A uses the production wire path (delta codec + permessage-deflate), B plain JSON snapshots.
+    const a = new Client(true); const b = new Client(false);
     await a.open(url); await b.open(url);
-    a.send({ t: 'hello', name: 'Alpha', version: PROTOCOL_VERSION });
+    a.send({ t: 'hello', name: 'Alpha', version: PROTOCOL_VERSION, codec: 'delta1' });
     b.send({ t: 'hello', name: 'Bravo', version: PROTOCOL_VERSION });
     const wa = await a.wait('welcome'); await b.wait('welcome');
 
@@ -75,6 +82,8 @@ describe('online match end to end', () => {
     expect(ia.init.roster.length).toBe(8); // bots filled
     expect(ia.init.loot.length).toBeGreaterThan(100);
 
+    // Both clients finished loading → the plane is released.
+    a.send({ t: 'loaded' }); b.send({ t: 'loaded' });
     // Send inputs for ~1 s and check acks advance and self state arrives.
     const youA = ia.init.you!;
     for (let seq = 1; seq <= 30; seq++) {
@@ -92,6 +101,20 @@ describe('online match end to end', () => {
     // No other player's inventory in the snapshot.
     expect(JSON.stringify(snap.players)).not.toContain('ammo');
 
+    // The delta-decoded view on A agrees with B's plain view of the same entities (same server tick).
+    const snapB = b.lastSnap()!;
+    const nearestTick = (c: Client, tick: number) => {
+      for (let i = c.msgs.length - 1; i >= 0; i--) { const m = c.msgs[i]; if (m.t === 'snap' && m.s.tick === tick) return m.s; }
+      return null;
+    };
+    const aAtB = nearestTick(a, snapB.tick);
+    if (aAtB) {
+      for (const p of snapB.players) {
+        const q = aAtB.players.find((x) => x.id === p.id);
+        if (q) expect(q.p).toEqual(p.p);
+      }
+      expect(aAtB.zone).toEqual(snapB.zone);
+    }
     // Leave match → back to lobby.
     a.send({ t: 'leaveMatch' });
     await a.wait('backToLobby');

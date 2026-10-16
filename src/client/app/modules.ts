@@ -43,9 +43,9 @@ async function load<T>(path: string, exportName: string, fallback: T, fallbacks:
     const mod = await loader();
     const fn = mod[exportName];
     if (typeof fn === 'function') return fn as T;
-    console.warn(`[app] ${path} does not export ${exportName}; using fallback`);
+    console.error(`[app] ${path} does not export ${exportName}; using fallback`);
   } catch (err) {
-    console.warn(`[app] failed to load ${path}; using fallback`, err);
+    console.error(`[app] failed to load ${path}; using fallback`, err);
   }
   fallbacks.push(path);
   return fallback;
@@ -72,7 +72,11 @@ export function loadRenderModules(): Promise<RenderModules> {
         recommendQuality = coreMod.recommendQuality as RenderModules['recommendQuality'];
       }
     } catch { /* optional */ }
-    if (fallbacks.length) console.warn('[app] using fallback modules for:', fallbacks.join(', '));
+    if (fallbacks.length) {
+      console.error('[app] using fallback modules for:', fallbacks.join(', '));
+      // Don't memoise a degraded result: the next match retries (e.g. after a transient chunk-load error).
+      cached = null;
+    }
     return {
       createRenderCore: core,
       createWorldRenderer: world,

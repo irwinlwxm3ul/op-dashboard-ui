@@ -18,7 +18,15 @@ import { safeCreate, type RenderModules } from './modules';
 /** Delay before the results screen so the winner/elimination banners can play. */
 const RESULTS_DELAY_MS = 4500;
 const STATS_INTERVAL_MS = 500;
+/** Render / feel delta clamp (avoids huge jumps after a stall). */
 const MAX_FRAME_DT = 0.1;
+/**
+ * The game itself gets a larger delta so its fixed 30 Hz input stream keeps up at low frame rates
+ * (ClientGame additionally caps the ticks it produces per frame).
+ */
+const MAX_GAME_DT = 0.25;
+/** A module that throws this many frames in a row is replaced by its fallback for the rest of the match. */
+const MAX_CONSECUTIVE_FAILURES = 30;
 
 export interface MatchSessionOptions {
   ui: UiApi;
@@ -35,7 +43,10 @@ export interface MatchSessionOptions {
 export class MatchSession {
   readonly game: ClientGame;
   readonly worldKey: string;
-  readonly worldRenderer: WorldRenderer;
+  private worldRendererRef: WorldRenderer;
+  get worldRenderer(): WorldRenderer {
+    return this.worldRendererRef;
+  }
   private entities: EntityRenderer;
   private view: ViewRig;
   private fx: FxRenderer;
@@ -58,10 +69,10 @@ export class MatchSession {
     this.worldKey = `${init.config.seed}:${world.kind}`;
 
     if (opts.worldRenderer && opts.worldRenderer.key === this.worldKey) {
-      this.worldRenderer = opts.worldRenderer.renderer;
+      this.worldRendererRef = opts.worldRenderer.renderer;
     } else {
       opts.worldRenderer?.renderer.dispose();
-      this.worldRenderer = safeCreate('world renderer', () => modules.createWorldRenderer(core, world), () => fallbackWorldRenderer(core, world));
+      this.worldRendererRef = safeCreate('world renderer', () => modules.createWorldRenderer(core, world), () => fallbackWorldRenderer(core, world));
     }
     const events = this.game.events;
     this.entities = safeCreate('entity renderer', () => modules.createEntityRenderer(core, world, ui.nameplateLayer, events), () => fallbackEntityRenderer(core));
@@ -122,36 +133,72 @@ export class MatchSession {
   private tick = (now: number): void => {
     if (!this.running) return;
     this.raf = requestAnimationFrame(this.tick);
-    const dt = Math.min(MAX_FRAME_DT, Math.max(0, (now - this.last) / 1000));
+    const rawDt = Math.max(0, (now - this.last) / 1000);
+    const dt = Math.min(MAX_FRAME_DT, rawDt);
     this.last = now;
     const { ui, core } = this.opts;
-    try {
+    // Each stage is guarded on its own so one failing module can't freeze the view or the HUD;
+    // a module that keeps failing is swapped for its minimal fallback.
+    this.guard('game', () => {
       this.game.input.enabled = !this.paused && !this.resultsShown && !ui.isOverlayOpen();
-      this.game.update(dt);
-      const frame = this.game.getFrame();
-      this.lastFrame = frame;
-      this.feel.update(frame, this.lastCam, dt);
-      const cam = this.view.update(frame, this.feel.state, dt);
-      this.lastCam = cam;
-      this.worldRenderer.update(frame, cam, dt);
-      this.entities.update(frame, cam, dt);
-      this.fx.update(frame, cam, dt);
-      core.render();
-      ui.updateHud(frame, cam, dt);
-      if (now - this.lastStats > STATS_INTERVAL_MS) {
-        this.lastStats = now;
-        const entities = frame.players.size + frame.vehicles.size + frame.projectiles.size + frame.loot.size;
-        ui.setRenderStats(core.stats(), frame.ping, entities);
-      }
-      if (frame.results && !this.resultsTimer) this.scheduleResults(frame.results);
+      this.game.update(Math.min(MAX_GAME_DT, rawDt));
+    });
+    const frame = this.game.getFrame();
+    this.lastFrame = frame;
+    this.guard('feel', () => this.feel.update(frame, this.lastCam, dt));
+    let cam = this.lastCam;
+    this.guard('view', () => { cam = this.view.update(frame, this.feel.state, dt); });
+    this.lastCam = cam;
+    if (cam) {
+      const c = cam;
+      this.guard('world', () => this.worldRenderer.update(frame, c, dt));
+      this.guard('entities', () => this.entities.update(frame, c, dt));
+      this.guard('fx', () => this.fx.update(frame, c, dt));
+      this.guard('render', () => core.render());
+      this.guard('hud', () => ui.updateHud(frame, c, dt));
+    }
+    if (now - this.lastStats > STATS_INTERVAL_MS) {
+      this.lastStats = now;
+      const entities = frame.players.size + frame.vehicles.size + frame.projectiles.size + frame.loot.size;
+      this.guard('stats', () => ui.setRenderStats(core.stats(), frame.ping, entities));
+    }
+    if (frame.results && !this.resultsTimer) this.scheduleResults(frame.results);
+  };
+
+  private failures = new Map<string, number>();
+
+  private guard(stage: string, fn: () => void): void {
+    try {
+      fn();
+      if (this.failures.get(stage)) this.failures.set(stage, 0);
     } catch (err) {
-      // Never let one bad frame kill the loop; log once per second at most.
+      const n = (this.failures.get(stage) ?? 0) + 1;
+      this.failures.set(stage, n);
+      const now = performance.now();
       if (now - this.lastErrorLog > 1000) {
         this.lastErrorLog = now;
-        console.error('[app] frame error', err);
+        console.error(`[app] ${stage} failed`, err);
       }
+      if (n === MAX_CONSECUTIVE_FAILURES) this.replaceWithFallback(stage);
     }
-  };
+  }
+
+  /** Swap a persistently failing module for its minimal fallback (keeps the match playable). */
+  private replaceWithFallback(stage: string): void {
+    const { core } = this.opts;
+    const dispose = (d: { dispose(): void }) => { try { d.dispose(); } catch { /* ignore */ } };
+    console.error(`[app] ${stage} keeps failing; switching to the fallback implementation`);
+    switch (stage) {
+      case 'feel': dispose(this.feel); this.feel = noopFeel(); break;
+      case 'view': dispose(this.view); this.view = fallbackViewRig(core); break;
+      case 'entities': dispose(this.entities); this.entities = fallbackEntityRenderer(core); break;
+      case 'fx': dispose(this.fx); this.fx = noopFx; break;
+      case 'world': dispose(this.worldRenderer); this.worldRendererRef = fallbackWorldRenderer(core, this.game.world); break;
+      default: break;
+    }
+    this.failures.set(stage, 0);
+  }
+
   private lastErrorLog = 0;
 
   /** Dispose everything except the (cacheable) world renderer, which is returned to the caller. */

@@ -336,9 +336,12 @@ Every path has exactly one owner. Agents only write inside their own paths.
 | render-view-fx | `src/client/render/view/**`, `src/client/render/fx/**` |
 | ui | `src/client/ui/**` (except `contracts.ts`), `src/client/styles/**` |
 | feel | `src/client/feel/**` |
+| assets | `public/assets/models/{characters,animations,weapons,items}/**`, `src/client/assets/**`, `scripts/assets/**`, `docs/ASSETS.md`, `tests/assets.test.ts` |
+| world-assets | `public/assets/models/{vehicles,props,nature}/**`, `src/client/assets/manifest-world.ts`, `scripts/assets/world/**`, `docs/ASSETS-world.md`, `tests/assets-world.test.ts` |
 
 i18n string fragments: `src/client/i18n/locales/en.ts` = core keys (i18n owner) merged with
-`src/client/ui/strings.en.ts` (`ui.*`, ui owner) and `src/client/feel/strings.en.ts` (`feel.*`, feel owner).
+`src/client/ui/strings.en.ts` (`ui.*`, ui owner), `src/client/feel/strings.en.ts` (`feel.*`, feel owner)
+and `src/client/app/strings.en.ts` (`flow.*`, integrator).
 Non-English locales are `Partial` during the parallel build (English fallback); the final i18n pass
 completes them and `npm run check:i18n` enforces completeness.
 
@@ -347,5 +350,20 @@ Client module factories (each module `index.ts`): `createRenderCore`, `createWor
 (render/view), `createFxRenderer` (render/fx), `createFeel` (feel), `createUI` (ui),
 `ClientGame`/`LocalTransport`/`WsTransport`/`settings`/`InputController` (client-net). Signatures in
 `src/client/render/contracts.ts`, `src/client/ui/contracts.ts`, `src/client/game/types.ts`.
-| assets | `public/assets/models/{characters,animations,weapons,items}/**`, `src/client/assets/**`, `scripts/assets/**`, `docs/ASSETS.md`, `tests/assets.test.ts` |
-| world-assets | `public/assets/models/{vehicles,props,nature}/**`, `src/client/assets/manifest-world.ts`, `scripts/assets/world/**`, `docs/ASSETS-world.md`, `tests/assets-world.test.ts` |
+
+
+---
+
+## Protocol additions after stage B (integrator)
+
+* **`loaded`** (client → server, match scope): sent by the app once its scene is built. In battle
+  royale the `MatchRunner` keeps the plane parked (`GameSim.holdPlane` / `releasePlane()`, zone timer
+  not running, jumping disabled) until every client has sent `loaded`, or `LOAD_HOLD_MAX_MS` (15 s).
+* **Delta snapshots `snapd`** (`src/shared/netcodec.ts`, codec `delta1`): a client that announces
+  `codec: 'delta1'` in `hello` receives snapshots as per-entity diffs against the previous snapshot on the
+  same connection (`SnapshotEncoder` in `src/server/Connection.ts`); WebSocket ordering makes this safe
+  without acks. The app's `MessageHub` (`src/client/app/hub.ts`) decodes them with `SnapshotDecoder`
+  (copy-on-write) and hands `ClientGame` ordinary `{t:'snap'}` messages. Encoder and decoder reset on
+  `matchInit`. Combined with permessage-deflate this keeps a 64-player match at ~12 KB/s per client
+  (tests/integration/bandwidth.test.ts).
+* **`lobby.serverLimit`** error code: server-wide or per-address limits (lobbies, matches, connections).

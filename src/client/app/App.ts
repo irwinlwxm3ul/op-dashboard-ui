@@ -59,6 +59,8 @@ export class App implements AppActions {
     this.ui.show('main');
     // Warm up the render modules in the background so starting a match is quick.
     void loadRenderModules().then((m) => { this.modules = m; });
+    // Expose which modules fell back (debugging + e2e assertions).
+    (window as unknown as { __dzFallbacks?: () => string[] }).__dzFallbacks = () => this.modules?.fallbacks ?? [];
     const unlockAudio = () => { void audio.init(); };
     window.addEventListener('pointerdown', unlockAudio, { once: true });
     window.addEventListener('keydown', unlockAudio, { once: true });
@@ -116,6 +118,14 @@ export class App implements AppActions {
       this.ui.setLoading(0.15, 'flow.loading.waiting');
       const { init } = await initP;
       await this.beginMatch(hub, init, context);
+      // The simulation worker dying mid-match must not leave the player in a frozen match.
+      hub.onClose(() => {
+        if (this.localHub !== hub) return;
+        this.endSession();
+        this.closeLocal();
+        this.ui.showError('net.connectFailed');
+        this.ui.show('main');
+      });
     } catch (err) {
       console.error('[app] failed to start local match', err);
       this.closeLocal();
@@ -175,7 +185,8 @@ export class App implements AppActions {
     this.context = context;
     this.ui.show('loading');
     this.ui.setLoading(0.3, 'flow.loading.world');
-    const modules = this.modules ?? (await loadRenderModules());
+    // Cached when everything loaded; re-attempted after a degraded (fallback) load.
+    const modules = await loadRenderModules();
     this.modules = modules;
     await nextFrame();
     const core = this.ensureCore(modules);
@@ -193,9 +204,14 @@ export class App implements AppActions {
     });
     this.cachedWorld = null;
     this.session = session;
+    try {
+      this.ui.attachGame(session.game, context);
+    } catch (err) {
+      this.endSession();
+      throw err;
+    }
     this.ui.setLoading(1, 'flow.loading.ready');
     await nextFrame();
-    this.ui.attachGame(session.game, context);
     this.ui.show('game');
     core.resize();
     session.start();
@@ -316,6 +332,10 @@ export class App implements AppActions {
           this.endSession();
           void this.beginMatch(this.mpHub, m.init, 'mp').catch((err) => {
             console.error('[app] failed to start online match', err);
+            // Tell the server we're not in the match, so it stops streaming to us and the lobby
+            // can return to waiting (it also lets abandoned-match cleanup run).
+            this.mpHub?.send({ t: 'leaveMatch' });
+            this.endSession();
             this.ui.showError('net.connectFailed');
             this.ui.show('lobby');
           });
