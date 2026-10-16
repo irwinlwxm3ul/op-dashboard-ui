@@ -4,6 +4,7 @@
 import type { RoadSegment, Vec2 } from '../types';
 import { Heightfield, smooth01 } from './heightfield';
 import { M_ROAD, OccupancyMask } from './mask';
+import { len2 } from './util';
 
 export interface Road {
   pts: Vec2[];
@@ -196,7 +197,7 @@ export function resample(pts: Vec2[], spacing: number): Vec2[] {
   const n = pts.length;
   if (n < 2) return pts.map((p) => ({ x: p.x, z: p.z }));
   const cum = [0];
-  for (let i = 0; i + 1 < n; i++) cum.push(cum[i] + Math.hypot(pts[i + 1].x - pts[i].x, pts[i + 1].z - pts[i].z));
+  for (let i = 0; i + 1 < n; i++) cum.push(cum[i] + len2(pts[i + 1].x - pts[i].x, pts[i + 1].z - pts[i].z));
   const total = cum[n - 1];
   const count = Math.max(1, Math.round(total / spacing));
   const stepLen = total / count;

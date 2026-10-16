@@ -7,6 +7,7 @@ import type { Rect, RoomInfo } from './buildings';
 import type { PropInfo } from './props';
 import type { Road } from './roads';
 import type { GeneratedWorld } from './worldImpl';
+import { len2 } from './util';
 
 const r2 = (v: number): number => Math.round(v * 100) / 100;
 const r3 = (v: number): number => Math.round(v * 1000) / 1000;
@@ -191,10 +192,10 @@ export function vehicleSpotClear(world: GeneratedWorld, x: number, z: number, ra
     if ((cx - x) * (cx - x) + (cz - z) * (cz - z) < radius * radius) return false;
   }
   for (const t of world.queryTrees(x - radius - 1, z - radius - 1, x + radius + 1, z + radius + 1, [])) {
-    if (Math.hypot(t.x - x, t.z - z) < radius + t.r) return false;
+    if (len2(t.x - x, t.z - z) < radius + t.r) return false;
   }
   for (const r of world.queryRocks(x - radius - 5, z - radius - 5, x + radius + 5, z + radius + 5, [])) {
-    if (Math.hypot(r.x - x, r.z - z) < radius + r.r) return false;
+    if (len2(r.x - x, r.z - z) < radius + r.r) return false;
   }
   return true;
 }
@@ -212,7 +213,7 @@ export function placeVehicles(world: GeneratedWorld, rng: Rng, roads: Road[], to
   const segs: { a: { x: number; z: number }; b: { x: number; z: number }; w: number; len: number }[] = [];
   for (const r of roads) for (let i = 0; i + 1 < r.pts.length; i++) {
     const a = r.pts[i], b = r.pts[i + 1];
-    segs.push({ a, b, w: r.width, len: Math.hypot(b.x - a.x, b.z - a.z) });
+    segs.push({ a, b, w: r.width, len: len2(b.x - a.x, b.z - a.z) });
   }
   if (segs.length === 0) return;
   // Cumulative lengths for length-weighted sampling.
@@ -237,10 +238,10 @@ export function placeVehicles(world: GeneratedWorld, rng: Rng, roads: Road[], to
       const lane = (rng.chance(0.5) ? 1 : -1) * Math.min(1.8, s.w / 4);
       const x = r2(s.a.x + (s.b.x - s.a.x) * t - dz * lane);
       const z = r2(s.a.z + (s.b.z - s.a.z) * t + dx * lane);
-      if (towns.some((tw) => Math.hypot(tw.x - x, tw.z - z) < tw.r + 12)) continue;
+      if (towns.some((tw) => len2(tw.x - x, tw.z - z) < tw.r + 12)) continue;
       if (world.heightAt(x, z) < world.waterLevel + 1) continue;
       if (world.hf.flatness(x, z) < 0.96) continue;
-      if (world.vehicleSpawns.some((v) => Math.hypot(v.pos.x - x, v.pos.z - z) < spacing)) continue;
+      if (world.vehicleSpawns.some((v) => len2(v.pos.x - x, v.pos.z - z) < spacing)) continue;
       if (!vehicleSpotClear(world, x, z, VEHICLE_CLEAR)) continue;
       const forwardSign = lane > 0 ? 1 : -1;
       const yaw = yawTo({ x: 0, z: 0 }, { x: dx * forwardSign, z: dz * forwardSign });

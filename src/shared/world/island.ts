@@ -21,6 +21,7 @@ import { placeLoot, placeVehicles } from './spawns';
 import { SURF } from './surfaces';
 import { placeVegetation } from './vegetation';
 import { GeneratedWorld } from './worldImpl';
+import { len2 } from './util';
 
 // Stage seeds: each stage draws from its own stream so tweaks stay local.
 const S_SHAPE = 0x15a7, S_TOWNS = 0x70e5, S_ROADS = 0x40ad, S_BUILD = 0xb1d6, S_PROPS = 0x9409;
@@ -154,7 +155,7 @@ function placeTowns(seed: number, shape: IslandShape): TownPlan[] {
       if (shape.mountain(x, z) > 0.04 + 0.12 * relax) continue;
       let ok = true;
       for (const t of towns) {
-        if (Math.hypot(t.def.x - x, t.def.z - z) < R + t.def.r + 75 - 35 * relax) { ok = false; break; }
+        if (len2(t.def.x - x, t.def.z - z) < R + t.def.r + 75 - 35 * relax) { ok = false; break; }
       }
       if (!ok) continue;
       let mn = Infinity, mx = -Infinity, sum = 0, n = 0;
@@ -194,7 +195,7 @@ function placeTowns(seed: number, shape: IslandShape): TownPlan[] {
 function buildRoads(seed: number, hf: Heightfield, towns: TownPlan[]): { roads: Road[]; trunk: Road[] } {
   const rng = new Rng(hash32(seed, S_ROADS));
   const n = towns.length;
-  const dist = (i: number, j: number): number => Math.hypot(towns[i].def.x - towns[j].def.x, towns[i].def.z - towns[j].def.z);
+  const dist = (i: number, j: number): number => len2(towns[i].def.x - towns[j].def.x, towns[i].def.z - towns[j].def.z);
   // Minimum spanning tree (Prim) plus a few short extra links for loops.
   const edges: [number, number][] = [];
   const inTree = new Array<boolean>(n).fill(false);
@@ -243,7 +244,7 @@ function buildRoads(seed: number, hf: Heightfield, towns: TownPlan[]): { roads: 
 
   const trunk: Road[] = [];
   // Water is impassable, high ground costly, and town centres mildly avoided by through roads.
-  const grid = new RouteGrid(hf, 16, (x, z, h) => (h < 1.8 ? Infinity : h > 30 ? (h - 30) * 0.08 : 0), (x, z) => {
+  const grid = new RouteGrid(hf, 16, (_x, _z, h) => (h < 1.8 ? Infinity : h > 30 ? (h - 30) * 0.08 : 0), (x, z) => {
     for (const t of towns) {
       const dx = t.def.x - x, dz = t.def.z - z, rr = t.def.r * 0.6;
       if (dx * dx + dz * dz < rr * rr) return t.def.id;
@@ -341,7 +342,7 @@ function besideRoad(ctx: PlacementCtx, plan: BuildingPlan, g: Seg, extraOff: num
   const { rng } = ctx;
   const t = rng.range(0.05, 0.95);
   const px = g.ax + (g.bx - g.ax) * t, pz = g.az + (g.bz - g.az) * t;
-  const len = Math.hypot(g.bx - g.ax, g.bz - g.az) || 1;
+  const len = len2(g.bx - g.ax, g.bz - g.az) || 1;
   const dx = (g.bx - g.ax) / len, dz = (g.bz - g.az) / len;
   const side = rng.chance(0.5) ? 1 : -1;
   const nx = -dz * side, nz = dx * side;
@@ -363,7 +364,7 @@ function placeTownBuildings(ctx: PlacementCtx, town: TownPlan, segs: Seg[]): voi
   });
   const within = military
     ? (r: Rect): boolean => r.x0 > t.x - t.r + 9 && r.x1 < t.x + t.r - 9 && r.z0 > t.z - t.r + 9 && r.z1 < t.z + t.r - 9
-    : (r: Rect): boolean => [[r.x0, r.z0], [r.x1, r.z0], [r.x0, r.z1], [r.x1, r.z1]].every(([x, z]) => Math.hypot(x - t.x, z - t.z) < t.r + 4);
+    : (r: Rect): boolean => [[r.x0, r.z0], [r.x1, r.z0], [r.x0, r.z1], [r.x1, r.z1]].every(([x, z]) => len2(x - t.x, z - t.z) < t.r + 4);
   for (const style of TOWN_STYLES[town.size]) {
     const plan = planBuilding(style, rng, military);
     plan.town = t.id;
@@ -396,9 +397,9 @@ function placeFarmsteads(ctx: PlacementCtx, towns: TownPlan[], trunk: Road[], co
     if (road.pts.length < 3) continue;
     const k = rng.int(1, road.pts.length - 2);
     const a = road.pts[k], b = road.pts[k + 1];
-    if (towns.some((t) => Math.hypot(t.def.x - a.x, t.def.z - a.z) < t.def.r + 60)) continue;
+    if (towns.some((t) => len2(t.def.x - a.x, t.def.z - a.z) < t.def.r + 60)) continue;
     let nearest = towns[0];
-    for (const t of towns) if (Math.hypot(t.def.x - a.x, t.def.z - a.z) < Math.hypot(nearest.def.x - a.x, nearest.def.z - a.z)) nearest = t;
+    for (const t of towns) if (len2(t.def.x - a.x, t.def.z - a.z) < len2(nearest.def.x - a.x, nearest.def.z - a.z)) nearest = t;
     const g: Seg = { ax: a.x, az: a.z, bx: b.x, bz: b.z, w: road.width };
     let placedHere = 0;
     for (const style of ['barn', 'house', 'shed'] as BuildingStyle[]) {
@@ -420,7 +421,7 @@ function placeFarmsteads(ctx: PlacementCtx, towns: TownPlan[], trunk: Road[], co
 function placeTownProps(ctx: PropCtx, town: TownPlan, plans: BuildingPlan[], props: PropInfo[]): void {
   const { rng } = ctx;
   const t = town.def;
-  const mine = plans.filter((p) => p.town === t.id && Math.hypot(p.cx - t.x, p.cz - t.z) < t.r + 10);
+  const mine = plans.filter((p) => p.town === t.id && len2(p.cx - t.x, p.cz - t.z) < t.r + 10);
   const randomIn = (frac: number): [number, number] => {
     const rr = t.r * frac;
     let x = 0, z = 0;
@@ -633,7 +634,7 @@ export function generateIsland(seed: number): GeneratedWorld {
     stairZones,
     buildingTier: (b) => tierOf[b] ?? 0,
     outdoorTier: (x, z) => {
-      for (const t of townDefs) if (Math.hypot(t.x - x, t.z - z) < t.r + 30) return t.tier;
+      for (const t of townDefs) if (len2(t.x - x, t.z - z) < t.r + 30) return t.tier;
       return 0;
     },
     props,
