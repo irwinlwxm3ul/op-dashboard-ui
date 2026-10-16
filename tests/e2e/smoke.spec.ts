@@ -4,6 +4,19 @@ import { expect, test, type Page } from '@playwright/test';
 
 const tid = (id: string) => `[data-testid="${id}"]`;
 
+// Headless Chromium renders WebGL in software (SwiftShader), a few FPS at best: run with the
+// cheapest graphics settings so the game loop advances quickly enough to observe.
+test.use({ viewport: { width: 960, height: 540 } });
+test.beforeEach(async ({ page }) => {
+  await page.addInitScript(() => {
+    try {
+      if (!localStorage.getItem('dz.settings')) {
+        localStorage.setItem('dz.settings', JSON.stringify({ quality: 'low', renderScale: 0.5 }));
+      }
+    } catch { /* ignore */ }
+  });
+});
+
 function trackErrors(page: Page): string[] {
   const errors: string[] = [];
   page.on('pageerror', (e) => errors.push(`pageerror: ${e.message}`));
@@ -45,9 +58,9 @@ test('training ground loads and the player can move', async ({ page }) => {
   await page.waitForTimeout(1500);
   const before = await frameSelf(page);
   expect(before?.mode).toBe('ground');
-  await page.mouse.click(640, 360);
+  await page.mouse.click(480, 270);
   await page.keyboard.down('KeyW');
-  await page.waitForTimeout(1500);
+  await page.waitForTimeout(3000);
   await page.keyboard.up('KeyW');
   const after = await frameSelf(page);
   const moved = Math.hypot((after!.pos!.x - before!.pos!.x), (after!.pos!.z - before!.pos!.z));
@@ -100,7 +113,7 @@ test('two browser windows join the same lobby and start a match', async ({ brows
   await a.locator(tid('lobby-start')).click();
   await expect(a.locator('[data-screen="game"]')).toBeVisible({ timeout: 90_000 });
   await expect(b.locator('[data-screen="game"]')).toBeVisible({ timeout: 90_000 });
-  await a.waitForTimeout(2000);
+  await a.waitForTimeout(3000);
   await a.screenshot({ path: 'test-results/mp-a.png' });
   await b.screenshot({ path: 'test-results/mp-b.png' });
   expect(errors).toEqual([]);

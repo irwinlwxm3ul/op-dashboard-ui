@@ -542,6 +542,21 @@ describe('prediction and reconciliation', () => {
     expect(f.self!.aimPitch).toBeCloseTo(pitch + sim.p.recoilPitch, 6);
   });
 
+  it('does not lean through walls (leaned eye must be visible from the upright eye)', () => {
+    const world = makeWorld([{ min: { x: 0.2, y: 0, z: -2 }, max: { x: 0.5, y: 3, z: 2 } }]);
+    const env: PredictEnv = {
+      world, config: CONFIG, time: 0, plane: null, planeTime: 0, seatVehicle: null, vehicle: null, others: [],
+    };
+    const ev = createTickEvents();
+    const inp = (buttons: number): PlayerInput => ({ seq: 1, mx: 0, mz: 0, yaw: 0, pitch: 0, buttons, stance: 0, slot: -1, rt: 0 });
+    const right = basePlayer();
+    predictTick(right, createPredictRt(), inp(1 << 7), 0, env, ev); // LEAN_R into the wall at +x
+    expect(right.lean).toBe(0);
+    const left = basePlayer();
+    predictTick(left, createPredictRt(), inp(1 << 6), 0, env, ev); // LEAN_L into open space
+    expect(left.lean).toBe(-1);
+  });
+
   it('predicts the plane jump and the chute with the server rules', () => {
     const world = makeWorld();
     const p = basePlayer();
@@ -1000,6 +1015,25 @@ describe('parity with the real GameSim', () => {
     input.keyDown('Digit1');
     lb.run(60);
     expect(game.getFrame().self!.weapon).toBe('ar');
+
+    // Item use cancelled by sprinting: the sim cancels the use BEFORE computing the speed multiplier.
+    game.queueAction({ a: 'give', item: 'energy' });
+    lb.run(20);
+    game.queueAction({ a: 'use', item: 'energy' });
+    const useCorr: number[] = [];
+    let sawUse = false;
+    lb.run(110, (i) => {
+      if (i === 0) input.keyDown('KeyW');
+      if (game.getFrame().self!.use) sawUse = true;
+      if (i === 60) input.keyDown('ShiftLeft');
+      if (i === 70) { input.keyUp('ShiftLeft'); input.keyUp('KeyW'); }
+      if (i === 80) input.keyDown('KeyQ'); // lean while standing still
+      if (i === 100) input.keyUp('KeyQ');
+      useCorr.push(game.correction);
+    });
+    expect(sawUse).toBe(true);
+    expect(game.getFrame().self!.use).toBeNull();
+    expect(Math.max(...useCorr)).toBeLessThan(1e-6);
 
     const corrections: number[] = [];
     let shots = 0;

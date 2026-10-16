@@ -57,7 +57,7 @@ describe('snapshot bandwidth', () => {
         deflated += z;
         secondBytes += z;
         // Round trip must reproduce the snapshot exactly (after JSON normalisation).
-        const back = decoder.decode(JSON.parse(dStr));
+        const back = decoder.decode((JSON.parse(dStr) as { d: Parameters<SnapshotDecoder["decode"]>[0] }).d);
         if (si % 7 === 0 || si < 40) {
           expect(stripUndefined(back)).toEqual(s);
           checked++;
