@@ -50,6 +50,9 @@ export function decodeClientMessage(text: string): DecodeResult {
 
 type Outbound = string | { close: number; reason: string };
 
+/** An unanswered RTT ping older than this is superseded by a new one (ms). */
+const PING_REPLACE_MS = 5000;
+
 export interface ConnectionOptions {
   lagMs: number;
   jitterMs: number;
@@ -67,7 +70,7 @@ export class ClientConnection {
   lobbyId: string | null = null;
   /** True while the client is in the running match view of its lobby (receives match traffic). */
   inMatch = false;
-  /** Smoothed round trip time in ms (WebSocket ping/pong incl. artificial latency). */
+  /** Smoothed round trip time in ms (WebSocket ping/pong incl. artificial latency); 0 = unknown. */
   ping = 0;
   readonly connectedAt = performance.now();
   /** Match start budget of this connection (see ServerLimits.matchStartBurst). */
@@ -142,6 +145,15 @@ export class ClientConnection {
   /** Display rounded ping for lobby member lists. */
   get pingMs(): number {
     return Math.round(this.ping);
+  }
+
+  /**
+   * Transport-measured round trip time (ms, incl. 2x LAG_MS) for the match runner's
+   * lag-compensation bound; NaN until the first sample. Measured by the server (protocol
+   * ping/pong), so a client cannot fake a low value per input.
+   */
+  get rtt(): number {
+    return this.ping > 0 ? this.ping : NaN;
   }
 
   /** Enable/disable delta-encoded snapshots (client announced codec 'delta1' in hello). */
@@ -230,6 +242,16 @@ export class ClientConnection {
       this.terminate();
       return false;
     }
+    return this.probeRtt(now);
+  }
+
+  /**
+   * Send a protocol ping for an RTT sample unless one is still outstanding (in-match clients are
+   * probed more often than the heartbeat). Returns false when the connection was terminated.
+   */
+  probeRtt(now: number): boolean {
+    if (this.closed) return false;
+    if (this.pingSentAt > 0 && now - this.pingSentAt < PING_REPLACE_MS) return true;
     try {
       this.pingSentAt = now;
       this.ws.ping();

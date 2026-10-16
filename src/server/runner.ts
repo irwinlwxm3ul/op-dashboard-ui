@@ -3,6 +3,7 @@
 // in-process; tests inject a fake through startServer({ runnerFactory }).
 
 import type { ClientMessage, ServerMessage } from '../shared/protocol';
+import type { CheatFlag } from '../shared/sim/index';
 import type { MatchConfig, MatchResults, TeamId } from '../shared/types';
 
 export interface RunnerClient {
@@ -10,6 +11,11 @@ export interface RunnerClient {
   name: string;
   team: TeamId | null;
   send(msg: ServerMessage): void;
+  /**
+   * Transport-measured round trip time (ms, incl. LAG_MS; NaN while unknown). Bounds the
+   * lag-compensation rewind of this client; MatchRunner polls it about once per second.
+   */
+  rttMs?: () => number;
 }
 
 export interface RunnerOptions {
@@ -28,6 +34,10 @@ export interface RunnerStats {
   tickMsMax: number;
   players: number;
   bots: number;
+  /** Suspicious-aim flags raised since the previous stats() call (drained on read). */
+  flags?: CheatFlag[];
+  /** Average RTT (ms) the runner currently applies to its human clients (worker runners). */
+  rttAvgMs?: number;
 }
 
 /** Subset of the MatchRunner contract (ARCHITECTURE.md Stage B) the server relies on. */

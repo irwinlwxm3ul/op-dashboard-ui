@@ -115,6 +115,10 @@ const TURN_ACCEL = 5.5;
 /** Speeds (fractions of the current one, the first is the current) tried for the turn arc. */
 const ROLLOUT_SPEEDS: readonly number[] = [1, 0.7, 0.45];
 const ROLLOUT_STEP = 1.5;
+/** Tightest turn a vehicle makes (1 / minimum turning radius, 1/m). */
+const MAX_CURVATURE = 0.18;
+/** How long a driver backs up to get out of a dead end (s). */
+const REVERSE_TIME = 2;
 /** Braking deceleration assumed for planning, as a fraction of the vehicle's service brake. */
 const BRAKE_USE = 0.5;
 /** Planning reaction time (s): one think interval plus throttle response. */
@@ -306,18 +310,20 @@ function freeDist(sys: BotSystem, x: number, z: number, h: number, L: number, w:
 }
 
 /**
- * Distance (m, up to L) the body (half width w) travels along an arc that starts at heading h0
- * and turns toward heading target as tightly as speed u allows, before touching an obstacle.
+ * Distance (m, up to L) the body travels along an arc that starts at heading h0 and turns toward
+ * heading target as tightly as speed u allows, before its front collision circle (centre `nose`
+ * ahead of the body centre, radius w) touches an obstacle.
  */
-function rollout(x: number, z: number, h0: number, target: number, u: number, L: number, w: number): number {
-  const maxTurn = (TURN_ACCEL / Math.max(16, u * u)) * ROLLOUT_STEP;
+function rollout(x: number, z: number, h0: number, target: number, u: number, L: number, nose: number, w: number): number {
+  const maxTurn = Math.min(TURN_ACCEL / Math.max(16, u * u), MAX_CURVATURE) * ROLLOUT_STEP;
   let h = h0;
   for (let s = ROLLOUT_STEP; s <= L; s += ROLLOUT_STEP) {
     const e = angleDiff(h, target);
     h += e > maxTurn ? maxTurn : e < -maxTurn ? -maxTurn : e;
-    x -= Math.sin(h) * ROLLOUT_STEP;
-    z -= Math.cos(h) * ROLLOUT_STEP;
-    if (pointBlocked(x, z, w)) return s - ROLLOUT_STEP;
+    const fx = -Math.sin(h), fz = -Math.cos(h);
+    x += fx * ROLLOUT_STEP;
+    z += fz * ROLLOUT_STEP;
+    if (pointBlocked(x + fx * nose, z + fz * nose, w)) return s - ROLLOUT_STEP;
   }
   return L;
 }
@@ -405,6 +411,7 @@ export function vehicleTick(sys: BotSystem, b: BotState, p: PlayerState, think: 
     b.exitWanted = false;
     b.driveStuckCount = 0;
     b.driveStuckSince = -1;
+    b.driveGoodSince = -1;
     b.reverseUntil = 0;
     b.driveHeading = v.yaw;
     b.driveTargetSpeed = 0;
@@ -517,15 +524,19 @@ export function vehicleTick(sys: BotSystem, b: BotState, p: PlayerState, think: 
     // Along the current motion: the vehicle keeps going that way until the turn is made.
     const moveH = sp > 3 ? Math.atan2(-v.vel.x, -v.vel.z) : speed >= 0 ? v.yaw : v.yaw + Math.PI;
     const turn = Math.abs(angleDiff(moveH, chosen));
-    const yawErr0 = Math.abs(angleDiff(v.yaw, chosen));
     const aheadF = turn > 0.1 ? freeDist(sys, v.pos.x, v.pos.z, moveH, L, w) : chosenF;
     b.driveHeading = chosen;
-    if (chosenF < he.z + 1.5 || (aheadF < he.z + 1.2 && yawErr0 > 0.6)) {
-      // Boxed in, or nose against an obstacle with a sharp turn to make: back up.
-      if (t >= b.reverseUntil) {
-        b.reverseUntil = t + 1.2;
+    const nose = he.z - he.x;
+    if (t >= b.reverseUntil) {
+      // Boxed in, or the tightest arc toward the chosen heading hits something right away
+      // (nose against a tree with a sharp turn to make): back up, swinging the nose around.
+      if (chosenF < he.z + 1.5 || (sp < 6 && rollout(v.pos.x, v.pos.z, speed >= -0.5 ? v.yaw : v.yaw + Math.PI, chosen, 3, 6, nose, he.x + 0.2) < 1.5)) {
+        b.reverseUntil = t + REVERSE_TIME;
         b.driveStuckCount++;
       }
+    } else if (speed < -0.5 && freeDist(sys, v.pos.x, v.pos.z, v.yaw + Math.PI, 6, he.x + 0.3) < he.z + 0.4) {
+      // Backing into something: stop reversing.
+      b.reverseUntil = t;
     }
     // Target speed: stop before the first obstacle on the chosen heading and on the current
     // line (while turning), slow for towns, crests and the destination.
@@ -541,13 +552,13 @@ export function vehicleTick(sys: BotSystem, b: BotState, p: PlayerState, think: 
     if (turn > 0.1 || aheadF < chosenF) {
       // The body follows an arc from the current motion to the chosen heading (tighter when
       // slower): take the fastest of a few speeds whose arc stays clear for its stopping distance.
-      const wHit = he.x + 0.3;
+      const wHit = he.x + 0.35;
       let best = 0;
       for (let k = 0; k < ROLLOUT_SPEEDS.length; k++) {
         const u = k === 0 ? Math.max(sp, 4) : sp * ROLLOUT_SPEEDS[k];
         if (k > 0 && u < 4) break;
-        const F = rollout(v.pos.x, v.pos.z, moveH, chosen, u, L, wHit);
-        const a = Math.sqrt(2 * dEff * Math.max(0, F - lead));
+        const F = rollout(v.pos.x, v.pos.z, moveH, chosen, u, L, he.z - he.x, wHit);
+        const a = Math.sqrt(2 * dEff * Math.max(0, F - (STOP_MARGIN * 0.6 + sp * REACTION)));
         const ok = k === 0 ? a : Math.min(u, a);
         if (ok > best) best = ok;
         if (a >= u) break;
@@ -560,13 +571,23 @@ export function vehicleTick(sys: BotSystem, b: BotState, p: PlayerState, think: 
     // Never crawl below walking pace when the way is open (obstacle contacts that slow are harmless).
     if (avail > 0) vt = Math.max(vt, 3);
     b.driveTargetSpeed = vt;
-    const dbg = (globalThis as any).__vdbg; if (dbg) dbg({ t, x: v.pos.x, z: v.pos.z, sp, desired, chosen, chosenF, need, L, w, aheadF, turn, vt, obsN, dist });
+    const dbg = (globalThis as any).__vdbg; if (dbg) dbg({ t, x: v.pos.x, z: v.pos.z, sp, desired, chosen, chosenF, need, L, w, aheadF, turn, vt, obsN, dist, stuck: b.driveStuckCount, rev: b.reverseUntil > t ? 1 : 0, yaw: v.yaw });
 
+    // Steady progress forgives earlier stuck episodes.
+    if (sp > 6 && t >= b.reverseUntil) {
+      if (b.driveGoodSince < 0) b.driveGoodSince = t;
+      else if (t - b.driveGoodSince > 6) {
+        if (b.driveStuckCount > 0) b.driveStuckCount--;
+        b.driveGoodSince = t;
+      }
+    } else {
+      b.driveGoodSince = -1;
+    }
     // Stuck: throttling without moving.
     if (b.driveThrottle > 0.4 && Math.abs(speed) < 1.5 && t >= b.reverseUntil) {
       if (b.driveStuckSince < 0) b.driveStuckSince = t;
       else if (t - b.driveStuckSince > 1.5) {
-        b.reverseUntil = t + 1.3;
+        b.reverseUntil = t + REVERSE_TIME;
         b.driveStuckCount++;
         b.driveStuckSince = -1;
       }

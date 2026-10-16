@@ -171,6 +171,8 @@ export interface BotState {
   vehicleBlacklist: Map<EntityId, number>;
   driveHeading: number;
   driveStuckSince: number;
+  /** Since when the driver has been making steady progress (-1 = not). */
+  driveGoodSince: number;
   reverseUntil: number;
   driveStuckCount: number;
   driveWaitUntil: number;
@@ -306,6 +308,7 @@ export function createBotState(p: PlayerState, seed: number, thinkSlot: number, 
     vehicleBlacklist: new Map(),
     driveHeading: 0,
     driveStuckSince: -1,
+    driveGoodSince: -1,
     reverseUntil: 0,
     driveStuckCount: 0,
     driveWaitUntil: 0,

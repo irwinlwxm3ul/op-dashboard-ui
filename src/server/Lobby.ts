@@ -4,7 +4,7 @@
 import type {
   LobbyErrorCode, LobbyMember, LobbySettings, LobbyState, LobbyStatus, LobbySummary, ServerMessage,
 } from '../shared/protocol';
-import type { MatchResults, TeamId } from '../shared/types';
+import type { EntityId, MatchResults, TeamId } from '../shared/types';
 import type { TokenBucket } from './limits';
 import type { MatchRunnerLike } from './runner';
 
@@ -16,6 +16,8 @@ export interface LobbyClient {
   readonly matchStarts: TokenBucket;
   readonly name: string | null;
   readonly pingMs: number;
+  /** Transport-measured RTT in ms (NaN while unknown). */
+  readonly rtt: number;
   lobbyId: string | null;
   inMatch: boolean;
   send(msg: ServerMessage): void;
@@ -31,6 +33,8 @@ interface Member {
 /** A running (or lingering, after it ended) match of a lobby. */
 export interface MatchSession {
   readonly lobby: Lobby;
+  /** Player entity id -> client (learnt from each client's matchInit), for cheat-flag logs. */
+  readonly players: Map<EntityId, LobbyClient>;
   /** Address key of the host that started it (per-address concurrent match limit). */
   readonly ip: string;
   runner: MatchRunnerLike | null;

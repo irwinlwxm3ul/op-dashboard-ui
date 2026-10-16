@@ -30,6 +30,20 @@
       ]
     },
     {
+      "id": "ammo_crate",
+      "file": "/home/user/op-dashboard-ui/public/assets/models/props/ammo_crate.glb",
+      "bytes": 225656,
+      "tris": 1531,
+      "size": [
+        0.815,
+        0.301,
+        0.538
+      ],
+      "meshes": [
+        "ammo_crate"
+      ]
+    },
+    {
       "id": "barrel_oil",
       "file": "/home/user/op-dashboard-ui/public/assets/models/props/barrel_oil.glb",
       "bytes": 169448,
@@ -145,18 +159,18 @@
     {
       "id": "sandbag_wall",
       "file": "/home/user/op-dashboard-ui/public/assets/models/props/sandbag_wall.glb",
-      "bytes": 82988,
-      "tris": 1932,
+      "bytes": 81136,
+      "tris": 1848,
       "size": [
-        2.075,
+        2.074,
         1.156,
-        0.66
+        0.664
       ],
       "meshes": [
         "sandbag_wall"
       ],
       "bags": 42,
-      "bagTris": 46
+      "bagTris": 44
     }
   ]
 ]

@@ -4,10 +4,16 @@
 // post-match linger, end detection and periodic stats logging at a relaxed rate. The loop only
 // runs while at least one match exists.
 
+import type { CheatFlag } from '../shared/sim/index';
 import type { MatchSession } from './Lobby';
 import type { Logger } from './log';
 
+/** Runner stats (and cheat flags) are polled this often (ms). */
+const STATS_POLL_MS = 1000;
+
 export interface MatchLoopHost {
+  /** Suspicious-aim flags drained from the runner's stats. */
+  onCheatFlags(session: MatchSession, flags: CheatFlag[]): void;
   /** The runner reports isOver() but never called onEnd. */
   onRunnerOver(session: MatchSession): void;
   /** The post-match linger period elapsed. */
@@ -35,6 +41,7 @@ export class MatchLoop {
   private timer: ReturnType<typeof setInterval> | null = null;
   private timerMs = 0;
   private statsTimer: ReturnType<typeof setInterval> | null = null;
+  private lastStatsLog = 0;
 
   constructor(
     private readonly host: MatchLoopHost,
@@ -47,7 +54,10 @@ export class MatchLoop {
 
   add(session: MatchSession): void {
     this.sessions.add(session);
-    if (this.statsTimer === null) this.statsTimer = setInterval(this.logStats, this.opts.statsMs);
+    if (this.statsTimer === null) {
+      this.lastStatsLog = performance.now();
+      this.statsTimer = setInterval(this.pollStats, STATS_POLL_MS);
+    }
     this.reschedule();
   }
 
@@ -129,19 +139,27 @@ export class MatchLoop {
     if (this.sessions.size === 0) this.stop();
   };
 
-  private readonly logStats = (): void => {
+  /** Every second: forward cheat flags; every `statsMs`: log tick statistics per match. */
+  private readonly pollStats = (): void => {
+    const now = performance.now();
+    const logNow = now - this.lastStatsLog >= this.opts.statsMs;
+    if (logNow) this.lastStatsLog = now;
     for (const s of this.sessions) {
       if (!s.runner || s.disposed) continue;
       try {
         const st = s.runner.stats();
-        this.opts.log.info('match stats', {
+        if (st.flags && st.flags.length > 0) this.host.onCheatFlags(s, st.flags);
+        if (!logNow) continue;
+        const fields: Record<string, unknown> = {
           lobby: s.lobby.id,
-          uptime: `${Math.round((performance.now() - s.startedAt) / 1000)}s`,
+          uptime: `${Math.round((now - s.startedAt) / 1000)}s`,
           tickMsAvg: Math.round(st.tickMsAvg * 100) / 100,
           tickMsMax: Math.round(st.tickMsMax * 100) / 100,
           players: st.players,
           bots: st.bots,
-        });
+        };
+        if (st.rttAvgMs !== undefined && st.rttAvgMs >= 0) fields.rttAvgMs = Math.round(st.rttAvgMs);
+        this.opts.log.info('match stats', fields);
       } catch (err) {
         this.opts.log.warn('match stats failed', { lobby: s.lobby.id, err });
       }

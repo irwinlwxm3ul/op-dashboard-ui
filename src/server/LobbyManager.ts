@@ -4,6 +4,7 @@
 
 import { randomBytes, randomInt } from 'node:crypto';
 import type { ClientMessage, LobbySettings, LobbySummary, ServerMessage } from '../shared/protocol';
+import type { CheatFlag } from '../shared/sim/index';
 import type { MatchConfig, MatchResults, TeamId } from '../shared/types';
 import { Lobby, type LobbyClient, type MatchSession } from './Lobby';
 import { TokenBucket, type ServerLimits } from './limits';
@@ -340,6 +341,7 @@ export class LobbyManager implements MatchLoopHost {
     };
     const session: MatchSession = {
       lobby,
+      players: new Map(),
       ip: client.ip,
       runner: null,
       startedAt: performance.now(),
@@ -355,8 +357,10 @@ export class LobbyManager implements MatchLoopHost {
       team,
       // Only deliver while the client is still in this match's view.
       send: (msg: ServerMessage) => {
+        if (msg.t === 'matchInit' && msg.init.you !== null) session.players.set(msg.init.you, c);
         if (!session.disposed && c.inMatch && c.lobbyId === lobby.id) c.send(msg);
       },
+      rttMs: () => c.rtt,
     }));
 
     try {
@@ -447,6 +451,24 @@ export class LobbyManager implements MatchLoopHost {
       winnerTeam: results?.winnerTeam ?? null,
       duration: results ? `${Math.round(results.duration)}s` : 'unknown',
     });
+  }
+
+  /** MatchLoopHost: suspicious-aim flags from the runner's heuristics (log only). */
+  onCheatFlags(session: MatchSession, flags: CheatFlag[]): void {
+    for (const f of flags) {
+      const c = session.players.get(f.player);
+      this.opts.log.warn('cheat flag', {
+        lobby: session.lobby.id,
+        kind: f.kind,
+        value: f.value,
+        player: f.player,
+        name: f.name,
+        client: c?.id ?? null,
+        clientName: c?.name ?? null,
+        ip: c?.ip ?? null,
+        simTime: Math.round(f.time * 10) / 10,
+      });
+    }
   }
 
   /** MatchLoopHost */

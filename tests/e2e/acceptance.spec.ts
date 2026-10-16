@@ -220,7 +220,8 @@ test.describe.serial('training ground', () => {
         const hit = (await events(page, ['targetHit'], since)).find((e) => e.ev.target === targetId);
         if (hit) {
           const local = (await events(page, ['localShot'], since));
-          const shots = (await events(page, ['shot'], since)).filter((e) => e.ev.shooter === f.localId && e.seq < hit.seq);
+          // (A hitscan read-out is emitted just before its shot event, in the same snapshot.)
+          const shots = (await events(page, ['shot'], since)).filter((e) => e.ev.shooter === f.localId && e.snap <= hit.snap);
           return { hit, local, shot: shots[shots.length - 1] };
         }
         await page.waitForTimeout(300);
