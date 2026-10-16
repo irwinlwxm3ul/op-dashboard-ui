@@ -10,14 +10,20 @@ import { BTN } from '../types';
 import { VEHICLES } from '../vehicles';
 import { steerAim } from './combat';
 import { setDest } from './movement';
-import { NF_BLOCKED, NF_UNKNOWN } from './nav';
+import { NF_BLOCKED, NF_NEAR, NF_ON_BOX, NF_UNKNOWN } from './nav';
 import type { BotState } from './state';
 import type { BotSystem } from './system';
-import { insideNext, updateZoneTarget, zoneActive } from './zone';
+import { insideNext, outsideCurrent, updateZoneTarget, zoneActive } from './zone';
+import { findContact } from './perception';
+import { slotRounds } from './aim';
 
 /** Rotations longer than this prefer a vehicle (m). */
 export const VEHICLE_TRIP = 250;
+/** Seconds a vehicle the bot gave up on is ignored. */
+export const VEHICLE_BLACKLIST_TIME = 90;
 const ARRIVE_DIST = 35;
+/** Enemies closer than this make a slow driver get out and fight. */
+const THREAT_EXIT_DIST = 45;
 const HEADINGS: readonly number[] = [0, 0.3, -0.3, 0.6, -0.6, 0.95, -0.95, 1.35, -1.35];
 
 export function freeSeat(v: VehicleState, driver: boolean): number {
@@ -38,7 +44,8 @@ export function findVehicle(sys: BotSystem, b: BotState, p: PlayerState, radius:
   let best: VehicleState | null = null, bestS = Infinity;
   for (let i = 0; i < near.length; i++) {
     const v = near[i];
-    if (v.id === b.vehicleBlacklist || !usable(sys, v)) continue;
+    const until = b.vehicleBlacklist.get(v.id);
+    if ((until !== undefined && until > sys.now) || !usable(sys, v)) continue;
     const def = VEHICLES[v.type];
     const d = hyp(v.pos.x - p.pos.x, v.pos.z - p.pos.z);
     const driver = v.seats[0];
@@ -61,7 +68,7 @@ export function approachVehicle(sys: BotSystem, b: BotState, p: PlayerState): bo
   const t = sys.now;
   const v = sys.sim.vehicles.get(b.vehicleId);
   if (!v || !usable(sys, v) || t - b.vehicleSince > 25) {
-    b.vehicleBlacklist = b.vehicleId;
+    b.vehicleBlacklist.set(b.vehicleId, t + VEHICLE_BLACKLIST_TIME);
     b.vehicleId = -1;
     return false;
   }
@@ -71,7 +78,7 @@ export function approachVehicle(sys: BotSystem, b: BotState, p: PlayerState): bo
   else if (sys.sim.sameTeam(b.id, driver)) seat = freeSeat(v, false);
   else seat = -1;
   if (seat < 0) {
-    b.vehicleBlacklist = v.id;
+    b.vehicleBlacklist.set(v.id, t + VEHICLE_BLACKLIST_TIME);
     b.vehicleId = -1;
     return false;
   }
@@ -88,15 +95,15 @@ export function approachVehicle(sys: BotSystem, b: BotState, p: PlayerState): bo
   return true;
 }
 
-function rayClear(sys: BotSystem, x: number, z: number, h: number, L: number): boolean {
+function rayClear(sys: BotSystem, x: number, z: number, h: number, L: number, mask: number): boolean {
   const fx = -Math.sin(h), fz = -Math.cos(h), rx = Math.cos(h), rz = -Math.sin(h);
   const g = sys.grid;
-  for (let k = 0; k < 4; k++) {
-    const s = k === 0 ? 3 : (L * k) / 3;
+  // Dense samples (1 m) so thin barriers and fences cannot slip between them; NEAR catches
+  // tree trunks thinner than a cell. Vehicles also stay out of buildings (box floors).
+  for (let s = 2; s <= L; s += 1) {
     for (let lat = -1; lat <= 1; lat++) {
-      const px = x + fx * s + rx * lat * 1.1, pz = z + fz * s + rz * lat * 1.1;
-      const f = g.flagsAt(px, pz, false);
-      if (f !== NF_UNKNOWN && f & NF_BLOCKED) return false;
+      const f = g.flagsAt(x + fx * s + rx * lat * 1.1, z + fz * s + rz * lat * 1.1, false);
+      if (f !== NF_UNKNOWN && f & mask) return false;
     }
   }
   return true;
@@ -147,24 +154,32 @@ export function vehicleTick(sys: BotSystem, b: BotState, p: PlayerState, think: 
   const dist = hyp(tx - v.pos.x, tz - v.pos.z);
   if (think) {
     const arrivedNow = dist < ARRIVE_DIST || (!leader && zoneActive(sys) && insideNext(sys, v.pos.x, v.pos.z, 20) && dist < 120);
-    const threatClose = t - b.lastContactTime < 1 && Math.abs(speed) < 8;
+    // Bail out to fight only when an enemy is close, the bot can shoot back and it is not
+    // racing the zone.
+    const c = findContact(b, b.targetId);
+    const threatClose = !!c && c.visible && Math.abs(speed) < 8 && hyp(c.x - v.pos.x, c.z - v.pos.z) < THREAT_EXIT_DIST &&
+      hasRounds(p) && !outsideCurrent(sys, v.pos.x, v.pos.z);
     if (arrivedNow || v.destroyed || v.health < def.health * 0.2 || v.fuel <= 0.05 || b.driveStuckCount >= 3 || threatClose) {
       b.exitWanted = true;
     }
     if (b.exitWanted && Math.abs(speed) < 3 && t - b.vehicleActionAt > 0.6) {
       b.actions.push({ a: 'exit' });
       b.vehicleActionAt = t;
-      b.vehicleBlacklist = b.driveStuckCount >= 3 || v.fuel <= 0.05 ? v.id : -1;
+      if (b.driveStuckCount >= 3 || v.fuel <= 0.05) b.vehicleBlacklist.set(v.id, t + VEHICLE_BLACKLIST_TIME);
     }
-    // Heading with feelers.
+    // Heading with feelers: strict first, then without the obstacle margin, then short range.
     const desired = Math.atan2(-(tx - v.pos.x), -(tz - v.pos.z));
     const L = clamp(Math.abs(speed) * 1.4, 8, 30);
     let chosen = NaN;
-    for (let k = 0; k < HEADINGS.length; k++) {
-      const h = desired + HEADINGS[k];
-      if (rayClear(sys, v.pos.x, v.pos.z, h, L)) {
-        chosen = h;
-        break;
+    for (let pass = 0; pass < 3 && Number.isNaN(chosen); pass++) {
+      const mask = pass === 0 ? NF_BLOCKED | NF_ON_BOX | NF_NEAR : NF_BLOCKED | NF_ON_BOX;
+      const len = pass === 2 ? 5 : L;
+      for (let k = 0; k < HEADINGS.length; k++) {
+        const h = desired + HEADINGS[k];
+        if (rayClear(sys, v.pos.x, v.pos.z, h, len, mask)) {
+          chosen = h;
+          break;
+        }
       }
     }
     b.driveHeading = Number.isNaN(chosen) ? desired : chosen;
@@ -202,12 +217,19 @@ export function vehicleTick(sys: BotSystem, b: BotState, p: PlayerState, think: 
     const ae = Math.abs(yawErr);
     throttle = ae > 1.3 ? 0.3 : 1 - (0.45 * ae) / 1.3;
     if (Math.abs(speed) > 18 && ae > 0.5) throttle = 0.15;
+    // Bots drive at a sane cruising speed (crashes hurt, bikes especially).
+    const cruise = Math.min(def.maxSpeed * 0.7, def.isBike ? 18 : 22);
+    if (speed > cruise) throttle = Math.min(throttle, speed > cruise + 3 ? -0.3 : 0);
     if (dist < 80) throttle *= Math.max(0.35, dist / 80);
   }
   b.driveThrottle = throttle;
   out.mx = steer;
   out.mz = throttle;
   return buttons;
+}
+
+function hasRounds(p: PlayerState): boolean {
+  return slotRounds(p, 0) > 0 || slotRounds(p, 1) > 0 || slotRounds(p, 2) > 0;
 }
 
 function teammatesWalkingNear(sys: BotSystem, p: PlayerState, r: number): boolean {

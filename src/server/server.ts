@@ -144,6 +144,7 @@ export async function startServer(opts: StartServerOptions = {}): Promise<Server
         break;
       case 'input':
       case 'ping':
+      case 'loaded':
         manager.routeMatchMessage(conn, msg);
         break;
       case 'leaveMatch':

@@ -167,6 +167,7 @@ export class App implements AppActions {
     this.ui.show('game');
     core.resize();
     session.start();
+    hub.send({ t: 'loaded' });
   }
 
   private onResults(_results: MatchResults): void {

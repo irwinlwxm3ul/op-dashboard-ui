@@ -99,6 +99,7 @@ export class LocalMatchHost {
         return;
       case 'input':
       case 'ping':
+      case 'loaded':
         this.runner?.handleMessage(LOCAL_CLIENT_ID, msg);
         return;
       case 'leaveMatch':

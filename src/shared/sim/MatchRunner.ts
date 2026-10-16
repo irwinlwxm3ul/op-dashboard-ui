@@ -60,7 +60,12 @@ function now(): number {
   return perf ? perf.now() : 0;
 }
 
+/** Longest the plane waits for slow clients to finish loading (ms). */
+export const LOAD_HOLD_MAX_MS = 15000;
+
 export class MatchRunner {
+  private loaded = new Set<string>();
+  private holdUntil = 0;
   readonly sim: GameSim;
   private readonly entries = new Map<string, ClientEntry>();
   private readonly entryList: ClientEntry[] = [];
@@ -110,7 +115,11 @@ export class MatchRunner {
     }
     if (sim.config.botFill) sim.fillBots();
     if (this.botDriverFactory) this.driver = this.botDriverFactory(sim);
+    // Battle royale: park the plane until every client has built its scene, so nobody loses
+    // flight time to loading (bounded by LOAD_HOLD_MAX_MS so one slow client can't stall a match).
+    sim.holdPlane = sim.config.mode === 'br' && this.entryList.length > 0;
     sim.start();
+    this.holdUntil = nowMs + LOAD_HOLD_MAX_MS;
     this.lastNow = nowMs;
     this.acc = 0;
     this.snapAcc = 0;
@@ -135,9 +144,18 @@ export class MatchRunner {
     this.sendSnapshots();
   }
 
+  /** Release a held plane once all clients reported 'loaded' (or the hold timed out). */
+  private checkHold(nowMs: number): void {
+    if (!this.sim.isPlaneHeld) return;
+    let all = true;
+    for (const e of this.entryList) if (!this.loaded.has(e.c.id)) { all = false; break; }
+    if (all || nowMs >= this.holdUntil) this.sim.releasePlane();
+  }
+
   /** Advance the fixed-step simulation to `nowMs` and send due snapshots. */
   update(nowMs: number): void {
     if (!this.started) return;
+    this.checkHold(nowMs);
     let elapsed = nowMs - this.lastNow;
     this.lastNow = nowMs;
     if (!(elapsed > 0)) elapsed = 0;
@@ -195,6 +213,9 @@ export class MatchRunner {
         if (typeof msg.c === 'number' && Number.isFinite(msg.c)) {
           e.c.send({ t: 'pong', c: msg.c, s: this.sim.time * 1000 + this.acc });
         }
+        break;
+      case 'loaded':
+        this.loaded.add(clientId);
         break;
       case 'leaveMatch':
         this.removeClient(clientId);

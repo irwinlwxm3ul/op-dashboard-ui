@@ -6,7 +6,7 @@ import { newPathRequest, type PathRequest } from './pathfind';
 
 export type BotGoal =
   | 'plane' | 'drop' | 'downed' | 'combat' | 'cover' | 'heal' | 'revive' | 'zone' | 'vehicle'
-  | 'drive' | 'passenger' | 'loot' | 'explore' | 'follow' | 'investigate' | 'idle';
+  | 'drive' | 'passenger' | 'loot' | 'explore' | 'follow' | 'investigate' | 'idle' | 'descend';
 
 /** Number of enemies a bot can keep track of at once. */
 export const MAX_CONTACTS = 8;
@@ -163,7 +163,8 @@ export interface BotState {
   vehicleId: EntityId;
   vehicleSince: number;
   vehicleActionAt: number;
-  vehicleBlacklist: EntityId;
+  /** Vehicles this bot gave up on (id -> until time). */
+  vehicleBlacklist: Map<EntityId, number>;
   driveHeading: number;
   driveStuckSince: number;
   reverseUntil: number;
@@ -294,7 +295,7 @@ export function createBotState(p: PlayerState, seed: number, thinkSlot: number, 
     vehicleId: -1,
     vehicleSince: 0,
     vehicleActionAt: -1e9,
-    vehicleBlacklist: -1,
+    vehicleBlacklist: new Map(),
     driveHeading: 0,
     driveStuckSince: -1,
     reverseUntil: 0,

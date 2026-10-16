@@ -13,19 +13,23 @@ import { activeWeapon, combatAct, combatThink, manageWeapon, steerAim, wantReloa
 import { freeCapacity, lootUtility, wellEquipped, worstPrimarySlot } from './loot';
 import { INTERIOR_NONE, INTERIOR_OK, INTERIOR_PENDING, buildingInterior } from './mapinfo';
 import {
-  checkStuck, clearDest, facingMove, followPath, isAvoided, moveYaw, setDest,
+  checkStuck, clearDest, facingMove, followPath, isAvoided, moveYaw, setDest, setDirectDest,
 } from './movement';
 import { findContact, perceive, selectTarget } from './perception';
 import type { BotGoal, BotState } from './state';
 import type { BotSystem } from './system';
-import { VEHICLE_TRIP, approachVehicle, findVehicle } from './vehicle';
+import { VEHICLE_BLACKLIST_TIME, VEHICLE_TRIP, approachVehicle, findVehicle } from './vehicle';
 import { insideNext, outsideCurrent, updateZoneTarget, zoneActive, zoneUrgency } from './zone';
 
 const LOOT_RADIUS = 30;
+/** Unarmed bots look further for a gun. */
+const LOOT_RADIUS_UNARMED = 55;
 const EXPLORE_RADIUS = 220;
 const REVIVE_SEARCH = 120;
 /** Items more than this above the terrain lie on an upper floor. */
 const UPPER_FLOOR = 2.4;
+/** A bot this far above the nav floor under it is on a roof / upper floor. */
+const ELEVATED = 2.2;
 /** Goal stickiness (score bonus for the current goal). */
 const HYSTERESIS = 8;
 
@@ -68,16 +72,27 @@ export function brainThink(sys: BotSystem, b: BotState, p: PlayerState): void {
   bestGoal = 'idle';
   bestScore = 5 + (b.goal === 'idle' ? HYSTERESIS : 0);
 
+  // Stranded on a roof / upper floor (chute drift): get down first.
+  if (isElevated(sys, p)) offer('descend', 97);
+
   // Combat.
   if (target) {
     const d = hyp(target.x - p.pos.x, target.z - p.pos.z);
     const w = activeWeapon(p);
     const armed = hasAnyRounds(p);
     if (visible) {
-      const far = w ? d > WEAPON_RANGE[w.id].max * 1.3 : true;
-      offer('combat', !armed ? 58 : far && t - b.lastDamageTime > 3 ? 44 : 100);
-    } else if (t - target.lastSeen < 8 && armed) {
-      offer('combat', 48 + sk.aggression * 15);
+      if (!armed) {
+        // Unarmed: only back off from close threats; otherwise grabbing a gun matters more.
+        offer('combat', d < 15 ? 62 : 28);
+      } else {
+        const far = w ? d > WEAPON_RANGE[w.id].max * 1.3 : true;
+        offer('combat', far && t - b.lastDamageTime > 3 ? 44 : 100);
+      }
+    } else if (armed) {
+      // Stay engaged right after losing sight (pre-aim / peek), then decide by aggression.
+      const lost = t - target.lastSeen;
+      if (lost < 2.5) offer('combat', 80);
+      else if (lost < 8) offer('combat', 48 + sk.aggression * 15);
     }
   }
 
@@ -132,7 +147,12 @@ export function brainThink(sys: BotSystem, b: BotState, p: PlayerState): void {
     lootPick = b.lootPick >= 0 && sys.sim.loot.has(b.lootPick) ? b.lootPick : -1;
     lootPickScore = lootPick >= 0 ? b.lootPickScore : 0;
   }
-  if (lootPick >= 0) offer('loot', 25 + 50 * lootPickScore);
+  if (lootPick >= 0) {
+    // Without a usable gun, getting one beats almost everything except a closing zone.
+    const pick = sys.sim.loot.get(lootPick);
+    const gunHunt = pick !== undefined && isWeaponId(pick.item) && !hasAnyRounds(p);
+    offer('loot', (gunHunt ? 42 : 28) + 55 * lootPickScore);
+  }
   if (!wellEquipped(p) && pickExplore(sys, b, p)) offer('explore', 20 + (p.weapons[0] || p.weapons[1] ? 0 : 14));
 
   // Investigate noises / damage.
@@ -174,6 +194,9 @@ export function brainThink(sys: BotSystem, b: BotState, p: PlayerState): void {
       setDest(sys, b, p, b.investigateX, b.investigateZ, 4, false);
       b.walk = true;
       break;
+    case 'descend':
+      descendThink(sys, b, p);
+      break;
     default:
       idleThink(sys, b, p);
   }
@@ -203,6 +226,31 @@ function setGoal(sys: BotSystem, b: BotState, g: BotGoal): void {
   clearDest(sys, b);
 }
 
+/** Standing well above the ground-level nav floor (roof, upper floor, container top). */
+function isElevated(sys: BotSystem, p: PlayerState): boolean {
+  return p.mode === 'ground' && p.pos.y - sys.grid.baseOr(p.pos.x, p.pos.z) > ELEVATED;
+}
+
+/** Walk off the roof over the nearest footprint edge (the drop is survivable from one storey). */
+function descendThink(sys: BotSystem, b: BotState, p: PlayerState): void {
+  const w = sys.world;
+  let ex = p.pos.x + Math.cos(p.id) * 4, ez = p.pos.z + Math.sin(p.id) * 4;
+  let best = Infinity;
+  for (let i = 0; i < w.buildings.length; i++) {
+    const bd = w.buildings[i];
+    if (p.pos.x < bd.min.x - 0.5 || p.pos.x > bd.max.x + 0.5 || p.pos.z < bd.min.z - 0.5 || p.pos.z > bd.max.z + 0.5) continue;
+    const dW = p.pos.x - bd.min.x, dE = bd.max.x - p.pos.x, dN = p.pos.z - bd.min.z, dS = bd.max.z - p.pos.z;
+    const m = Math.min(dW, dE, dN, dS);
+    if (m >= best) continue;
+    best = m;
+    if (m === dW) { ex = bd.min.x - 2.5; ez = p.pos.z; }
+    else if (m === dE) { ex = bd.max.x + 2.5; ez = p.pos.z; }
+    else if (m === dN) { ex = p.pos.x; ez = bd.min.z - 2.5; }
+    else { ex = p.pos.x; ez = bd.max.z + 2.5; }
+  }
+  if (!b.hasDest || hyp(b.destX - ex, b.destZ - ez) > 1) setDirectDest(sys, b, ex, ez, 0.8);
+}
+
 function hasAnyRounds(p: PlayerState): boolean {
   return slotRounds(p, 0) > 0 || slotRounds(p, 1) > 0 || slotRounds(p, 2) > 0;
 }
@@ -217,7 +265,7 @@ function onGaveUp(sys: BotSystem, b: BotState): void {
     b.explored[b.exploreBuilding] = 1;
     b.exploreBuilding = -1;
   } else if (b.goal === 'vehicle') {
-    b.vehicleBlacklist = b.vehicleId;
+    if (b.vehicleId >= 0) b.vehicleBlacklist.set(b.vehicleId, t + VEHICLE_BLACKLIST_TIME);
     b.vehicleId = -1;
   } else if (b.goal === 'idle') {
     b.wanderUntil = t;
@@ -235,6 +283,8 @@ function findDownedTeammate(sys: BotSystem, b: BotState, p: PlayerState): Player
     const q = mates[i];
     if (q.id === p.id || q.life !== 'downed') continue;
     if (q.revivedBy !== null && q.revivedBy !== p.id) continue;
+    // Ground-floor navigation: teammates on roofs / upper floors cannot be reached.
+    if (Math.abs(q.pos.y - p.pos.y) > 2.2 && q.pos.y - sys.world.heightAt(q.pos.x, q.pos.z) > UPPER_FLOOR) continue;
     const d = hyp(q.pos.x - p.pos.x, q.pos.z - p.pos.z);
     if (d > REVIVE_SEARCH) continue;
     const s = d - (q.isBot ? 0 : 40);
@@ -276,9 +326,11 @@ export function chooseHeal(sys: BotSystem, p: PlayerState): ConsumableId | null 
 
 function scanLoot(sys: BotSystem, b: BotState, p: PlayerState): void {
   const t = sys.now;
-  const items = sys.sim.lootNear(p.pos.x, p.pos.z, LOOT_RADIUS, sys.lootBuf);
+  const unarmed = !hasAnyRounds(p);
+  const items = sys.sim.lootNear(p.pos.x, p.pos.z, unarmed ? LOOT_RADIUS_UNARMED : LOOT_RADIUS, sys.lootBuf);
   const free = freeCapacity(p);
   const world = sys.world;
+  const elevated = isElevated(sys, p);
   if (b.blacklist.size > 48) {
     for (const [id, until] of b.blacklist) if (until <= t) b.blacklist.delete(id);
   }
@@ -292,8 +344,10 @@ function scanLoot(sys: BotSystem, b: BotState, p: PlayerState): void {
     let s = u / (1 + d / 14);
     if (it.id === b.lootId) s *= 1.25;
     if (s <= lootPickScore) continue;
-    // Upper floors are skipped unless the bot is already up there (ground-floor navigation).
-    if (Math.abs(it.pos.y - p.pos.y) > 1.3 && it.pos.y - world.heightAt(it.pos.x, it.pos.z) > UPPER_FLOOR) continue;
+    // Upper floors are skipped unless the bot is already up there (ground-floor navigation),
+    // and a bot stranded up high only takes what is on its own level.
+    const dy = it.pos.y - p.pos.y;
+    if (Math.abs(dy) > 1.6 && (elevated || it.pos.y - world.heightAt(it.pos.x, it.pos.z) > UPPER_FLOOR)) continue;
     if (isAvoided(sys, b, it.pos.x, it.pos.z)) continue;
     lootPick = it.id;
     lootPickScore = s;
@@ -320,7 +374,14 @@ function lootThink(sys: BotSystem, b: BotState, p: PlayerState): void {
     return;
   }
   const d = hyp(it.pos.x - p.pos.x, it.pos.z - p.pos.z);
-  if (d < 1.9 && Math.abs(it.pos.y - p.pos.y) < 2) {
+  if (d < 1.9 && Math.abs(it.pos.y - p.pos.y) >= 2) {
+    // Right above / below us on another level: not reachable from here.
+    b.blacklist.set(it.id, t + 60);
+    b.lootId = -1;
+    clearDest(sys, b);
+    return;
+  }
+  if (d < 1.9) {
     // Replacing a primary: switch to the weapon we are willing to drop first.
     if (isWeaponId(it.item) && WEAPONS[it.item].slot === 'primary') {
       const worst = worstPrimarySlot(p);

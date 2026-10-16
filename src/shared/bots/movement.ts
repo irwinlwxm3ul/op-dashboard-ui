@@ -29,6 +29,24 @@ export function setDest(sys: BotSystem, b: BotState, p: PlayerState, x: number, 
   if (b.path.status === PATH_IDLE || b.path.status === PATH_FAILED || moved > REPATH_MOVE) requestPath(sys, b, p);
 }
 
+/** Walk straight to (x, z) without path planning (e.g. off a roof, where the ground grid does not apply). */
+export function setDirectDest(sys: BotSystem, b: BotState, x: number, z: number, arrive: number): void {
+  sys.planner.cancel(b.path);
+  b.hasDest = true;
+  b.destX = b.pathGX = x;
+  b.destZ = b.pathGZ = z;
+  b.arrive = arrive;
+  b.sprint = false;
+  b.walk = false;
+  b.pathIdx = 0;
+  b.pathTime = sys.now;
+  b.path.pts[0] = x;
+  b.path.pts[1] = z;
+  b.path.count = 1;
+  b.path.partial = false;
+  b.path.status = PATH_DONE;
+}
+
 export function clearDest(sys: BotSystem, b: BotState): void {
   b.hasDest = false;
   b.moveScale = 0;

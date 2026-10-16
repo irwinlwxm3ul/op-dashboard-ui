@@ -180,6 +180,7 @@ export function validateClientMessage(raw: unknown): ClientMessage | null {
     case 'leaveLobby':
     case 'startMatch':
     case 'leaveMatch':
+    case 'loaded':
       return { t: raw.t } as ClientMessage;
     case 'createLobby':
     case 'lobbySettings': {

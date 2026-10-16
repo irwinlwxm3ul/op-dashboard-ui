@@ -248,7 +248,7 @@ const planePos: Vec3 = { x: 0, y: 0, z: 0 };
 const planeDir = { x: 0, z: 0 };
 
 function actJump(sim: GameSim, p: PlayerState): void {
-  if (p.mode !== 'plane' || p.life !== 'alive' || !sim.plane) return;
+  if (p.mode !== 'plane' || p.life !== 'alive' || !sim.plane || sim.isPlaneHeld) return;
   planePosition(sim.plane, planePos);
   if (!sim.world.inBounds(planePos.x, planePos.z)) return;
   jumpFromPlane(sim, p);

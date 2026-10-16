@@ -1,7 +1,7 @@
 // Public API of the simulation module (see ARCHITECTURE.md "src/shared/sim").
 
 export { GameSim } from './GameSim';
-export { MatchRunner } from './MatchRunner';
+export { LOAD_HOLD_MAX_MS, MatchRunner } from './MatchRunner';
 export type { MatchRunnerOptions, RunnerClient } from './MatchRunner';
 export { trainingTargetPosition, TRAINING_TARGET_CENTER_HEIGHT } from './training';
 export { ZONE_PHASES, ZONE_PRE_TIME, ADS_MOVE_MUL, SPRAY_RESET_INTERVALS } from './tuning';

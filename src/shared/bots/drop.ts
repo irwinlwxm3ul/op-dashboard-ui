@@ -13,6 +13,8 @@ import type { BotSystem } from './system';
 
 /** Lateral distance (m) from the flight path that is comfortably reachable. */
 const EASY_REACH = 320;
+/** Landing spots keep this distance from the building footprint (chutes drift a few metres). */
+const LANDING_CLEARANCE = 8;
 const MAX_REACH = 520;
 
 const dir = { x: 0, z: 0 };
@@ -62,8 +64,13 @@ export function chooseLanding(sys: BotSystem, b: BotState, p: PlayerState): void
     const weights: number[] = [];
     for (let i = 0; i < w.towns.length; i++) {
       const t = w.towns[i];
+      // Other teams already heading there make a town less attractive (spread the drops).
+      let taken = 0;
+      for (const plan of sys.teams.values()) {
+        if (plan.hasLanding && (plan.landX - t.x) ** 2 + (plan.landZ - t.z) ** 2 < (t.r + 40) ** 2) taken++;
+      }
       const wt = Math.pow(t.tier + 1, 1.3) * (0.5 + t.r / 60) * reach(t.x, t.z) * (0.6 + 0.8 * rng.next()) *
-        (info.townBuildings[i].length > 0 ? 1 : 0.3);
+        (info.townBuildings[i].length > 0 ? 1 : 0.3) * Math.pow(0.4, taken);
       weights.push(wt);
       total += wt;
     }
@@ -115,17 +122,38 @@ export function chooseLanding(sys: BotSystem, b: BotState, p: PlayerState): void
   team.hasLanding = true;
 }
 
-/** Landing point next to (not on top of) a building. */
+/** Landing point next to (never on top of) a building: open, dry ground with clearance. */
 function landingNearBuilding(sys: BotSystem, b: BotState, bi: number): void {
   const info = sys.info;
   const cx = info.bCenter[bi * 2], cz = info.bCenter[bi * 2 + 1];
   const hx = info.bHalf[bi * 2], hz = info.bHalf[bi * 2 + 1];
-  const a = b.rng.next() * Math.PI * 2;
-  const ca = Math.cos(a), sa = Math.sin(a);
-  // Distance from the centre to the footprint edge along the direction, plus clearance.
-  const edge = Math.min(Math.abs(ca) > 1e-3 ? hx / Math.abs(ca) : Infinity, Math.abs(sa) > 1e-3 ? hz / Math.abs(sa) : Infinity);
-  b.landX = cx + ca * (edge + 4);
-  b.landZ = cz + sa * (edge + 4);
+  const a0 = b.rng.next() * Math.PI * 2;
+  let bestX = cx + hx + LANDING_CLEARANCE, bestZ = cz;
+  for (let k = 0; k < 8; k++) {
+    const a = a0 + k * (Math.PI / 4);
+    const ca = Math.cos(a), sa = Math.sin(a);
+    // Distance from the centre to the footprint edge along the direction, plus clearance.
+    const edge = Math.min(Math.abs(ca) > 1e-3 ? hx / Math.abs(ca) : Infinity, Math.abs(sa) > 1e-3 ? hz / Math.abs(sa) : Infinity);
+    const x = cx + ca * (edge + LANDING_CLEARANCE), z = cz + sa * (edge + LANDING_CLEARANCE);
+    bestX = x;
+    bestZ = z;
+    if (openGround(sys, x, z)) break;
+  }
+  b.landX = bestX;
+  b.landZ = bestZ;
+}
+
+/** No box top (roof, container) within a few metres and not in water. */
+function openGround(sys: BotSystem, x: number, z: number): boolean {
+  const w = sys.world;
+  const t = w.heightAt(x, z);
+  if (t < w.waterLevel + 0.5) return false;
+  for (let dz = -3; dz <= 3; dz += 3) {
+    for (let dx = -3; dx <= 3; dx += 3) {
+      if (w.groundAt(x + dx, z + dz) > w.heightAt(x + dx, z + dz) + 0.8) return false;
+    }
+  }
+  return true;
 }
 
 /** Riding the plane: decide when to jump. */
@@ -191,8 +219,11 @@ export function dropTick(sys: BotSystem, b: BotState, p: PlayerState, think: boo
     const timeLeft = h / PARACHUTE_DESCENT;
     const drift = timeLeft * PARACHUTE_HORIZONTAL * 0.45;
     if (dist > drift + 5) mz = 1;
-    else if (dist < 6) mz = -1;
-    else mz = Math.max(-1, Math.min(1, (dist - 6) / 25));
+    else if (dist < 4) mz = -1;
+    else mz = Math.max(-1, Math.min(1, (dist - 4) / 25));
+    // Never settle onto a roof: low over a box top, glide on toward open ground.
+    const w = sys.world;
+    if (h < 30 && w.groundAt(p.pos.x, p.pos.z) > w.heightAt(p.pos.x, p.pos.z) + 0.8) mz = 1;
   }
   out.mx = 0;
   out.mz = facing ? mz : mz * 0.3;

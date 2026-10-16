@@ -268,6 +268,8 @@ export type ClientMessage =
   | { t: 'ping'; c: number }
   /** Leave the running match and go back to the lobby room (after death / end). */
   | { t: 'leaveMatch' }
+  /** The client finished building the match scene (releases the parked plane). */
+  | { t: 'loaded' }
   /** Local worker only: start an offline match with these settings. */
   | { t: 'startLocal'; config: MatchConfig; name: string };
 

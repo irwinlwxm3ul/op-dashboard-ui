@@ -174,6 +174,14 @@ export class NavGrid {
     return (this.tBase[ti] as Float32Array)[((gz & TILE_MASK) << TILE_SHIFT) | (gx & TILE_MASK)];
   }
 
+  /** Floor height under a world position without forcing generation (terrain when unknown). */
+  baseOr(x: number, z: number): number {
+    const gx = this.cell(x), gz = this.cell(z);
+    if (!this.inGrid(gx, gz)) return this.world.heightAt(x, z);
+    const b = this.tBase[(gz >> TILE_SHIFT) * this.tiles + (gx >> TILE_SHIFT)];
+    return b ? b[((gz & TILE_MASK) << TILE_SHIFT) | (gx & TILE_MASK)] : this.world.heightAt(x, z);
+  }
+
   /** Flags of the cell under a world position. */
   flagsAt(x: number, z: number, force = true): number {
     return this.flags(this.cell(x), this.cell(z), force);
@@ -295,7 +303,7 @@ export class NavGrid {
    */
   clearSegment(ax: number, az: number, bx: number, bz: number, clearance: number): boolean {
     const w = this.world;
-    const ba = this.base(this.cell(ax), this.cell(az)), bb = this.base(this.cell(bx), this.cell(bz));
+    const ba = this.baseOr(ax, az), bb = this.baseOr(bx, bz);
     const lo = Math.min(ba, bb) + CLEAR_LO, hi = Math.max(ba, bb) + CLEAR_HI;
     const m = clearance + 0.6;
     const minX = Math.min(ax, bx) - m, maxX = Math.max(ax, bx) + m;

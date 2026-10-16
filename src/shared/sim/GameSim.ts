@@ -174,6 +174,28 @@ export class GameSim implements SimView {
   }
 
   /** waiting -> plane (battle royale) | playing (training). */
+  /**
+   * When set before start(), everyone boards a parked plane (not moving, zone timer not running)
+   * until releasePlane() is called — the runner releases it once every client has loaded the world.
+   */
+  holdPlane = false;
+  private planeHeld = false;
+
+  /** Start the flight (and the zone timeline) after a held start. No-op otherwise. */
+  releasePlane(): void {
+    if (!this.planeHeld || !this.plane) return;
+    this.planeHeld = false;
+    this.plane.active = true;
+    this.plane.startTime = this.time;
+    this.zoneCtl.start();
+    this.emit({ type: 'planeStart' });
+    this.emitZone();
+  }
+
+  get isPlaneHeld(): boolean {
+    return this.planeHeld;
+  }
+
   start(): void {
     if (this.started) return;
     this.started = true;
@@ -184,7 +206,12 @@ export class GameSim implements SimView {
     } else {
       this.plane = createPlane(this.world, this.rngPlane, this.time);
       this.phase = 'plane';
-      this.zoneCtl.start();
+      if (this.holdPlane) {
+        this.planeHeld = true;
+        this.plane.active = false;
+      } else {
+        this.zoneCtl.start();
+      }
       for (const p of this.playerList) {
         p.mode = 'plane';
         p.vel.x = 0; p.vel.y = 0; p.vel.z = 0;
@@ -194,8 +221,10 @@ export class GameSim implements SimView {
         rt.last.yaw = p.yaw;
       }
       this.emit({ type: 'matchStart' });
-      this.emit({ type: 'planeStart' });
-      this.emitZone();
+      if (!this.planeHeld) {
+        this.emit({ type: 'planeStart' });
+        this.emitZone();
+      }
     }
     this.history.record(this.time, this.playerList);
     this.playerGrid.rebuild(this.playerList);

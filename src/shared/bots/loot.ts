@@ -65,10 +65,10 @@ export function lootUtility(p: PlayerState, it: LootItem, free: number): number 
   if (isConsumableId(id)) {
     const c = p.items[id] || 0;
     switch (id) {
-      case 'bandage': return c >= 10 ? 0 : 0.25 * (1 - c / 10) + (p.health < 75 ? 0.15 : 0);
-      case 'firstaid': return c >= 3 ? 0 : 0.45 * (1 - c / 3) + (p.health < 60 ? 0.2 : 0);
-      case 'medkit': return c >= 1 ? 0.04 : 0.5;
-      case 'energy': return c >= 4 ? 0 : 0.28 * (1 - c / 4);
+      case 'bandage': return c >= 10 ? 0 : 0.35 * (1 - c / 10) + (p.health < 75 ? 0.2 : 0);
+      case 'firstaid': return c >= 3 ? 0 : 0.6 * (1 - c / 3) + (p.health < 60 ? 0.25 : 0);
+      case 'medkit': return c >= 1 ? 0.04 : 0.6 + (p.health < 50 ? 0.2 : 0);
+      case 'energy': return c >= 4 ? 0 : 0.3 * (1 - c / 4);
       default: return 0;
     }
   }

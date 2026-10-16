@@ -3,7 +3,7 @@
 import { describe, expect, it } from 'vitest';
 import { INPUT_BURST, MOVE_SPEED, SNAPSHOT_RATE, TICK_MS, TICK_RATE } from '../src/shared/constants';
 import type { ClientMessage, ServerMessage, Snapshot } from '../src/shared/protocol';
-import { MatchRunner } from '../src/shared/sim';
+import { LOAD_HOLD_MAX_MS, MatchRunner } from '../src/shared/sim';
 import type { BotDriver, SimView } from '../src/shared/sim';
 import { damageInfo, damagePlayer } from '../src/shared/sim/combat';
 import type { GameEvent, MatchConfig, PlayerInput, PlayerState, RockDef, TreeDef, World, WorldBox } from '../src/shared/types';
@@ -90,6 +90,22 @@ function placeOnGround(w: World, p: PlayerState, x: number, z: number): void {
 }
 
 describe('MatchRunner', () => {
+  it('parks the plane until all clients loaded, or the hold times out', () => {
+    const { runner, clients, advance } = setup();
+    const sim = runner.sim;
+    expect(sim.isPlaneHeld).toBe(true);
+    const travelled0 = sim.plane!.traveled;
+    advance(2000);
+    expect(sim.plane!.traveled).toBe(travelled0);
+    runner.handleMessage(clients[0].id, { t: 'loaded' });
+    advance(500);
+    expect(sim.isPlaneHeld).toBe(true); // others still loading
+    advance(LOAD_HOLD_MAX_MS);
+    expect(sim.isPlaneHeld).toBe(false); // timed out
+    advance(1000);
+    expect(sim.plane!.traveled).toBeGreaterThan(travelled0);
+  });
+
   it('sends matchInit with the roster, loot and the client player, then snapshots', () => {
     const { runner, clients, advance } = setup();
     const sim = runner.sim;
@@ -109,7 +125,11 @@ describe('MatchRunner', () => {
       // A first snapshot follows immediately.
       expect(c.msgs[1].t).toBe('snap');
     }
+    // The plane stays parked until every client reports it has loaded the scene.
+    expect(sim.isPlaneHeld).toBe(true);
+    for (const c of clients) runner.handleMessage(c.id, { t: 'loaded' });
     advance(1000);
+    expect(sim.isPlaneHeld).toBe(false);
     const snaps = clients[0].snaps();
     // ~20 Hz.
     expect(snaps.length).toBeGreaterThanOrEqual(SNAPSHOT_RATE);

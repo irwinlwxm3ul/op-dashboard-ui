@@ -305,7 +305,7 @@ export class LobbyManager implements MatchLoopHost {
   }
 
   /** input / ping: forwarded to the runner while in a match; ping is answered here otherwise. */
-  routeMatchMessage(client: LobbyClient, msg: Extract<ClientMessage, { t: 'input' } | { t: 'ping' }>): void {
+  routeMatchMessage(client: LobbyClient, msg: Extract<ClientMessage, { t: 'input' } | { t: 'ping' } | { t: 'loaded' }>): void {
     const lobby = this.lobbyOf(client);
     const session = lobby?.match;
     if (session && client.inMatch && session.runner && !session.disposed) {
