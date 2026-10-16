@@ -5,11 +5,12 @@
 // vehicles smoke (< 40 % hp) or burn.
 
 import * as THREE from 'three';
-import { HANDLING, VEHICLES, WHEELS } from '../../../shared/vehicles';
+import { HANDLING, SEAT_HIP_HEIGHT, VEHICLES, WHEELS } from '../../../shared/vehicles';
+import type { VehicleModel } from '../../assets';
 import type { EntityId, VehicleType } from '../../../shared/types';
 import type { VehicleView } from '../../game/types';
 import { GeoBuilder, type PartStyle, xform } from './geometry';
-import { createEntityMaterial } from './materials';
+import { applyEntityShader, createEntityMaterial, createEntityUniforms } from './materials';
 import { WRECK_TINT, vehiclePaintHex } from './palette';
 import { ParticleSystem } from './particles';
 import { DRIVER_CONTROLS } from './seating';
@@ -205,6 +206,49 @@ interface VehicleSlot {
   smokeAcc: number;
   fireAcc: number;
   destroyedFor: number;
+  /** Real model instance while close enough (null = procedural batched model). */
+  glb: GlbVehicle | null;
+  /** Hysteresis state of the real-model distance band. */
+  useGlb: boolean;
+}
+
+// ---------------------------------------------------------------------------
+// Real vehicle models (curated glTF; per-vehicle clones near the camera)
+// ---------------------------------------------------------------------------
+
+/** Real models are used inside this band (m, with hysteresis); the batched procedural beyond. */
+const GLB_NEAR = 280;
+const GLB_FAR = 320;
+
+interface GlbWheel {
+  node: THREE.Object3D;
+  steers: boolean;
+  radius: number;
+}
+
+interface GlbVehicle {
+  root: THREE.Object3D;
+  meshes: THREE.Mesh[];
+  /** Original (template) material of each mesh, to look up the normal / wreck variants. */
+  baseMats: THREE.Material[];
+  wheels: GlbWheel[];
+  fork: THREE.Object3D | null;
+  forkRake: number;
+  wrecked: boolean;
+}
+
+interface GlbVehicleType {
+  model: VehicleModel;
+  template: THREE.Object3D;
+  /** Entity-patched materials (rim, reduced fog) and charred wreck variants, by template material. */
+  normal: Map<THREE.Material, THREE.Material>;
+  wreck: Map<THREE.Material, THREE.Material>;
+  free: GlbVehicle[];
+}
+
+/** Loaded real vehicle templates (types without a model keep the procedural one). */
+export interface VehicleTemplates {
+  models: Partial<Record<VehicleType, { model: VehicleModel; template: THREE.Object3D }>>;
 }
 
 const _m = new THREE.Matrix4();
@@ -231,7 +275,10 @@ export class VehicleRenderer {
   private readonly bike = bikeAxis();
   private readonly removeList: EntityId[] = [];
 
+  private readonly parentObj: THREE.Object3D;
+
   constructor(parent: THREE.Object3D) {
+    this.parentObj = parent;
     const built: { type: VehicleType; paint: THREE.BufferGeometry; chassis: THREE.BufferGeometry; wheel: THREE.BufferGeometry; fork: THREE.BufferGeometry | null }[] = [];
     let verts = 0;
     for (const type of TYPES) {
@@ -287,7 +334,10 @@ export class VehicleRenderer {
       const wheels = v.type === 'bike' ? 2 : 4;
       for (let i = 0; i < wheels; i++) instances.push(this.batch.addInstance(g.wheel));
       if (g.fork >= 0) instances.push(this.batch.addInstance(g.fork));
-      s = { id: v.id, type: v.type, instances, wheelAngle: 0, seen: 0, smokeAcc: 0, fireAcc: 0, destroyedFor: 0 };
+      s = {
+        id: v.id, type: v.type, instances, wheelAngle: 0, seen: 0, smokeAcc: 0, fireAcc: 0, destroyedFor: 0,
+        glb: null, useGlb: false,
+      };
       this.slots.set(v.id, s);
       _c.setHex(vehiclePaintHex(v.id));
       this.batch.setColorAt(instances[0], _c);
@@ -298,7 +348,134 @@ export class VehicleRenderer {
 
   private free(s: VehicleSlot): void {
     for (const i of s.instances) this.batch.deleteInstance(i);
+    this.releaseGlb(s);
     this.slots.delete(s.id);
+  }
+
+  // --- Real models -----------------------------------------------------------------------------
+
+  private readonly glbTypes: Partial<Record<VehicleType, GlbVehicleType>> = {};
+  private readonly glbUniforms = createEntityUniforms(0.35);
+  private readonly glbMaterials: THREE.Material[] = [];
+
+  /** Install loaded real models; vehicles of those types switch to them near the camera. */
+  setModels(t: VehicleTemplates): void {
+    for (const type of TYPES) {
+      const entry = t.models[type];
+      if (!entry || this.glbTypes[type]) continue;
+      const normal = new Map<THREE.Material, THREE.Material>();
+      const wreck = new Map<THREE.Material, THREE.Material>();
+      entry.template.traverse((o) => {
+        const mesh = o as THREE.Mesh;
+        if (!mesh.isMesh) return;
+        const mats = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+        for (const m of mats) {
+          if (normal.has(m)) continue;
+          const glass = m.transparent;
+          const n = m.clone();
+          if (!glass) applyEntityShader(n, { rim: true }, this.glbUniforms);
+          const w = m.clone();
+          // Charred wreck: darken (the models are not paint-tintable), no shine.
+          const std = w as THREE.MeshStandardMaterial;
+          if (std.color) std.color.multiplyScalar(glass ? 0.25 : 0.16);
+          if (std.roughness !== undefined) std.roughness = 1;
+          if (std.metalness !== undefined) std.metalness = 0;
+          if (!glass) applyEntityShader(w, { rim: true }, this.glbUniforms);
+          normal.set(m, n);
+          wreck.set(m, w);
+          this.glbMaterials.push(n, w);
+        }
+      });
+      this.glbTypes[type] = { model: entry.model, template: entry.template, normal, wreck, free: [] };
+    }
+  }
+
+  private acquireGlb(type: VehicleType): GlbVehicle | null {
+    const t = this.glbTypes[type];
+    if (!t) return null;
+    const pooled = t.free.pop();
+    if (pooled) {
+      pooled.root.visible = true;
+      return pooled;
+    }
+    const root = t.template.clone(true);
+    root.matrixAutoUpdate = false;
+    const meshes: THREE.Mesh[] = [];
+    const baseMats: THREE.Material[] = [];
+    root.traverse((o) => {
+      const mesh = o as THREE.Mesh;
+      if (!mesh.isMesh) return;
+      const m = (Array.isArray(mesh.material) ? mesh.material[0] : mesh.material) as THREE.Material;
+      meshes.push(mesh);
+      baseMats.push(m);
+      mesh.material = t.normal.get(m) ?? m;
+      mesh.castShadow = !m.transparent;
+      mesh.receiveShadow = true;
+    });
+    const wheels: GlbWheel[] = [];
+    for (const w of t.model.wheels) {
+      const node = root.getObjectByName(w.node);
+      if (!node) continue;
+      node.rotation.order = 'YXZ';
+      wheels.push({ node, steers: w.steers && !w.parent, radius: w.radius });
+    }
+    let fork: THREE.Object3D | null = null;
+    let forkRake = 0;
+    if (t.model.fork) {
+      fork = root.getObjectByName(t.model.fork.node) ?? null;
+      if (fork) {
+        forkRake = fork.rotation.x;
+        fork.rotation.order = 'XYZ';
+      }
+    }
+    const g: GlbVehicle = { root, meshes, baseMats, wheels, fork, forkRake, wrecked: false };
+    this.parentObj.add(root);
+    return g;
+  }
+
+  private releaseGlb(s: VehicleSlot): void {
+    const g = s.glb;
+    if (!g) return;
+    g.root.visible = false;
+    this.glbTypes[s.type]?.free.push(g);
+    s.glb = null;
+  }
+
+  /**
+   * Extra lift (m, along the vehicle's up axis) for a rider of `seat` so they sit on the real
+   * model's seat surface instead of the physics hip height. 0 for procedural models.
+   */
+  riderLift(vehicleId: EntityId, seat: number): number {
+    const s = this.slots.get(vehicleId);
+    if (!s || !s.glb) return 0;
+    const model = this.glbTypes[s.type]?.model;
+    const def = VEHICLES[s.type];
+    if (!model || seat < 0 || seat >= def.seatOffsets.length) return 0;
+    const surface = model.seatSurfaceY[seat];
+    if (surface === null || surface === undefined) return 0;
+    return Math.max(0, surface - (def.seatOffsets[seat].y + SEAT_HIP_HEIGHT));
+  }
+
+  private poseGlb(s: VehicleSlot, v: VehicleView, m: THREE.Matrix4, steerAngle: number): void {
+    const g = s.glb!;
+    g.root.matrix.copy(m);
+    g.root.matrixWorldNeedsUpdate = true;
+    // Wheels: spin (signed forward speed / radius, accumulated in wheelAngle for the physics
+    // radius; rescaled to the model radius) and steer.
+    const spinScale = HANDLING[v.type].wheelRadius;
+    for (const w of g.wheels) {
+      w.node.rotation.x = (s.wheelAngle * spinScale) / w.radius;
+      w.node.rotation.y = w.steers ? steerAngle : 0;
+    }
+    if (g.fork) g.fork.rotation.set(g.forkRake, steerAngle, 0, 'XYZ');
+    if (g.wrecked !== v.destroyed) {
+      g.wrecked = v.destroyed;
+      const t = this.glbTypes[s.type]!;
+      for (let i = 0; i < g.meshes.length; i++) {
+        const base = g.baseMats[i];
+        g.meshes[i].material = (v.destroyed ? t.wreck.get(base) : t.normal.get(base)) ?? base;
+      }
+    }
   }
 
   /**
@@ -339,7 +516,16 @@ export class VehicleRenderer {
     const dx = v.pos.x - this.cam.x, dy = v.pos.y - this.cam.y, dz = v.pos.z - this.cam.z;
     const d2 = dx * dx + dy * dy + dz * dz;
     const visible = d2 < this.maxD2;
-    for (let i = 0; i < s.instances.length; i++) this.batch.setVisibleAt(s.instances[i], visible);
+    // Real model near the camera (hysteresis band), procedural batched model beyond.
+    if (this.glbTypes[v.type]) {
+      s.useGlb = visible && (s.useGlb ? d2 < GLB_FAR * GLB_FAR : d2 < GLB_NEAR * GLB_NEAR);
+    } else {
+      s.useGlb = false;
+    }
+    if (s.useGlb && !s.glb) s.glb = this.acquireGlb(v.type);
+    else if (!s.useGlb && s.glb) this.releaseGlb(s);
+    const batchVisible = visible && !s.glb;
+    for (let i = 0; i < s.instances.length; i++) this.batch.setVisibleAt(s.instances[i], batchVisible);
     if (!visible) return;
     // Body transform (Ry * Rx * Rz).
     _e.set(v.pitch, v.yaw, v.roll, 'YXZ');
@@ -379,6 +565,7 @@ export class VehicleRenderer {
         this.batch.setMatrixAt(s.instances[2 + i], _w);
       }
     }
+    if (s.glb) this.poseGlb(s, v, _m, steerAngle);
     // Burnt wreck tint (switch colours only on state changes).
     const wrecked = v.destroyed;
     if (wrecked !== (s.destroyedFor > 0)) {
@@ -438,5 +625,13 @@ export class VehicleRenderer {
     this.material.dispose();
     this.smoke.dispose();
     this.fire.dispose();
+    this.slots.forEach((s) => this.releaseGlb(s));
+    for (const type of TYPES) {
+      const t = this.glbTypes[type];
+      if (!t) continue;
+      for (const g of t.free) g.root.removeFromParent();
+      t.free.length = 0;
+    }
+    for (const m of this.glbMaterials) m.dispose();
   }
 }

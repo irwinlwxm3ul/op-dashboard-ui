@@ -20,6 +20,7 @@ import { Hud } from './hud/hud';
 import { initKeyboardLayout } from './keys';
 import { ModalManager } from './modal';
 import { ControlsModal } from './modals/controlsModal';
+import { CreditsModal } from './modals/creditsModal';
 import { PauseMenu } from './modals/pauseMenu';
 import { SettingsModal } from './modals/settingsModal';
 import { LoadingScreen } from './screens/loading';
@@ -55,6 +56,7 @@ class Ui implements UiApi, UiCtx {
   private readonly langCallbacks: Array<() => void> = [];
   private settingsModal: SettingsModal | null = null;
   private controlsModal: ControlsModal | null = null;
+  private creditsModal: CreditsModal | null = null;
   private readonly pauseMenu: PauseMenu;
   private lastHover: Element | null = null;
   private lastHoverAt = 0;
@@ -129,6 +131,11 @@ class Ui implements UiApi, UiCtx {
     this.controlsModal.open();
   }
 
+  openCredits(): void {
+    this.creditsModal ??= new CreditsModal(this.modals);
+    this.creditsModal.open();
+  }
+
   toast(text: string, kind: 'error' | 'info' = 'info'): void {
     this.toasts.show(text, kind);
   }
@@ -199,6 +206,7 @@ class Ui implements UiApi, UiCtx {
       // Closing the pause menu also closes settings / controls opened from it.
       this.settingsModal?.close();
       this.controlsModal?.close();
+      this.creditsModal?.close();
       this.pauseMenu.close();
     }
   }
@@ -207,6 +215,7 @@ class Ui implements UiApi, UiCtx {
     return this.pauseMenu.isOpen
       || !!this.settingsModal?.isOpen
       || !!this.controlsModal?.isOpen
+      || !!this.creditsModal?.isOpen
       || this.hud.overlayOpen;
   }
 

@@ -61,4 +61,14 @@ export const uiStrings = {
   'ui.hud.useCancelHint': 'Sprint, jump or fire to cancel',
   'ui.hud.fragArmed': '{throw} throw · {cancel} cancel',
   'ui.key.mouseLeftShort': 'LMB',
+
+  // Credits
+  'ui.credits.intro': 'DROPZONE is built with these free assets. Thank you to their creators!',
+  'ui.credits.models': '3D models',
+  'ui.credits.sounds': 'Sounds',
+  'ui.credits.fonts': 'Fonts',
+  'ui.credits.modifiedNote': 'Models were converted, merged, recoloured and resized for DROPZONE.',
+  'ui.credits.colAsset': 'Asset',
+  'ui.credits.colAuthor': 'Author',
+  'ui.credits.colLicense': 'Licence',
 } as const;

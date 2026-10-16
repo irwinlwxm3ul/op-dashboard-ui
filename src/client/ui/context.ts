@@ -11,6 +11,7 @@ export interface UiCtx {
   show(screen: Screen): void;
   openSettings(): void;
   openControls(): void;
+  openCredits(): void;
   /** Transient notification with already-translated text (errors are red). */
   toast(text: string, kind?: 'error' | 'info'): void;
   /** Register a callback run after the language changed (static labels are re-translated already). */

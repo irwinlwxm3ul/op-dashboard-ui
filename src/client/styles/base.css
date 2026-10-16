@@ -1147,3 +1147,56 @@ button.dz-keycap:hover {
     transition-duration: 0.01ms !important;
   }
 }
+
+/* Credits */
+.dz-credits-modal .dz-modal-panel {
+  width: min(860px, 100%);
+}
+
+.dz-credits-section {
+  margin-bottom: 14px;
+}
+
+.dz-credits-note {
+  margin: 0 0 6px;
+  color: var(--dz-text-dim);
+  font-size: 0.82rem;
+}
+
+.dz-credits-table {
+  --cols: minmax(0, 1.7fr) minmax(0, 1.1fr) 6.5rem;
+  font-size: 0.88rem;
+}
+
+.dz-credits-table .dz-tr {
+  padding-block: 4px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.dz-credits-link,
+.dz-credits-license {
+  color: var(--dz-text);
+  text-decoration: none;
+  border-bottom: 1px dotted rgba(255, 255, 255, 0.35);
+}
+
+.dz-credits-link:hover,
+.dz-credits-license:hover {
+  color: var(--dz-accent);
+  border-bottom-color: var(--dz-accent);
+}
+
+.dz-credits-license {
+  font-size: 0.8rem;
+  color: var(--dz-text-dim);
+}
+
+.dz-credits-by {
+  color: var(--dz-accent-hi);
+  font-weight: 700;
+}
+
+.dz-credits-table .dz-td {
+  user-select: text;
+  -webkit-user-select: text;
+}

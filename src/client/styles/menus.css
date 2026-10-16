@@ -245,8 +245,21 @@
 
 .dz-main-nav-row {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 10px;
+}
+
+.dz-main-nav-row .dz-btn {
+  padding-inline: 12px;
+  gap: 8px;
+  min-width: 0;
+}
+
+.dz-main-nav-row .dz-btn-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .dz-main-nav-row .dz-btn {
