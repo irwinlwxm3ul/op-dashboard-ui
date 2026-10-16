@@ -133,6 +133,8 @@ export function sanitizeLobbySettings(raw: unknown): LobbySettings | null {
   if (!num(zoneSpeed)) return null;
   if (!TEAM_SIZES.includes(teamSize)) return null;
   if (maxPlayers < MIN_PLAYERS || maxPlayers > MAX_PLAYERS) return null;
+  // A battle royale needs at least two teams.
+  if (maxPlayers <= teamSize) return null;
   const n = sanitizeText(name, MAX_LOBBY_NAME_LEN);
   if (!n) return null;
   return {
@@ -152,6 +154,8 @@ export function sanitizeMatchConfig(raw: unknown): MatchConfig | null {
   if (!int(seed) || !int(maxPlayers) || !int(teamSize) || !TEAM_SIZES.includes(teamSize)) return null;
   if (typeof botFill !== 'boolean' || typeof infiniteAmmo !== 'boolean' || !num(zoneSpeed)) return null;
   if (typeof botDifficulty !== 'string' || !DIFFS.includes(botDifficulty)) return null;
+  // Battle royale needs at least two teams (training is a single player on its own).
+  if (mode === 'br' && maxPlayers <= teamSize) return null;
   return {
     mode,
     seed: seed >>> 0,

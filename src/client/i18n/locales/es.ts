@@ -584,5 +584,6 @@ export const es: LocaleDict = {
   'flow.loading.waiting': 'Esperando los datos de la partida…',
   'flow.loading.starting': 'Iniciando la simulación…',
   'flow.loading.ready': 'Listo',
+  'flow.clickToPlay': 'Haz clic para jugar',
   'flow.webglUnsupported': 'Tu navegador no es compatible con WebGL 2, necesario para DROPZONE.',
 };

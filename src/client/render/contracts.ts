@@ -64,6 +64,11 @@ export interface CameraState {
   ads: number;
   /** True when the local player's own body should be hidden (first person) */
   hideLocalBody: boolean;
+  /**
+   * One-shot aim handoff: when set, the app copies this direction into the player's base aim
+   * (used when leaving a vehicle chase cam so the camera doesn't whip back to a stale aim).
+   */
+  aimHandoff?: { yaw: number; pitch: number } | null;
 }
 
 /** Transient game-feel values produced by src/client/feel each frame. */

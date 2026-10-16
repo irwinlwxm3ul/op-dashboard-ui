@@ -4,7 +4,8 @@
 import type { MatchInit } from '../../shared/protocol';
 import type { MatchResults } from '../../shared/types';
 import { ClientGame, settings } from '../game';
-import type { FrameState } from '../game/types';
+import { t } from '../i18n';
+import type { ClientGameApi, FrameState } from '../game/types';
 import type { Transport } from '../net';
 import type {
   CameraState, EntityRenderer, Feel, FxRenderer, RenderCore, ViewRig, WorldRenderer,
@@ -92,6 +93,7 @@ export class MatchSession {
     if (this.running) return;
     this.running = true;
     this.last = performance.now();
+    this.startedAt = this.last;
     this.raf = requestAnimationFrame(this.tick);
     this.game.input.requestLock();
   }
@@ -149,6 +151,9 @@ export class MatchSession {
     let cam = this.lastCam;
     this.guard('view', () => { cam = this.view.update(frame, this.feel.state, dt); });
     this.lastCam = cam;
+    // One-shot aim handoff from the camera rig (e.g. leaving a vehicle chase cam).
+    const handoff = (cam as CameraState | null)?.aimHandoff;
+    if (handoff) (this.game as ClientGameApi).setAim?.(handoff.yaw, handoff.pitch);
     if (cam) {
       const c = cam;
       this.guard('world', () => this.worldRenderer.update(frame, c, dt));
@@ -163,7 +168,38 @@ export class MatchSession {
       this.guard('stats', () => ui.setRenderStats(core.stats(), frame.ping, entities));
     }
     if (frame.results && !this.resultsTimer) this.scheduleResults(frame.results);
+    this.updateClickToPlay(now);
   };
+
+  // ---------------------------------------------------------------------------
+  // "Click to play": shown while playing without pointer lock (lock denied / not yet granted),
+  // so mouse look is never silently dead.
+  // ---------------------------------------------------------------------------
+  private clickOverlay: HTMLElement | null = null;
+  private startedAt = 0;
+
+  private updateClickToPlay(now: number): void {
+    const want = this.running && !this.paused && !this.resultsShown && !this.opts.ui.isOverlayOpen()
+      && !document.pointerLockElement && now - this.startedAt > 800;
+    if (want && !this.clickOverlay) {
+      const el = document.createElement('button');
+      el.type = 'button';
+      el.className = 'dz-click-to-play';
+      el.textContent = t('flow.clickToPlay');
+      Object.assign(el.style, {
+        position: 'absolute', inset: '0', margin: 'auto', width: 'max-content', height: 'max-content',
+        padding: '0.9rem 1.6rem', font: '600 1.1rem system-ui, sans-serif', color: '#fff',
+        background: 'rgba(10,12,16,0.72)', border: '1px solid rgba(255,255,255,0.25)', borderRadius: '10px',
+        cursor: 'pointer', zIndex: '5', pointerEvents: 'auto',
+      } satisfies Partial<CSSStyleDeclaration>);
+      el.addEventListener('click', () => this.game.input.requestLock());
+      this.opts.ui.canvasHost.appendChild(el);
+      this.clickOverlay = el;
+    } else if (!want && this.clickOverlay) {
+      this.clickOverlay.remove();
+      this.clickOverlay = null;
+    }
+  }
 
   private failures = new Map<string, number>();
 
@@ -205,6 +241,8 @@ export class MatchSession {
   dispose(): { key: string; renderer: WorldRenderer } {
     this.running = false;
     cancelAnimationFrame(this.raf);
+    this.clickOverlay?.remove();
+    this.clickOverlay = null;
     if (this.resultsTimer) clearTimeout(this.resultsTimer);
     for (const u of this.unsubs.splice(0)) u();
     this.game.input.exitLock();

@@ -584,5 +584,6 @@ export const ko: LocaleDict = {
   'flow.loading.waiting': '매치 데이터를 기다리는 중…',
   'flow.loading.starting': '시뮬레이션 시작 중…',
   'flow.loading.ready': '준비 완료',
+  'flow.clickToPlay': '클릭하여 플레이',
   'flow.webglUnsupported': '브라우저가 WebGL 2를 지원하지 않습니다. DROPZONE을 플레이하려면 WebGL 2가 필요합니다.',
 };

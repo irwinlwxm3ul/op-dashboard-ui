@@ -584,5 +584,6 @@ export const ja: LocaleDict = {
   'flow.loading.waiting': 'マッチデータを待っています…',
   'flow.loading.starting': 'シミュレーションを開始中…',
   'flow.loading.ready': '準備完了',
+  'flow.clickToPlay': 'クリックしてプレイ',
   'flow.webglUnsupported': 'お使いのブラウザはWebGL 2に対応していません。DROPZONEのプレイにはWebGL 2が必要です。',
 };

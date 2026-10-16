@@ -6,5 +6,6 @@ export const appStrings = {
   'flow.loading.waiting': 'Waiting for match data…',
   'flow.loading.starting': 'Starting simulation…',
   'flow.loading.ready': 'Ready',
+  'flow.clickToPlay': 'Click to play',
   'flow.webglUnsupported': 'Your browser does not support WebGL 2, which DROPZONE needs.',
 } as const;

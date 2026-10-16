@@ -142,6 +142,10 @@ export interface LocalPlayerView {
   placement: number;
   killerId: EntityId | null;
   spectating: EntityId | null;
+  /** A frag is armed (key 4): the next fire press throws it. */
+  grenadeArmed?: boolean;
+  /** Hold-breath key is held (steadies scoped sway). */
+  holdBreath?: boolean;
 }
 
 export type InteractionKind = 'jump' | 'chute' | 'pickup' | 'enter' | 'exit' | 'revive' | 'refuel' | 'give';
@@ -309,5 +313,7 @@ export interface ClientGameApi {
   queueAction(a: ClientAction): void;
   /** Perform the current interaction prompt (if any). */
   performInteraction(): void;
+  /** Overwrite the base aim (e.g. hand the vehicle chase-cam direction back when exiting a vehicle). */
+  setAim?(yaw: number, pitch: number): void;
   dispose(): void;
 }

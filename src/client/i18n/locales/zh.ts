@@ -584,5 +584,6 @@ export const zh: LocaleDict = {
   'flow.loading.waiting': '正在等待对局数据…',
   'flow.loading.starting': '正在启动模拟…',
   'flow.loading.ready': '就绪',
+  'flow.clickToPlay': '点击开始游戏',
   'flow.webglUnsupported': '你的浏览器不支持 WebGL 2，无法运行 DROPZONE。',
 };
