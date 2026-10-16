@@ -25,6 +25,11 @@ export interface EntityMaterialOptions {
    * (`setColorAt(id, Vector4)`); needs `dither`.
    */
   batchFade?: boolean;
+  /**
+   * BatchedMesh: the instance colour carries the team accent (rgb) and the dither code + 4 *
+   * outline (alpha) instead of tinting the mesh.
+   */
+  batchAccent?: boolean;
   /** Fresnel rim light. */
   rim?: boolean;
   /** Fog multiplier; 0 disables fog entirely (far impostors). */
@@ -76,6 +81,22 @@ varying vec3 vCloth;
 varying float vFade;
 varying float vOutline;
 #endif
+#if defined(ENT_BATCH_ACCENT) && defined(USE_BATCHING_COLOR)
+varying vec4 vBatchColor;
+#endif
+`;
+
+/** Replaces <color_vertex>: a batched-accent mesh keeps its instance colour out of vColor. */
+const VERT_COLOR = /* glsl */ `
+#if defined(ENT_BATCH_ACCENT) && defined(USE_BATCHING_COLOR)
+  vColor = vec4(1.0);
+#ifdef USE_COLOR
+  vColor.rgb *= color.rgb;
+#endif
+  vBatchColor = getBatchingColor(getIndirectIndex(gl_DrawID));
+#else
+#include <color_vertex>
+#endif
 `;
 
 const VERT_MAIN = /* glsl */ `
@@ -109,27 +130,48 @@ varying vec3 vCloth;
 varying float vFade;
 varying float vOutline;
 #endif
+#if defined(ENT_BATCH_ACCENT) && defined(USE_COLOR_ALPHA)
+varying vec4 vBatchColor;
+#endif
 float entIgn(vec2 p) {
   return fract(52.9829189 * fract(dot(p, vec2(0.06711056, 0.00583715))));
 }
 `;
 
+/**
+ * Per-draw entity values (accent, cloth tint, dither code, outline weight), from uniforms, the
+ * per-instance attributes or a BatchedMesh's instance colour. A batched-accent instance colour is
+ * rgb = accent, a = dither code + 4 * outline.
+ */
+const FRAG_VALUES = /* glsl */ `
+#if defined(ENT_BATCH_ACCENT) && defined(USE_COLOR_ALPHA)
+  vec3 entAccent = vBatchColor.rgb;
+  vec3 entCloth = uCloth;
+  float entOutline = step(2.0, vBatchColor.a);
+  float entFade = vBatchColor.a - 4.0 * entOutline;
+#elif defined(ENT_INSTANCED)
+  vec3 entAccent = vAccent;
+  vec3 entCloth = vCloth;
+  float entFade = vFade;
+  float entOutline = vOutline;
+#else
+  vec3 entAccent = uAccent;
+  vec3 entCloth = uCloth;
+  float entFade = uFade;
+  float entOutline = uOutline;
+#endif
+#if defined(ENT_BATCH_FADE) && defined(USE_COLOR_ALPHA)
+  entFade = vColor.a;
+#endif
+`;
+
 const FRAG_DITHER = /* glsl */ `
 #ifdef ENT_DITHER
-{
-#if defined(ENT_BATCH_FADE) && defined(USE_COLOR_ALPHA)
-  float entFade = vColor.a;
-#elif defined(ENT_INSTANCED)
-  float entFade = vFade;
-#else
-  float entFade = uFade;
-#endif
   if (entFade < 0.999 && entFade > -0.999) {
-    float n = entIgn(gl_FragCoord.xy);
-    if (entFade >= 0.0) { if (n >= entFade) discard; }
-    else { if (n < 1.0 + entFade) discard; }
+    float entN = entIgn(gl_FragCoord.xy);
+    if (entFade >= 0.0) { if (entN >= entFade) discard; }
+    else { if (entN < 1.0 + entFade) discard; }
   }
-}
 #endif
 `;
 
@@ -139,21 +181,9 @@ const FRAG_MASK = /* glsl */ `
 #endif
 #ifdef ENT_MASK
 {
-#ifdef ENT_INSTANCED
-  vec3 entAccent = vAccent;
-  vec3 entCloth = vCloth;
-#else
-  vec3 entAccent = uAccent;
-  vec3 entCloth = uCloth;
-#endif
   float entAccentW = vMask.x;
 #ifdef ENT_OUTLINE_MASK
-#ifdef ENT_INSTANCED
-  float entOutlineM = vOutline;
-#else
-  float entOutlineM = uOutline;
-#endif
-  if (vMask.x > 0.0) entAccentW = mix(vMask.x, max(vMask.x, ENT_OUTLINE_MASK), entOutlineM);
+  if (vMask.x > 0.0) entAccentW = mix(vMask.x, max(vMask.x, ENT_OUTLINE_MASK), entOutline);
 #endif
   diffuseColor.rgb = mix(diffuseColor.rgb, diffuseColor.rgb * entCloth, vMask.z);
   diffuseColor.rgb = mix(diffuseColor.rgb, uSkin, vMask.y);
@@ -170,17 +200,10 @@ const FRAG_RIM = /* glsl */ `
   float entDist = smoothstep(uRimParams.z, uRimParams.w, length(vViewPosition));
   float entRim = pow(1.0 - entNdv, 2.6) * mix(uRimParams.x, uRimParams.y, entDist);
   outgoingLight += uRimColor * entRim * (0.5 + 0.5 * diffuseColor.rgb);
-#ifdef ENT_INSTANCED
-  float entOutline = vOutline;
-  vec3 entOutlineColor = vAccent;
-#else
-  float entOutline = uOutline;
-  vec3 entOutlineColor = uAccent;
-#endif
   if (entOutline > 0.0) {
     // Local team: a bright team-colour edge around the silhouette.
     float entEdge = pow(1.0 - entNdv, uOutlineParams.y);
-    outgoingLight = mix(outgoingLight, entOutlineColor * (uOutlineParams.z + uOutlineParams.x * entEdge), entOutline * min(1.0, entEdge * 1.4));
+    outgoingLight = mix(outgoingLight, entAccent * (uOutlineParams.z + uOutlineParams.x * entEdge), entOutline * min(1.0, entEdge * 1.4));
   }
 }
 #endif
@@ -220,6 +243,7 @@ export function applyEntityShader(mat: THREE.Material, opts: EntityMaterialOptio
   if (opts.instanced) defines.ENT_INSTANCED = '';
   if (opts.dither) defines.ENT_DITHER = '';
   if (opts.batchFade) defines.ENT_BATCH_FADE = '';
+  if (opts.batchAccent) defines.ENT_BATCH_ACCENT = '';
   if (opts.rim) defines.ENT_RIM = '';
   if (opts.outlineMask !== undefined) defines.ENT_OUTLINE_MASK = opts.outlineMask.toFixed(3);
   mat.defines = defines;
@@ -238,10 +262,10 @@ export function applyEntityShader(mat: THREE.Material, opts: EntityMaterialOptio
     shader.uniforms.uOutlineParams = OUTLINE.params;
     shader.vertexShader = shader.vertexShader
       .replace('#include <common>', `#include <common>\n${VERT_PARS}`)
-      .replace('#include <color_vertex>', `#include <color_vertex>\n${VERT_MAIN}`);
+      .replace('#include <color_vertex>', `${VERT_COLOR}\n${VERT_MAIN}`);
     shader.fragmentShader = shader.fragmentShader
       .replace('#include <common>', `#include <common>\n${FRAG_PARS}`)
-      .replace('#include <clipping_planes_fragment>', `${FRAG_DITHER}\n#include <clipping_planes_fragment>`)
+      .replace('#include <clipping_planes_fragment>', `${FRAG_VALUES}\n${FRAG_DITHER}\n#include <clipping_planes_fragment>`)
       .replace('#include <color_fragment>', `#include <color_fragment>\n${FRAG_MASK}`)
       .replace('#include <opaque_fragment>', `${FRAG_RIM}\n#include <opaque_fragment>`)
       .replace('#include <fog_fragment>', FRAG_FOG);

@@ -11,7 +11,8 @@ import {
   buildHitboxes, canStand, collideCircleXZ, createMoveEvents, createMoveIntent, eyePosition, lineOfSight,
   raycastHitboxes, raycastWorld, rayCapsule, stepCharacter, stepDrop, bodyHeight, PhysicsTuning,
 } from '../src/shared/physics';
-import type { HitboxPose, MoveEvents, MoveIntent } from '../src/shared/physics';
+import type { CharObstacle, HitboxPose, MoveEvents, MoveIntent } from '../src/shared/physics';
+import { VEHICLES, createVehicle, vehicleObstacle, worldToLocal } from '../src/shared/vehicles';
 
 // ---------------------------------------------------------------------------
 // Fake world
@@ -924,5 +925,124 @@ describe('collideCircleXZ', () => {
     const rk = collideCircleXZ(w, k, 0.5, 0, 2);
     expect(rk.nz).toBeCloseTo(1, 9);
     expect(k.z).toBeCloseTo(1.5, 9);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Vehicle hulls as character obstacles
+// ---------------------------------------------------------------------------
+
+describe('vehicle hulls are solid to bodies on foot', () => {
+  const R = PLAYER_RADIUS;
+  const uaz = (x: number, z: number, yaw: number, ground = 0) => createVehicle(7, { pos: { x, y: ground, z }, yaw, type: 'uaz' });
+  /** Body position in the vehicle frame (x across, z along). */
+  const local = (v: ReturnType<typeof uaz>, b: CharacterBody) => worldToLocal(v, b.pos);
+  /** Yaw that walks along world direction (dx, dz). */
+  const yawToward = (dx: number, dz: number) => Math.atan2(-dx, -dz);
+  /** Horizontal distance from the body axis to the hull footprint (>= R when not overlapping). */
+  const hullGap = (v: ReturnType<typeof uaz>, b: CharacterBody) => {
+    const l = local(v, b), he = VEHICLES[v.type].halfExtents;
+    return Math.hypot(Math.max(0, Math.abs(l.x) - he.x), Math.max(0, Math.abs(l.z) - he.z));
+  };
+
+  it('a body walking into a parked UAZ stops at its side and slides along it', () => {
+    const w = makeWorld();
+    const v = uaz(0, 0, 0.4);
+    const he = VEHICLES.uaz.halfExtents;
+    const rx = Math.cos(v.yaw), rz = -Math.sin(v.yaw); // vehicle right
+    const b = makeBody(rx * 4, 0, rz * 4);
+    const obs: CharObstacle[] = [vehicleObstacle(v)];
+    let minSide = Infinity;
+    for (let i = 0; i < 60; i++) {
+      stepCharacter(b, intent({ mz: 1, yaw: yawToward(-rx, -rz) }), TICK_DT, w, createMoveEvents(), obs);
+      minSide = Math.min(minSide, Math.abs(local(v, b).x));
+      expect(hullGap(v, b)).toBeGreaterThanOrEqual(R - 1e-6); // never overlapping the hull
+    }
+    expect(minSide).toBeCloseTo(he.x + R, 6);
+    expect(b.pos.y).toBeCloseTo(0, 9);
+    // Walking diagonally into the side slides along it (toward the front), never through.
+    const fx = -Math.sin(v.yaw), fz = -Math.cos(v.yaw);
+    const z0 = local(v, b).z;
+    for (let i = 0; i < 20; i++) {
+      stepCharacter(b, intent({ mz: 1, yaw: yawToward(-rx + fx, -rz + fz) }), TICK_DT, w, createMoveEvents(), obs);
+      expect(hullGap(v, b)).toBeGreaterThanOrEqual(R - 1e-6);
+    }
+    expect(local(v, b).z).toBeLessThan(z0 - 1); // local -Z is forward
+    // Without the obstacle list the same walk goes straight through (the static world alone).
+    const ghost = makeBody(rx * 4, 0, rz * 4);
+    for (let i = 0; i < 60; i++) stepCharacter(ghost, intent({ mz: 1, yaw: yawToward(-rx, -rz) }), TICK_DT, w);
+    expect(local(v, ghost).x).toBeLessThan(-he.x);
+  });
+
+  it('a body overlapping a hull (the vehicle moved onto it) is pushed out through the nearest side', () => {
+    const w = makeWorld();
+    const v = uaz(5, 5, 0);
+    const he = VEHICLES.uaz.halfExtents;
+    const b = makeBody(5 + 0.6, 0, 5 + 1.2);
+    stepCharacter(b, intent(), TICK_DT, w, createMoveEvents(), [vehicleObstacle(v)]);
+    expect(b.pos.x - 5).toBeCloseTo(he.x + R, 6);
+    expect(b.pos.z).toBeCloseTo(6.2, 9);
+    // Prone under the chassis is not a hiding spot either (the hull reaches down to the ground).
+    const c = makeBody(5 - 0.5, 0, 5, 'prone');
+    stepCharacter(c, intent({ wantStance: 'prone' }), TICK_DT, w, createMoveEvents(), [vehicleObstacle(v)]);
+    expect(5 - c.pos.x).toBeCloseTo(he.x + R, 6);
+  });
+
+  it('a body can stand on the roof and walk off it; one on a bridge above a passing vehicle is unaffected', () => {
+    const w = makeWorld({ boxes: [{ min: { x: -12, y: 3.9, z: -2 }, max: { x: 12, y: 4.2, z: 2 } }] });
+    const v = uaz(20, 0, 0);
+    const top = v.pos.y + VEHICLES.uaz.halfExtents.y;
+    const obs = [vehicleObstacle(v)];
+    const b = makeBody(20.2, top, 0.5);
+    for (let i = 0; i < 30; i++) stepCharacter(b, intent(), TICK_DT, w, createMoveEvents(), obs);
+    expect(b.onGround).toBe(true);
+    expect(b.pos.y).toBeCloseTo(top, 9);
+    expect(b.pos.x).toBeCloseTo(20.2, 9);
+    expect(b.pos.z).toBeCloseTo(0.5, 9);
+    // Walk off the side: falls and lands on the ground next to the vehicle.
+    let landed = false;
+    for (let i = 0; i < 60; i++) {
+      const ev = stepCharacter(b, intent({ mx: 1 }), TICK_DT, w, createMoveEvents(), obs);
+      landed ||= ev.landed && b.pos.y < 0.01;
+    }
+    expect(landed).toBe(true);
+    expect(b.pos.x).toBeGreaterThan(20 + VEHICLES.uaz.halfExtents.x + R - 1e-6);
+    // A vehicle driving under the bridge deck does not shove the people walking on it.
+    const under = uaz(0, 0, Math.PI / 2);
+    const walker = makeBody(-8, 4.2, 0);
+    for (let i = 0; i < 60; i++) {
+      under.pos.x = -6 + i * 0.25;
+      stepCharacter(walker, intent({ mx: 1 }), TICK_DT, w, createMoveEvents(), [vehicleObstacle(under)]);
+      expect(walker.pos.z).toBeCloseTo(0, 9);
+      expect(walker.pos.y).toBeCloseTo(4.2, 9);
+    }
+    expect(walker.pos.x).toBeGreaterThan(0);
+  });
+
+  it('a hull never pushes a body into a wall (the static world has the last word)', () => {
+    // 0.32 m gap between the hull side (x = 0.98) and a wall (x = 1.3): too narrow for a body.
+    const w = makeWorld({ boxes: [{ min: { x: 1.3, y: 0, z: -6 }, max: { x: 1.6, y: 3, z: 6 } }] });
+    const v = uaz(0, 0, 0);
+    const b = makeBody(1.14, 0, -1);
+    for (let i = 0; i < 30; i++) {
+      stepCharacter(b, intent({ mx: -1, mz: 0.5 }), TICK_DT, w, createMoveEvents(), [vehicleObstacle(v)]);
+      expect(b.pos.x).toBeLessThanOrEqual(1.3 - R + 1e-6);
+    }
+  });
+
+  it('obstacles only apply to the step they were passed to; tilted hulls get a tilted roof', () => {
+    const w = makeWorld();
+    const v = uaz(0, 0, 0);
+    stepCharacter(makeBody(3, 0, 0), intent(), TICK_DT, w, createMoveEvents(), [vehicleObstacle(v)]);
+    const p = { x: 0.5, y: 0, z: 0 };
+    expect(collideCircleXZ(w, p, R, 0.2, 1.8).pushed).toBe(false);
+    // Cached per vehicle and rebuilt when it moves; a nose-up pitch raises the front of the roof.
+    const o1 = vehicleObstacle(v);
+    v.pitch = 0.2;
+    const o2 = vehicleObstacle(v);
+    expect(o2).toBe(o1);
+    const fz = -1.5; // local -Z is forward (yaw 0: world -Z)
+    expect(o2.top + o2.gz * fz).toBeGreaterThan(o2.top + o2.gz * -fz + 0.5);
+    expect(o2.hz).toBeGreaterThan(VEHICLES.uaz.halfExtents.z);
   });
 });

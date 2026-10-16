@@ -1,9 +1,13 @@
 // Bot locomotion: destinations, path following (A* waypoints with look-ahead), direct steering
-// with grid feelers while a path is pending, stuck detection with escalating recovery, and the
-// conversion of a world-space move direction into PlayerInput axes.
+// with grid feelers while a path is pending, walking around vehicle hulls (solid, but not part of
+// the static nav grid), stuck detection with escalating recovery, and the conversion of a
+// world-space move direction into PlayerInput axes.
 
+import { PLAYER_RADIUS, STANCE_HEIGHT, STEP_HEIGHT } from '../constants';
 import { angleDiff } from '../math';
-import type { PlayerState } from '../types';
+import type { CharObstacle } from '../physics';
+import type { PlayerState, VehicleState } from '../types';
+import { vehicleObstacle } from '../vehicles';
 import { NF_BLOCKED, NF_NEAR, NF_UNKNOWN } from './nav';
 import { PATH_DONE, PATH_FAILED, PATH_IDLE } from './pathfind';
 import type { BotState } from './state';
@@ -176,6 +180,11 @@ export function followPath(sys: BotSystem, b: BotState, p: PlayerState): void {
       }
     }
   }
+  // Vehicle hulls in the way: walk around them (sliding along a hull hit head-on goes nowhere).
+  if (avoidVehicles(sys, b, p, dx, dz, dd)) {
+    dx = avoidX;
+    dz = avoidZ;
+  }
   if (sys.now < b.sidestepUntil) {
     // Recovery sidestep: perpendicular, slightly forward.
     const sx = -dz * b.sidestepDir, sz = dx * b.sidestepDir;
@@ -189,6 +198,86 @@ export function followPath(sys: BotSystem, b: BotState, p: PlayerState): void {
   b.moveZ = dz;
   // Slow down for the final approach so the bot stops on the spot.
   b.moveScale = dd < 2.5 ? Math.max(0.45, dd / 2.5) : 1;
+}
+
+/** How far ahead (m) a vehicle hull counts as in the way, and the clearance kept from it. */
+const VEH_LOOK = 2;
+const VEH_PAD = PLAYER_RADIUS + 0.1;
+/** Seconds the chosen way around a hull is kept (no dithering at its corners). */
+const VEH_SIDE_HOLD = 1.2;
+const vehNear: VehicleState[] = [];
+let avoidX = 0, avoidZ = 0;
+
+/** Entry distance of the ray (x, z) + t (dx, dz), t in [0, len], into o's footprint grown by pad. */
+function rayFootprint(o: CharObstacle, x: number, z: number, dx: number, dz: number, len: number, pad: number): number {
+  const ox = x - o.x, oz = z - o.z;
+  const lx = ox * o.c - oz * o.s, lz = ox * o.s + oz * o.c;
+  const ldx = dx * o.c - dz * o.s, ldz = dx * o.s + dz * o.c;
+  let t0 = 0, t1 = len;
+  for (let axis = 0; axis < 2; axis++) {
+    const p0 = axis === 0 ? lx : lz, d = axis === 0 ? ldx : ldz, h = (axis === 0 ? o.hx : o.hz) + pad;
+    if (Math.abs(d) < 1e-9) {
+      if (p0 < -h || p0 > h) return -1;
+      continue;
+    }
+    let a = (-h - p0) / d, c = (h - p0) / d;
+    if (a > c) { const tmp = a; a = c; c = tmp; }
+    if (a > t0) t0 = a;
+    if (c < t1) t1 = c;
+    if (t0 > t1) return -1;
+  }
+  return t0;
+}
+
+/**
+ * Steer around the nearest vehicle hull that blocks the next VEH_LOOK metres toward the target
+ * (`dist` away): along the hull (tangent of its outline) in a kept orbit sense, slightly outward.
+ * Writes avoidX/avoidZ and returns true when steering is needed.
+ */
+function avoidVehicles(sys: BotSystem, b: BotState, p: PlayerState, dx: number, dz: number, dist: number): boolean {
+  if (p.mode !== 'ground' && p.mode !== 'swim') return false;
+  const look = Math.min(VEH_LOOK, dist);
+  if (look < 0.05) return false;
+  const px = p.pos.x, pz = p.pos.z;
+  const near = sys.sim.vehiclesNear(px, pz, VEH_LOOK + 4, vehNear);
+  let best: CharObstacle | null = null;
+  let bestId = -1, bestT = Infinity;
+  for (let i = 0; i < near.length; i++) {
+    const o = vehicleObstacle(near[i]);
+    // Only hulls the body bumps into (not one it stands on or walks under).
+    if (o.y1 <= p.pos.y + STEP_HEIGHT || o.y0 >= p.pos.y + STANCE_HEIGHT[p.stance]) continue;
+    const t = rayFootprint(o, px, pz, dx, dz, look, VEH_PAD);
+    if (t >= 0 && t < bestT) {
+      bestT = t;
+      best = o;
+      bestId = near[i].id;
+    }
+  }
+  if (!best) return false;
+  // Outward normal from the hull outline toward the bot.
+  const ox = px - best.x, oz = pz - best.z;
+  const lx = ox * best.c - oz * best.s, lz = ox * best.s + oz * best.c;
+  const cx = lx < -best.hx ? -best.hx : lx > best.hx ? best.hx : lx;
+  const cz = lz < -best.hz ? -best.hz : lz > best.hz ? best.hz : lz;
+  let nlx = lx - cx, nlz = lz - cz;
+  let nl = hyp(nlx, nlz);
+  if (nl < 1e-6) { nlx = lx; nlz = lz; nl = hyp(nlx, nlz) || 1; }
+  nlx /= nl; nlz /= nl;
+  const nx = best.c * nlx + best.s * nlz, nz = -best.s * nlx + best.c * nlz;
+  // Tangent for orbit sense +1 (rotating the normal by +90 degrees).
+  const tx = -nz, tz = nx;
+  if (b.vehAvoidId !== bestId || sys.now > b.vehAvoidUntil) {
+    // The way the bot already leans to; head-on, the way toward the nearer end of the hull.
+    const lean = tx * dx + tz * dz;
+    b.vehAvoidSide = Math.abs(lean) > 0.1 ? (lean > 0 ? 1 : -1) : tx * ox + tz * oz >= 0 ? 1 : -1;
+  }
+  b.vehAvoidId = bestId;
+  b.vehAvoidUntil = sys.now + VEH_SIDE_HOLD;
+  const sx = tx * b.vehAvoidSide + nx * 0.3, sz = tz * b.vehAvoidSide + nz * 0.3;
+  const sl = hyp(sx, sz) || 1;
+  avoidX = sx / sl;
+  avoidZ = sz / sl;
+  return true;
 }
 
 function blockedAhead(sys: BotSystem, x: number, z: number, dx: number, dz: number): boolean {

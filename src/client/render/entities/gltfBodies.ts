@@ -39,14 +39,14 @@ import { WEAPON_HOLD, WEAPON_IDS, buildWeapon } from './weaponModels';
 // Gear geometry layout (bone indices of the shared gear skinned mesh)
 // ---------------------------------------------------------------------------
 
-const G_HELMET1 = 0; // 0..2 helmet level 1..3 (Head)
-const G_VEST1 = 3; // 3..5 vest level 1..3 (Chest)
-const G_PACK1 = 6; // 6..8 pack level 1..3 (Chest)
+export const G_HELMET1 = 0; // 0..2 helmet level 1..3 (Head)
+export const G_VEST1 = 3; // 3..5 vest level 1..3 (Chest)
+export const G_PACK1 = 6; // 6..8 pack level 1..3 (Chest)
 const G_WEAPON0 = 9; // 9..14 weapons in WEAPON_IDS order (weapon holder)
 const G_COUNT = G_WEAPON0 + WEAPON_IDS.length;
 
 /** Gear ids of the 9 gear slots (G_HELMET1 .. G_PACK1 + 2). */
-const GEAR_SLOTS: readonly GearId[] = ['helmet1', 'helmet2', 'helmet3', 'vest1', 'vest2', 'vest3', 'pack1', 'pack2', 'pack3'];
+export const GEAR_SLOTS: readonly GearId[] = ['helmet1', 'helmet2', 'helmet3', 'vest1', 'vest2', 'vest3', 'pack1', 'pack2', 'pack3'];
 
 const ACCENT = { color: 0xffffff, mask: M_ACCENT };
 
@@ -122,7 +122,7 @@ export interface VariantData {
 
 const clamp = (x: number, lo: number, hi: number): number => (x < lo ? lo : x > hi ? hi : x);
 
-function findBodyMesh(root: THREE.Object3D, teamMesh: string): THREE.SkinnedMesh | null {
+export function findBodyMesh(root: THREE.Object3D, teamMesh: string): THREE.SkinnedMesh | null {
   let body: THREE.SkinnedMesh | null = null;
   let bestCount = -1;
   root.traverse((o) => {
@@ -266,6 +266,43 @@ export class CharacterLibrary {
   /** Which gear slots use real item models (snapshot taken when the library was built). */
   private readonly gearFromAsset: readonly boolean[];
 
+  /** Static geometry of one gear slot (G_HELMET1..G_PACK1 + 2), item model or procedural, with team marks. */
+  slotGeometry(slot: number): THREE.BufferGeometry {
+    let g = this.slots.get(slot);
+    if (!g) {
+      const b = new GeoBuilder();
+      const I = new THREE.Matrix4();
+      const asset = this.gearFromAsset[slot] ? itemAsset(GEAR_SLOTS[slot]) : null;
+      if (asset) {
+        addItemAsset(asset, b, I, 0);
+        addTeamMarks(asset.geometry, slot, b);
+      } else {
+        const lvl = (slot % 3) + 1;
+        if (slot < G_VEST1) buildHelmet(lvl, b, I, 0);
+        else if (slot < G_PACK1) buildVest(lvl, b, I, 0);
+        else buildPack(lvl, b, I, 0);
+      }
+      g = b.build({ mask: true });
+      this.slots.set(slot, g);
+    }
+    return g;
+  }
+
+  /** Static weapon geometry in the weapon frame (real model when registered). */
+  weaponGeometry(weapon: WeaponId): THREE.BufferGeometry {
+    let g = this.weapons.get(weapon);
+    if (!g) {
+      const b = new GeoBuilder();
+      buildWeapon(weapon, b, new THREE.Matrix4(), 0);
+      g = b.build({ mask: true });
+      this.weapons.set(weapon, g);
+    }
+    return g;
+  }
+
+  private readonly slots = new Map<number, THREE.BufferGeometry>();
+  private readonly weapons = new Map<WeaponId, THREE.BufferGeometry>();
+
   /** Gear + weapon geometry for a held weapon (built on demand, shared by every body). */
   gearGeometryFor(weapon: WeaponId | null): THREE.BufferGeometry {
     const key = weapon ?? 'none';
@@ -314,6 +351,10 @@ export class CharacterLibrary {
   dispose(): void {
     for (const g of this.gear.values()) g.dispose();
     this.gear.clear();
+    for (const g of this.slots.values()) g.dispose();
+    this.slots.clear();
+    for (const g of this.weapons.values()) g.dispose();
+    this.weapons.clear();
   }
 }
 
@@ -322,7 +363,7 @@ export class CharacterLibrary {
 // ---------------------------------------------------------------------------
 
 /** Base states that can carry the weapon overlay (legs play the base clip's lower part). */
-const ARMED_STATES = new Set<LogicalAnimState>(['idle', 'walk', 'run', 'sprint', 'jump', 'crouchIdle', 'crouchWalk', 'ride']);
+export const ARMED_STATES = new Set<LogicalAnimState>(['idle', 'walk', 'run', 'sprint', 'jump', 'crouchIdle', 'crouchWalk', 'ride']);
 /** Locomotion states with directional variants: [forward, back, left, right]. */
 const DIRECTIONAL: Partial<Record<LogicalAnimState, readonly [CharacterAnimKey, CharacterAnimKey, CharacterAnimKey, CharacterAnimKey]>> = {
   walk: ['walk', 'walkBack', 'walkLeft', 'walkRight'],
@@ -331,7 +372,7 @@ const DIRECTIONAL: Partial<Record<LogicalAnimState, readonly [CharacterAnimKey, 
   crawl: ['crawl', 'crawlBack', 'crawlLeft', 'crawlRight'],
 };
 /** Fallback chain when a key has no clip. */
-const FALLBACK: Partial<Record<CharacterAnimKey, CharacterAnimKey>> = {
+export const FALLBACK: Partial<Record<CharacterAnimKey, CharacterAnimKey>> = {
   dive: 'freefall', freefall: 'jump', jump: 'idle', parachute: 'jump',
   downedCrawl: 'downed', downed: 'prone', crawl: 'prone', prone: 'crouchIdle', crouchWalk: 'walk', crouchIdle: 'idle',
   swim: 'swimIdle', swimIdle: 'idle', ride: 'sit', drive: 'sit', sit: 'crouchIdle', revive: 'crouchIdle', heal: 'idle',
@@ -352,7 +393,7 @@ type AimMode = 'none' | 'track' | 'pitch';
  * the hips 0.4 m straight above the origin), and the crawl clips lie with the hips 0.27 m behind
  * their origin (ours: hips at the origin).
  */
-const ROOT_OFFSET: Partial<Record<CharacterAnimKey, readonly [number, number, number]>> = {
+export const ROOT_OFFSET: Partial<Record<CharacterAnimKey, readonly [number, number, number]>> = {
   swim: [0, 1.15, 0],
   swimIdle: [0, 1.0, 0],
   sit: [0, -0.13, -0.34],
@@ -377,7 +418,7 @@ const _des = new THREE.Vector3();
 const _axis = new THREE.Vector3();
 const _dir: Vec3 = { x: 0, y: 0, z: 0 };
 const ZERO = new THREE.Matrix4().makeScale(0, 0, 0);
-const HIP_PIVOT = 0.95;
+export const HIP_PIVOT = 0.95;
 
 class GltfNearBody implements NearBody {
   ownerId = -1;

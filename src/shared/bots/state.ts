@@ -74,6 +74,10 @@ export interface BotState {
   stuckLevel: number;
   sidestepUntil: number;
   sidestepDir: number;
+  /** Walking around a vehicle hull (not in the nav grid): which one, orbit sense (+1/-1), until. */
+  vehAvoidId: number;
+  vehAvoidSide: number;
+  vehAvoidUntil: number;
   jumpNow: boolean;
   /** Destination blacklisted after giving up (x, z, until). */
   avoidX: number;
@@ -236,6 +240,9 @@ export function createBotState(p: PlayerState, seed: number, thinkSlot: number, 
     stuckLevel: 0,
     sidestepUntil: 0,
     sidestepDir: 1,
+    vehAvoidId: -1,
+    vehAvoidSide: 1,
+    vehAvoidUntil: -1e9,
     jumpNow: false,
     avoidX: 0,
     avoidZ: 0,
