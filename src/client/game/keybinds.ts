@@ -1,5 +1,8 @@
 // Default keyboard bindings (KeyboardEvent.code values). Chosen to avoid browser-reserved Ctrl
 // combinations. Mouse buttons are fixed: left = fire, right = ADS, wheel = cycle weapons.
+// Vehicle seats: the driver changes seats with slot1-slot4; in seats that can shoot those keys keep
+// selecting weapons and Shift + slot1-slot4 changes seats (fixed modifier, no chord bindings:
+// PUBG's Ctrl+1-4 is reserved by browsers for tab switching). See input.ts.
 
 import type { KeyAction } from './types';
 

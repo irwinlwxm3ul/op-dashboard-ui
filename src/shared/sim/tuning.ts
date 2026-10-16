@@ -113,6 +113,14 @@ export const REFUEL_FRACTION = 0.5;
 
 // ---- Vehicles ----------------------------------------------------------------------------------
 
+/**
+ * Environmental damage (zone, falls, crashes, bail-outs, ownerless blasts) reaches the victim as a
+ * private self 'hit' (attacker === victim) at most this often per damage source (s); the damage
+ * in between is summed into the next one. Damage from an exposure that ended more than
+ * ENV_HIT_STALE ago is not carried into a later one.
+ */
+export const ENV_HIT_INTERVAL = 0.5;
+export const ENV_HIT_STALE = 0.1;
 /** Bailing out faster than this (m/s) hurts: (speed - BAIL_SPEED) * BAIL_DAMAGE_PER_MS. */
 export const BAIL_SPEED = 8;
 export const BAIL_DAMAGE_PER_MS = 3;

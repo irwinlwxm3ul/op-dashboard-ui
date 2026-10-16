@@ -10,7 +10,7 @@ import { emptyInventory } from '../items';
 import { createMoveEvents, createMoveIntent } from '../physics';
 import type { MoveEvents, MoveIntent } from '../physics';
 import type { VehicleControls } from '../vehicles';
-import type { ClientAction, EntityId, PlayerInput, PlayerState, TeamId, Vec3 } from '../types';
+import type { ClientAction, DamageSource, EntityId, PlayerInput, PlayerState, TeamId, Vec3 } from '../types';
 import { BTN } from '../types';
 import {
   FLAG_HS_WINDOW, FLAG_SNAP_COUNT, FLAG_SNAP_WINDOW, GIVE_BURST, INPUT_CREDIT_MAX, INPUT_QUEUE_CAPACITY,
@@ -24,6 +24,16 @@ const MAX_ACTIONS = 8;
 export const LAG_BUCKETS = 6;
 export const LAG_BUCKET_TICKS = 15;
 const PITCH_LIM = (89 * Math.PI) / 180;
+
+/** Rate limiter of the self 'hit' events for one environmental damage source (combat.ts). */
+export interface EnvHitSlot {
+  source: DamageSource;
+  /** Sim time of the last event sent / of the last damage taken. */
+  sentAt: number;
+  lastAt: number;
+  /** Damage taken since the last event (reported with the next one). */
+  pending: number;
+}
 
 /** Server-side bookkeeping for one player (not part of the networked PlayerState). */
 export interface PlayerRt {
@@ -95,6 +105,8 @@ export interface PlayerRt {
   /** Driver controls produced by the last input (consumed by the vehicle step). */
   controls: VehicleControls;
   hasControls: boolean;
+  /** Environmental damage feedback, one slot per source seen so far. */
+  envHits: EnvHitSlot[];
 }
 
 export function neutralInput(): PlayerInput {
@@ -213,6 +225,7 @@ export function createPlayerRt(p: PlayerState, spawnIndex: number): PlayerRt {
     spawnIndex,
     controls: { throttle: 0, steer: 0, handbrake: false, boost: false },
     hasControls: false,
+    envHits: [],
   };
 }
 

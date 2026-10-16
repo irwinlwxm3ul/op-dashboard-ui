@@ -962,7 +962,7 @@ describe('input controller', () => {
     const settings = memorySettings();
     const ic = new InputController(settings);
     ic.setContext({
-      mode: 'ground', life: 'alive', stance: 'stand', seat: -1, weapons: [{ id: 'ar', mag: 30 }, null, { id: 'pistol', mag: 15 }],
+      mode: 'ground', life: 'alive', stance: 'stand', seat: -1, seatCanShoot: false, weapons: [{ id: 'ar', mag: 30 }, null, { id: 'pistol', mag: 15 }],
       activeSlot: -1, frags: 2, ads: 0, adsZoom: 1, scoped: false,
     });
     ic.keyDown('KeyW');
@@ -1015,7 +1015,7 @@ describe('input controller', () => {
     expect(ic.pitch).toBeCloseTo((-89 * Math.PI) / 180, 6);
     ic.setAim(0, 0);
     ic.setContext({
-      mode: 'ground', life: 'alive', stance: 'stand', seat: -1, weapons: [{ id: 'sniper', mag: 5 }, null, null],
+      mode: 'ground', life: 'alive', stance: 'stand', seat: -1, seatCanShoot: false, weapons: [{ id: 'sniper', mag: 5 }, null, null],
       activeSlot: 0, frags: 0, ads: 1, adsZoom: 0.125, scoped: true,
     });
     ic.mouseMove(100, 0);
@@ -1034,7 +1034,7 @@ describe('input controller', () => {
   });
 
   const scopedCtx = (stance: 'stand' | 'crouch' | 'prone' = 'stand') => ({
-    mode: 'ground' as const, life: 'alive' as const, stance, seat: -1,
+    mode: 'ground' as const, life: 'alive' as const, stance, seat: -1, seatCanShoot: false,
     weapons: [{ id: 'sniper' as const, mag: 5 }, null, null] as [{ id: 'sniper'; mag: number }, null, null],
     activeSlot: 0 as const, frags: 2, ads: 1, adsZoom: WEAPONS.sniper.adsZoom, scoped: true,
   });
@@ -1153,7 +1153,7 @@ describe('input controller', () => {
   it('vehicle context: seat keys, handbrake / boost buttons; UI edge events', () => {
     const ic = new InputController(memorySettings());
     ic.setContext({
-      mode: 'vehicle', life: 'alive', stance: 'stand', seat: 0, weapons: [null, null, null], activeSlot: -1, frags: 0,
+      mode: 'vehicle', life: 'alive', stance: 'stand', seat: 0, seatCanShoot: false, weapons: [null, null, null], activeSlot: -1, frags: 0,
       ads: 0, adsZoom: 1, scoped: false,
     });
     ic.keyDown('Digit3');
@@ -1174,6 +1174,96 @@ describe('input controller', () => {
     ic.keyDown('KeyM'); // UI toggles still work with game input disabled
     expect(seen).toEqual(['inv', 'cam', 'map']);
     expect(ic.cameraMode).toBe('fpp');
+  });
+
+  it('seat that can shoot: 1-3, wheel, B, H, 4 / G work as on foot; Shift + 1-4 changes seats; the driver keeps 1-4', () => {
+    const ic = new InputController(memorySettings());
+    const passenger = {
+      mode: 'vehicle' as const, life: 'alive' as const, stance: 'stand' as const, seat: 1, seatCanShoot: true,
+      weapons: [{ id: 'ar' as const, mag: 30 }, { id: 'sniper' as const, mag: 5 }, { id: 'pistol' as const, mag: 15 }],
+      activeSlot: -1 as const, frags: 2, ads: 0, adsZoom: 1, scoped: false,
+    };
+    ic.setContext(passenger);
+    const press = (code: string) => {
+      ic.keyDown(code);
+      ic.keyUp(code);
+    };
+    // Entered with fists: the number keys draw weapons instead of changing seats.
+    press('Digit1');
+    let i = ic.sample(1, 0);
+    expect(i.slot).toBe(0);
+    expect(i.actions).toBeUndefined();
+    press('Digit3');
+    expect(ic.sample(2, 0).slot).toBe(2);
+    ic.wheel(1);
+    expect(ic.sample(3, 0).slot).toBe(0);
+    ic.wheel(-1);
+    expect(ic.sample(4, 0).slot).toBe(2);
+    press('KeyB');
+    expect(ic.sample(5, 0).actions).toEqual([{ a: 'swapWeapons' }]);
+    press('KeyH');
+    expect(ic.sample(6, 0).slot).toBe(-1);
+    press('KeyG');
+    expect(ic.sample(7, 0).actions).toEqual([{ a: 'throw' }]);
+    // 4 arms a frag, the trigger throws it and the previous weapon comes back.
+    press('Digit2');
+    expect(ic.sample(8, 0).slot).toBe(1);
+    press('Digit4');
+    expect(ic.isGrenadeArmed).toBe(true);
+    expect(ic.sample(9, 0).slot).toBe(-1);
+    ic.mouseButton(0, true);
+    ic.mouseButton(0, false);
+    i = ic.sample(10, 0);
+    expect(i.actions).toEqual([{ a: 'throw' }]);
+    expect(i.buttons & 1).toBe(0);
+    expect(i.slot).toBe(1);
+    // Shift (either side, or the event's modifier flag) + 1-4 changes seats; the weapon stays.
+    ic.keyDown('ShiftLeft');
+    press('Digit1');
+    ic.keyUp('ShiftLeft');
+    i = ic.sample(11, 0);
+    expect(i.actions).toEqual([{ a: 'seat', seat: 0 }]);
+    expect(i.slot).toBe(1);
+    expect(ic.keyDown('ShiftRight')).toBe(false); // unbound, still the modifier
+    press('Digit3');
+    ic.keyUp('ShiftRight');
+    ic.keyDown('Digit4', false, true);
+    ic.keyUp('Digit4');
+    i = ic.sample(12, 0);
+    expect(i.actions).toEqual([{ a: 'seat', seat: 2 }, { a: 'seat', seat: 3 }]);
+    expect(ic.isGrenadeArmed).toBe(false);
+    press('Digit1'); // Shift released: weapons again
+    expect(ic.sample(13, 0).slot).toBe(0);
+
+    // A frag armed in the passenger seat is put away when moving to the driver's seat.
+    press('Digit4');
+    expect(ic.isGrenadeArmed).toBe(true);
+    const driver = { ...passenger, seat: 0, seatCanShoot: false };
+    ic.setContext(driver);
+    expect(ic.isGrenadeArmed).toBe(false);
+    expect(ic.sample(14, 0).slot).toBe(0);
+    // The driver cannot shoot: plain (and Shift +) 1-4 change seats, weapon keys do nothing.
+    press('Digit2');
+    ic.keyDown('ShiftLeft');
+    press('Digit3');
+    ic.keyUp('ShiftLeft');
+    i = ic.sample(15, 0);
+    expect(i.actions).toEqual([{ a: 'seat', seat: 1 }, { a: 'seat', seat: 2 }]);
+    press('KeyH');
+    press('KeyB');
+    press('KeyG');
+    ic.wheel(1);
+    i = ic.sample(16, 0);
+    expect(i.slot).toBe(0);
+    expect(i.actions).toBeUndefined();
+
+    // On foot, Shift (sprint) + 2 still selects the weapon.
+    ic.setContext({ ...passenger, mode: 'ground', seat: -1, seatCanShoot: false });
+    ic.keyDown('ShiftLeft');
+    press('Digit2');
+    i = ic.sample(17, 0);
+    expect(i.slot).toBe(1);
+    expect(i.actions).toBeUndefined();
   });
 });
 
@@ -1431,6 +1521,78 @@ describe('parity with the real GameSim', () => {
     // The rider is drawn at the driver seat of the predicted vehicle.
     const f = game.getFrame();
     expect(Math.hypot(f.self!.pos.x - f.vehicles.get(car.id)!.pos.x, f.self!.pos.z - f.vehicles.get(car.id)!.pos.z)).toBeLessThan(2);
+  });
+
+  it('passenger seat: the server takes weapon draws, swap, holster, frag throw and Shift + seat keys (60 ms latency)', () => {
+    const lb = new Loopback({ ...CONFIG, mode: 'training', maxPlayers: 4, teamSize: 1, infiniteAmmo: true }, 60);
+    lb.run(30);
+    const game = lb.game!;
+    const sim = lb.runner.sim;
+    const me = [...sim.players.values()].find((p) => !p.isBot)!;
+    for (const item of ['ar', 'sniper', 'frag'] as const) {
+      game.queueAction({ a: 'give', item });
+      lb.run(20);
+    }
+    expect(me.weapons.map((w) => w?.id ?? null)).toEqual(['ar', 'sniper', null]);
+    expect(me.activeSlot).toBe(-1);
+    const car = [...sim.vehicles.values()].find((v) => v.type === 'buggy')!;
+    me.pos.x = car.pos.x + 3;
+    me.pos.z = car.pos.z;
+    me.pos.y = sim.world.groundAt(me.pos.x, me.pos.z, car.pos.y + 2);
+    me.vel.x = me.vel.y = me.vel.z = 0;
+    lb.run(30);
+    game.queueAction({ a: 'enter', id: car.id, seat: 1 });
+    lb.run(30);
+    expect(me.vehicleId).toBe(car.id);
+    expect(me.seat).toBe(1);
+    expect(me.activeSlot, 'entered with fists').toBe(-1);
+    const input = game.input;
+    const press = (code: string) => {
+      input.keyDown(code);
+      lb.frame();
+      input.keyUp(code);
+      lb.run(40);
+    };
+    // Draw the AR in the seat and fire it.
+    press('Digit1');
+    expect(me.activeSlot).toBe(0);
+    expect(game.getFrame().self!.weapon).toBe('ar');
+    lb.run(60);
+    let shots = 0;
+    game.events.on('localShot', () => shots++);
+    input.setAim(car.yaw + Math.PI / 2, -0.1);
+    input.mouseButton(0, true);
+    lb.run(30);
+    input.mouseButton(0, false);
+    lb.run(30);
+    expect(shots).toBeGreaterThan(2);
+    expect(me.shotCounter).toBeGreaterThan(2);
+    expect(game.predictedState!.shotCounter).toBe(me.shotCounter);
+    // Wheel, swap, holster and a frag from the seat.
+    input.wheel(1);
+    lb.run(40);
+    expect(me.activeSlot).toBe(1);
+    press('KeyB');
+    expect(me.weapons.map((w) => w?.id ?? null)).toEqual(['sniper', 'ar', null]);
+    press('KeyH');
+    expect(me.activeSlot).toBe(-1);
+    const frags = me.items.frag;
+    expect(frags).toBeGreaterThan(0);
+    press('KeyG');
+    expect(me.items.frag).toBe(frags - 1);
+    expect(game.predictedState!.items.frag).toBe(me.items.frag);
+    // Shift + 1 moves to the free driver seat; the driver's plain 2 goes back.
+    press('Digit2');
+    expect(me.activeSlot).toBe(1);
+    input.keyDown('ShiftLeft');
+    press('Digit1');
+    input.keyUp('ShiftLeft');
+    expect(me.seat).toBe(0);
+    expect(me.activeSlot).toBe(1);
+    press('Digit2');
+    expect(me.seat).toBe(1);
+    expect(me.mode).toBe('vehicle');
+    expect(game.predictedState!.activeSlot).toBe(me.activeSlot);
   });
 });
 

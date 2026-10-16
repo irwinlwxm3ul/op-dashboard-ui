@@ -86,8 +86,12 @@ export function planProps(boxes: readonly WorldBox[]): PropPlan[] {
     let shadows = true;
     switch (b.kind) {
       case 'crate': {
-        // Pale straw-coloured "crates" are hay bales: keep the box.
-        if (luma > 0.6) continue;
+        // Pale straw-coloured "crates" are the barns' hay stacks (a free prop: not offered by
+        // propModelsForBox, which maps crate boxes to crates).
+        if (luma > 0.6) {
+          placements = fitSegments(b, 'hay_bales', 1, flip);
+          break;
+        }
         const military = g > r;
         const model: WorldPropId = military && candidates.includes('crate_military') ? 'crate_military' : 'crate_wood';
         if (!candidates.includes(model)) continue;

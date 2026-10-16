@@ -1065,7 +1065,7 @@ describe('AT7 lag compensation (150 ms one-way latency)', () => {
 // ---------------------------------------------------------------------------------------------
 
 describe('AT8 vehicles', () => {
-  it('enter/seat swap, passenger shoots, drive (fuel use), crash damage, empty tank + jerry can, destroyed by gunfire', () => {
+  it('enter/seat swap, passenger draws + shoots + changes seat, drive (fuel use), crash damage, empty tank + jerry can, destroyed by gunfire', () => {
     const config: MatchConfig = { ...TRAINING, maxPlayers: 2 };
     const h = new Harness(config, [
       { id: 'd', name: 'Driver', latencyMs: 40 },
@@ -1073,7 +1073,12 @@ describe('AT8 vehicles', () => {
     ]);
     const [D, P] = h.clients;
     h.run(1500);
-    equip(h, P, 'ar');
+    // The passenger carries an AR but gets in with fists (draws it in the seat below).
+    give(h, P, 'ar');
+    give(h, P, WEAPONS.ar.ammo);
+    const arSlot = P.self.weapons.findIndex((w) => w?.id === 'ar');
+    expect(arSlot, 'AR in a weapon slot').toBeGreaterThanOrEqual(0);
+    expect(P.self.activeSlot).toBe(-1);
 
     // Test setup: park a buggy at the west end of a 90 m straight that ends at the item racks
     // (rack row 2 at z = firing line + 24), pointing east, and put both players next to it.
@@ -1098,7 +1103,8 @@ describe('AT8 vehicles', () => {
     h.run(2500);
     expect(D.frame.vehicles.get(buggy.id)!.pos.x).toBeCloseTo(startX, 0);
 
-    // Driver enters (F prompt), swaps seats with 1-4, back to the wheel.
+    // Driver enters (F prompt), swaps seats with 1-4 (the driver cannot shoot), back to the wheel
+    // from the passenger seat with Shift + 1 (there the number keys select weapons).
     expect(h.until(() => D.frame.interaction?.kind === 'enter', 3000, () => aimAt(D, buggy.pos))).toBe(true);
     expect(D.frame.interaction!.targetId).toBe(buggy.id);
     tap(h, D, 'KeyF');
@@ -1110,13 +1116,23 @@ describe('AT8 vehicles', () => {
     expect(okSeat, 'seat 2').toBe(true);
     h.run(300);
     tap(h, D, 'Digit1');
+    h.run(500);
+    expect(D.self.seat, 'plain 1 in a seat that can shoot is a weapon key').toBe(1);
+    D.key('ShiftLeft', true);
+    tap(h, D, 'Digit1');
+    D.key('ShiftLeft', false);
     expect(h.until(() => D.self.seat === 0, 3000), 'back to the wheel').toBe(true);
 
-    // Passenger enters the free seat and shoots from it.
+    // Passenger enters the free seat with fists, draws the AR with its number key (in a seat that
+    // can shoot 1-3 select weapons; seats are Shift + 1-4) and shoots from the seat.
     expect(h.until(() => P.frame.interaction?.kind === 'enter', 3000, () => aimAt(P, buggy.pos))).toBe(true);
     tap(h, P, 'KeyF');
     expect(h.until(() => P.self.vehicleId === buggy.id && P.self.seat === 1, 3000), 'passenger seat').toBe(true);
-    expect(h.until(() => P.self.weapon === 'ar' && P.self.drawProgress < 0, 3000)).toBe(true);
+    expect(P.self.weapon, 'entered with fists').toBeNull();
+    h.run(300);
+    tap(h, P, `Digit${arSlot + 1}`);
+    expect(h.until(() => P.self.weapon === 'ar' && P.self.drawProgress < 0, 3000), 'AR drawn in the seat').toBe(true);
+    expect(P.self.seat, 'the number key drew a weapon instead of changing seats').toBe(1);
     const tShot = h.sim.time;
     aimAt(P, { x: startX - 20, y: P.self.eye.y - 2, z: rowZ - 30 });
     pull(h, P);
@@ -1164,11 +1180,23 @@ describe('AT8 vehicles', () => {
     expect(moves, 'drives again after refuelling').toBe(true);
     h.run(2000);
 
-    // Both get out, step back and shoot it until it burns and explodes.
-    for (const c of [D, P]) {
-      tap(h, c, 'KeyF');
-      expect(h.until(() => c.self.vehicleId === null && c.self.mode === 'ground', 3000), `${c.spec.name} exits`).toBe(true);
-    }
+    // The driver gets out; the passenger moves to the free driver seat with Shift + 1 (the AR stays
+    // in hand) and back with the driver's plain 2, then gets out too.
+    tap(h, D, 'KeyF');
+    expect(h.until(() => D.self.vehicleId === null && D.self.mode === 'ground', 3000), 'Driver exits').toBe(true);
+    P.key('ShiftLeft', true);
+    tap(h, P, 'Digit1');
+    P.key('ShiftLeft', false);
+    expect(h.until(() => P.self.seat === 0, 3000), 'passenger -> driver seat (Shift + 1)').toBe(true);
+    expect(P.self.weapon).toBe('ar');
+    h.run(300);
+    tap(h, P, 'Digit2');
+    expect(h.until(() => P.self.seat === 1, 3000), 'driver -> passenger seat (2)').toBe(true);
+    h.run(300);
+    tap(h, P, 'KeyF');
+    expect(h.until(() => P.self.vehicleId === null && P.self.mode === 'ground', 3000), 'Passenger exits').toBe(true);
+
+    // Both step back and shoot it until it burns and explodes.
     const car = () => D.frame.vehicles.get(buggy.id)!;
     expect(walkTo(h, D, car().pos.x - 14, car().pos.z + 4, 1)).toBe(true);
     expect(walkTo(h, P, car().pos.x - 14, car().pos.z - 4, 1)).toBe(true);

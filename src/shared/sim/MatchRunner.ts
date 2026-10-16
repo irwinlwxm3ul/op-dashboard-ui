@@ -189,9 +189,9 @@ export class MatchRunner {
       const t0 = now();
       if (this.driver) this.driver.update(TICK_DT);
       sim.step();
-      this.recordTiming(now() - t0);
       this.routeEvents(sim.drainEvents());
       this.collectLoot();
+      this.recordTiming(now() - t0);
       for (const e of this.entryList) {
         e.tokens = Math.min(INPUT_TOKEN_BURST, e.tokens + INPUT_RATE_SLACK);
       }
@@ -213,7 +213,13 @@ export class MatchRunner {
       this.acc -= skipped * TICK_MS;
       sim.grantInputCredit(skipped);
     }
-    if (snapDue) this.sendSnapshots();
+    if (snapDue) {
+      const t0 = now();
+      this.sendSnapshots();
+      // Building and handing out the snapshots is part of the server's per-tick cost: it is
+      // charged to the tick that made them due (the last one of this update).
+      this.addTiming(now() - t0);
+    }
     if (endedNow && this.onEnd) this.onEnd(sim.results());
   }
 
@@ -285,8 +291,9 @@ export class MatchRunner {
   }
 
   /**
-   * Tick timing over the last TIMING_WINDOW ticks (~10 s), player and bot counts, and the
-   * suspicious-aim flags raised since the previous stats() call (for the server log).
+   * Tick timing over the last TIMING_WINDOW ticks (~10 s): bots + simulation step + event routing
+   * + snapshot building and sending (including whatever the clients' send() does). Player and bot
+   * counts, and the suspicious-aim flags raised since the previous stats() call (server log).
    */
   stats(): { tickMsAvg: number; tickMsMax: number; players: number; bots: number; flags: CheatFlag[] } {
     let sum = 0;
@@ -315,6 +322,12 @@ export class MatchRunner {
     this.tickTimes[this.tickTimeIdx] = ms;
     this.tickTimeIdx = (this.tickTimeIdx + 1) % TIMING_WINDOW;
     if (this.tickTimeCount < TIMING_WINDOW) this.tickTimeCount++;
+  }
+
+  /** Add work done after a tick (its snapshot) to that tick's recorded time. */
+  private addTiming(ms: number): void {
+    if (this.tickTimeCount === 0) return;
+    this.tickTimes[(this.tickTimeIdx + TIMING_WINDOW - 1) % TIMING_WINDOW] += ms;
   }
 
   private collectLoot(): void {
@@ -359,6 +372,7 @@ export class MatchRunner {
   }
 
   private noteCombat(a: EntityId, v: EntityId, t: number): void {
+    if (a === v) return; // self-hits (environmental damage feedback) are no exchange with anyone
     for (const e of this.entryList) {
       if (e.playerId === a) e.combat.set(v, t);
       else if (e.playerId === v) e.combat.set(a, t);

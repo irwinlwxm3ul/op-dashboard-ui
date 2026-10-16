@@ -15,12 +15,14 @@ const HYSTERESIS = 8;
 const VIS_WIDTH = 256;
 /**
  * Model distance per prop relative to the quality's propModelDistance: heavy models (chain-link
- * panels ~1 500 tris each, military crates, sandbag walls) switch to their boxes sooner.
+ * panels ~1 500 tris each, military crates, sandbag walls, barn hay stacks) switch to their boxes
+ * sooner.
  */
 const DISTANCE_SCALE: Partial<Record<WorldPropId, number>> = {
   fence_chainlink: 0.5,
   crate_military: 0.7,
   sandbag_wall: 0.8,
+  hay_bales: 0.7,
 };
 
 /** Per-pid on/off flags for the merged prop boxes (pid 0 = boxes that are always drawn). */

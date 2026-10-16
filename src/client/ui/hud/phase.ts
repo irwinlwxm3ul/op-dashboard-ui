@@ -135,7 +135,11 @@ export class DropMeter implements Widget {
   }
 }
 
-/** Vehicle HUD: speed, fuel, health, seats (with seat keys) and warnings. */
+/**
+ * Vehicle HUD: speed, fuel, health, seats (with seat keys), the seat-change hint and warnings.
+ * In a seat that can shoot the number keys select weapons and Shift + 1-4 changes seats (see
+ * game/input.ts); in the driver's seat the plain number keys change seats.
+ */
 export class VehiclePanel implements Widget {
   readonly el: HTMLDivElement;
   private readonly vis: Vis;
@@ -148,6 +152,7 @@ export class VehiclePanel implements Widget {
   private readonly role: TextSlot;
   private readonly warn: TextSlot;
   private readonly seats: HTMLDivElement;
+  private readonly seatHint: TextSlot;
   private seatEls: HTMLElement[] = [];
   private type: VehicleType | null = null;
   private seatSig = -1;
@@ -177,6 +182,7 @@ export class VehiclePanel implements Widget {
     this.hp = new BarFill(h('div', 'dz-vehicle-fill', hpBar));
     this.hpLow = new ClassFlag(hpBar, 'dz-low');
     this.seats = h('div', 'dz-vehicle-seats', this.el);
+    this.seatHint = new TextSlot(h('div', 'dz-drop-hint dz-vehicle-seat-hint', this.el));
     this.warn = new TextSlot(h('div', 'dz-vehicle-warn', this.el));
   }
 
@@ -204,7 +210,7 @@ export class VehiclePanel implements Widget {
     for (let i = 0; i < v.seats.length; i++) if (v.seats[i] !== null) sig += 1 << i;
     if (sig !== this.seatSig) {
       this.seatSig = sig;
-      this.renderSeats(v.seats, self.seat, env);
+      this.renderSeats(v.seats, self.seat, def.seatCanShoot[self.seat] === true, env);
       this.role.set(self.seat === 0 ? t('hud.driver') : t('hud.passenger'));
     }
     const warn = v.burning || v.destroyed ? 'b' : v.fuel <= 0 ? 'f' : '';
@@ -215,7 +221,7 @@ export class VehiclePanel implements Widget {
     }
   }
 
-  private renderSeats(seats: (EntityId | null)[], mine: number, env: HudEnv): void {
+  private renderSeats(seats: (EntityId | null)[], mine: number, mineShoots: boolean, env: HudEnv): void {
     this.seats.textContent = '';
     this.seatEls = [];
     const keys = [env.keys.slot1, env.keys.slot2, env.keys.slot3, env.keys.slot4];
@@ -227,10 +233,15 @@ export class VehiclePanel implements Widget {
       h('span', 'dz-key dz-key-xs', s).textContent = keyLabel(keys[i] ?? '');
       this.seatEls.push(s);
     }
+    // Seat keys: Shift + number where the number keys select weapons (seats that can shoot).
+    const n = Math.min(seats.length, keys.length);
+    const range = n > 1 ? `${keyLabel(keys[0])}–${keyLabel(keys[n - 1])}` : keyLabel(keys[0]);
+    this.seatHint.set(t('ui.hud.seatSwitchHint', { keys: mineShoots ? `${keyCapLabel('ShiftLeft')}+${range}` : range }));
   }
 
   relabel(): void {
     this.seatSig = -1;
+    this.seatHint.invalidate();
     this.warnState = '-';
     this.speed.invalidate();
   }

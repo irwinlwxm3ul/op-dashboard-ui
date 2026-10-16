@@ -54,6 +54,7 @@ export const WORLD_SOURCES = {
   phBarrier: { title: 'Concrete Road Barrier', author: 'Amal Kumar', license: 'CC0-1.0', url: 'https://polyhaven.com/a/concrete_road_barrier', mirror: 'https://github.com/EliteGamer007/6dof-drone-sim/tree/3b97077101bedb1326cf6483e04dc51ccf130fa3/assets/polyhaven/models/concrete_road_barrier' },
   phChainlink: { title: 'Modular Chainlink Fence', author: 'James Ray Cock (fence wire material: Amal Kumar)', license: 'CC0-1.0', url: 'https://polyhaven.com/a/modular_chainlink_fence', mirror: 'https://github.com/EliteGamer007/6dof-drone-sim/tree/3b97077101bedb1326cf6483e04dc51ccf130fa3/assets/polyhaven/models/modular_chainlink_fence' },
   phRockMoss: { title: 'Rock Moss Set 01', author: 'Kless Gyzen', license: 'CC0-1.0', url: 'https://polyhaven.com/a/rock_moss_set_01', mirror: 'https://github.com/ayoub5550/inside-copy-/tree/e93e405569477bd9e5e304f1a0763116888fb66f/assets/ph/models/rock_moss_set_01' },
+  kenneyGraveyard: { title: 'Graveyard Kit (5.0)', author: 'Kenney', license: 'CC0-1.0', url: 'https://kenney.nl/assets/graveyard-kit', mirror: 'https://github.com/series-ai/jam-ready-assets/tree/2d7c41049c1db4d670b1ded88a7aeec0d7c2f38c/kenney-graveyard-kit/3D/seasonal-holiday' },
 } as const satisfies Record<string, WorldAssetSource>;
 
 /** Every source used by the world assets (CC BY 4.0 ones must be credited in the game's credits). */
@@ -163,7 +164,7 @@ export const VEHICLE_MODELS: Partial<Record<VehicleType, VehicleModel>> = {
 // Props
 // ================================================================================================
 
-export type WorldPropId = 'crate_wood' | 'crate_military' | 'ammo_crate' | 'barrel_oil' | 'barrel_red' | 'jerrycan' | 'barrier_concrete' | 'sandbag_wall' | 'container_green' | 'container_red' | 'fence_wood' | 'fence_chainlink';
+export type WorldPropId = 'crate_wood' | 'crate_military' | 'ammo_crate' | 'barrel_oil' | 'barrel_red' | 'jerrycan' | 'barrier_concrete' | 'sandbag_wall' | 'container_green' | 'container_red' | 'fence_wood' | 'fence_chainlink' | 'hay_bales';
 
 export interface PropModel {
   id: WorldPropId;
@@ -299,6 +300,16 @@ export const PROP_MODELS: Record<WorldPropId, PropModel> = {
     boxes: [{ kind: 'fence', material: 'metal' }],
     fit: 'scale X to the panel length (1.99 m native: 1.91 m mesh panel + post), Y to 2.4 m',
     source: WORLD_SOURCES.phChainlink,
+  },
+  hay_bales: {
+    id: 'hay_bales',
+    file: 'props/hay_bales.glb',
+    size: [1.612, 0.891, 1.223],
+    tris: 1884,
+    meshes: ['hay_bales'],
+    boxes: [],
+    fit: 'stack of 12 square bales (2 x 3, two layers) for the barns\' 1.6 x 0.9 x 1.2 m hay boxes: crate / wood boxes in straw colour (PAL.hay), picked by colour (not via propModelsForBox); scale to the WorldBox',
+    source: WORLD_SOURCES.kenneyGraveyard,
   },
 };
 

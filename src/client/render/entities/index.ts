@@ -176,7 +176,7 @@ class EntityRendererImpl implements EntityRendererInternals {
     this.projScreen.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
     this.ctx.frustum.setFromProjectionMatrix(this.projScreen);
     this.players.update(frame, this.ctx, step);
-    this.vehicles.update(frame.vehicles, this.camPos, step, focal, PLAYER_RENDER_DISTANCE);
+    this.vehicles.update(frame.vehicles, this.camPos, step, focal, PLAYER_RENDER_DISTANCE, cam.fov, this.ctx.frustum);
     this.loot.update(frame.loot, this.camPos, step);
     this.plane.update(frame, step);
     this.dummies.update(frame.trainingTargets, step);

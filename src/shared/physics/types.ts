@@ -33,6 +33,35 @@ export interface MoveEvents {
   enteredWater: boolean;
 }
 
+/**
+ * A moving solid the character controller collides with (a vehicle hull): a footprint rectangle
+ * rotated about Y, a vertical span from `y0` (ground contact) to the top surface, and a top that
+ * can be stood on. Bodies are pushed out of it horizontally only where their vertical span
+ * overlaps it, so a body standing on its roof (or on a bridge above it) is left alone.
+ * Build one per vehicle with `vehicleObstacle` (src/shared/vehicles).
+ */
+export interface CharObstacle {
+  /** Footprint centre (XZ). */
+  x: number;
+  z: number;
+  /** cos / sin of the footprint yaw (local +X = (c, 0, -s), local +Z = (s, 0, c)). */
+  c: number;
+  s: number;
+  /** Footprint half extents along local X / Z. */
+  hx: number;
+  hz: number;
+  /** Bounding radius of the footprint (broad phase). */
+  br: number;
+  /** Lowest point of the solid (hull bottom extended down to the ground contact). */
+  y0: number;
+  /** Highest point of the top surface. */
+  y1: number;
+  /** Top surface: height above the footprint centre and its slope per metre along world X / Z. */
+  top: number;
+  gx: number;
+  gz: number;
+}
+
 /** Everything needed to place a player's hitboxes (also stored in the lag-compensation history). */
 export interface HitboxPose {
   pos: Vec3;

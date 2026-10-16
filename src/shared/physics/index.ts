@@ -4,7 +4,7 @@
 // Everything here is deterministic, allocation-light and free of DOM / Node / three.js so it runs
 // identically on the server, in the local-match worker and in client prediction.
 
-export type { MoveIntent, MoveEvents, HitboxPose } from './types';
+export type { MoveIntent, MoveEvents, HitboxPose, CharObstacle } from './types';
 export { createMoveEvents, createMoveIntent, resetMoveEvents } from './types';
 
 // Character controller (ground / swim) and drop (freefall / parachute).

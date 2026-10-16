@@ -7,7 +7,7 @@ import { settings } from '../../game';
 import type { KeyAction, Settings } from '../../game/types';
 import type { UiCtx } from '../context';
 import { button, clear, h, tx } from '../dom';
-import { keyLabel, onKeyboardLayout, RESERVED_CODES } from '../keys';
+import { keyCapLabel, keyLabel, onKeyboardLayout, RESERVED_CODES } from '../keys';
 import { Modal, type ModalManager } from '../modal';
 
 interface Group {
@@ -64,6 +64,7 @@ interface FixedRow {
 }
 
 const join = (...codes: string[]): string => codes.map((c) => keyLabel(c)).join(' / ');
+const seatKeys = (s: Settings): string => `${keyLabel(s.keybinds.slot1)}–${keyLabel(s.keybinds.slot4)}`;
 
 const FIXED: { title: TKey; rows: FixedRow[] }[] = [
   {
@@ -82,7 +83,10 @@ const FIXED: { title: TKey; rows: FixedRow[] }[] = [
       { label: 'controls.vehicle.steer', keys: (s) => join(s.keybinds.left, s.keybinds.right) },
       { label: 'controls.vehicle.handbrake', keys: (s) => join(s.keybinds.jump) },
       { label: 'controls.vehicle.boost', keys: (s) => join(s.keybinds.sprint) },
-      { label: 'controls.vehicle.switchSeat', keys: (s) => `${keyLabel(s.keybinds.slot1)}–${keyLabel(s.keybinds.slot4)}` },
+      // From any seat Shift + the weapon slot keys (the modifier is fixed: the keymap has no chords,
+      // and browsers reserve PUBG's Ctrl+1-4); the driver, who cannot shoot, also uses plain 1-4.
+      { label: 'controls.vehicle.switchSeat', keys: (s) => `${keyCapLabel('ShiftLeft')}+${seatKeys(s)}` },
+      { label: 'ui.controls.switchSeatDriver', keys: seatKeys },
       { label: 'controls.vehicle.exit', keys: (s) => join(s.keybinds.interact) },
     ],
   },

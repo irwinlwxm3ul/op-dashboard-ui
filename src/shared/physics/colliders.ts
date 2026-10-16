@@ -1,5 +1,6 @@
 // Low-level collision queries against the static world: a vertical cylinder (circle in XZ plus a
-// vertical span) versus axis-aligned boxes, tree trunks and rocks.
+// vertical span) versus axis-aligned boxes, tree trunks and rocks, plus the dynamic obstacles
+// (vehicle hulls) the character controller registers for its own step with `setObstacles`.
 //
 // The character controller and drop movement call `gatherNear` once per step (with a margin that
 // covers everything the step can reach) and then run many queries against the gathered candidate
@@ -11,6 +12,7 @@
 import { PLAYER_RADIUS, STANCE_HEIGHT, STEP_HEIGHT } from '../constants';
 import type { RockDef, Stance, TreeDef, Vec3, World, WorldBox } from '../types';
 import { CONTACT_SKIN, COS_MAX_SLOPE, TREE_TRUNK_FRAC } from './tuning';
+import type { CharObstacle } from './types';
 
 // ---------------------------------------------------------------------------
 // Candidate gathering
@@ -22,9 +24,15 @@ const rockBuf: RockDef[] = [];
 let nearBoxes: WorldBox[] = boxBuf;
 let nearTrees: TreeDef[] = treeBuf;
 let nearRocks: RockDef[] = rockBuf;
+const NO_OBSTACLES: readonly CharObstacle[] = [];
+let nearObs: readonly CharObstacle[] = NO_OBSTACLES;
 
-/** Collect the colliders around (x, z) within `margin` (square region) into the module lists. */
+/**
+ * Collect the colliders around (x, z) within `margin` (square region) into the module lists.
+ * Clears the dynamic obstacles (see `setObstacles`).
+ */
 export function gatherNear(world: World, x: number, z: number, margin: number): void {
+  nearObs = NO_OBSTACLES;
   // World query implementations append into `out`; clear first so stale entries never leak in.
   boxBuf.length = 0;
   treeBuf.length = 0;
@@ -33,6 +41,15 @@ export function gatherNear(world: World, x: number, z: number, margin: number): 
   nearBoxes = world.queryBoxes(x0, z0, x1, z1, boxBuf);
   nearTrees = world.queryTrees(x0, z0, x1, z1, treeBuf);
   nearRocks = world.queryRocks(x0, z0, x1, z1, rockBuf);
+}
+
+/**
+ * Dynamic obstacles (vehicle hulls) taking part in `resolveCircle` / `supportHeight` until the next
+ * `gatherNear` (or `setObstacles(null)`). Only the character controller registers them, for its
+ * own step; every other user of these helpers (vehicle physics, exit spots) sees the static world.
+ */
+export function setObstacles(list: readonly CharObstacle[] | null | undefined): void {
+  nearObs = list && list.length > 0 ? list : NO_OBSTACLES;
 }
 
 // ---------------------------------------------------------------------------
@@ -99,6 +116,67 @@ function penetrateCylinder(cx: number, cz: number, cr: number, x: number, z: num
   return R;
 }
 
+/** Closest footprint point of the last `obstacleDist2` call (world XZ and local XZ). */
+let ocx = 0, ocz = 0, olx = 0, olz = 0, oex = 0, oez = 0;
+
+/**
+ * Squared XZ distance from (x, z) to the footprint of o (0 inside); Infinity when beyond `r` of its
+ * bounding circle. Leaves the closest footprint point in ocx/ocz (world) and the local offset of
+ * (x, z) from it in oex/oez (local centre coordinates in olx/olz).
+ */
+function obstacleDist2(o: CharObstacle, x: number, z: number, r: number): number {
+  const dx = x - o.x, dz = z - o.z;
+  const R = o.br + r;
+  if (dx * dx + dz * dz >= R * R) return Infinity;
+  const lx = dx * o.c - dz * o.s;
+  const lz = dx * o.s + dz * o.c;
+  const cx = lx < -o.hx ? -o.hx : lx > o.hx ? o.hx : lx;
+  const cz = lz < -o.hz ? -o.hz : lz > o.hz ? o.hz : lz;
+  olx = lx; olz = lz;
+  oex = lx - cx; oez = lz - cz;
+  ocx = o.x + o.c * cx + o.s * cz;
+  ocz = o.z - o.s * cx + o.c * cz;
+  return oex * oex + oez * oez;
+}
+
+/** Height of the obstacle's top surface at (x, z) (clamped to its vertical span). */
+function obstacleTop(o: CharObstacle, x: number, z: number): number {
+  const t = o.top + o.gx * (x - o.x) + o.gz * (z - o.z);
+  return t < o.y0 ? o.y0 : t > o.y1 ? o.y1 : t;
+}
+
+/**
+ * Penetration of circle (x, z, r) spanning (y0, y1) into obstacle o (0 if none); sets pnx/pnz.
+ * The vertical test uses the top surface at the contact point, so a body above the roof there
+ * (standing on it, or passing over it on a bridge) does not collide.
+ */
+function penetrateObstacle(o: CharObstacle, x: number, z: number, r: number, y0: number, y1: number): number {
+  if (o.y0 >= y1) return 0;
+  const d2 = obstacleDist2(o, x, z, r);
+  if (d2 >= r * r) return 0;
+  if (obstacleTop(o, ocx, ocz) <= y0) return 0;
+  let nlx: number, nlz: number, pen: number;
+  if (d2 > 1e-12) {
+    const d = Math.sqrt(d2);
+    pen = r - d;
+    if (pen <= MIN_PEN) return 0;
+    nlx = oex / d;
+    nlz = oez / d;
+  } else {
+    // Centre inside the footprint: leave through the nearest side (fixed tie-break order).
+    let m = olx + o.hx;
+    nlx = -1; nlz = 0;
+    const toMaxX = o.hx - olx, toMinZ = olz + o.hz, toMaxZ = o.hz - olz;
+    if (toMaxX < m) { m = toMaxX; nlx = 1; nlz = 0; }
+    if (toMinZ < m) { m = toMinZ; nlx = 0; nlz = -1; }
+    if (toMaxZ < m) { m = toMaxZ; nlx = 0; nlz = 1; }
+    pen = m + r;
+  }
+  pnx = o.c * nlx + o.s * nlz;
+  pnz = -o.s * nlx + o.c * nlz;
+  return pen;
+}
+
 // ---------------------------------------------------------------------------
 // Circle resolution
 // ---------------------------------------------------------------------------
@@ -127,12 +205,23 @@ function clipVelocity(vel: Vec3 | null): void {
 /**
  * Push the circle (x, z, r) out of every gathered collider whose vertical extent overlaps the open
  * span (y0, y1). Velocity (if given) loses its component into each contact normal so the body
- * slides along walls. Writes the result into `resolved`.
+ * slides along walls. Writes the result into `resolved`. Dynamic obstacles are resolved first in
+ * every pass, so the static world has the last word (a vehicle never pushes a body into a wall).
  */
 export function resolveCircle(x: number, z: number, r: number, y0: number, y1: number, vel: Vec3 | null): void {
   let px = x, pz = z, tx = 0, tz = 0, maxDepth = 0, contacts = 0;
   for (let iter = 0; iter < 4; iter++) {
     let any = false;
+    for (let i = 0; i < nearObs.length; i++) {
+      const d = penetrateObstacle(nearObs[i], px, pz, r, y0, y1);
+      if (d > 0) {
+        px += pnx * d; pz += pnz * d; tx += pnx * d; tz += pnz * d;
+        if (d > maxDepth) maxDepth = d;
+        contacts++;
+        clipVelocity(vel);
+        any = true;
+      }
+    }
     for (let i = 0; i < nearBoxes.length; i++) {
       const b = nearBoxes[i];
       if (b.max.y <= y0 || b.min.y >= y1) continue;
@@ -192,7 +281,8 @@ export const support = { h: 0, kind: SUPPORT_TERRAIN as number };
 
 /**
  * Highest standable surface under the footprint circle (x, z, rs) whose top is at or below
- * `refTop`: terrain under the centre, box tops (floors, roofs, crates, stair steps) and rock tops.
+ * `refTop`: terrain under the centre, box tops (floors, roofs, crates, stair steps), rock tops and
+ * the tops of registered obstacles (vehicle roofs, reported as SUPPORT_BOX).
  */
 export function supportHeight(world: World, x: number, z: number, refTop: number, rs: number): number {
   let h = world.heightAt(x, z);
@@ -214,6 +304,16 @@ export function supportHeight(world: World, x: number, z: number, refTop: number
         h = top;
         kind = SUPPORT_ROCK;
       }
+    }
+  }
+  for (let i = 0; i < nearObs.length; i++) {
+    const o = nearObs[i];
+    if (o.y1 <= h || o.y0 > refTop) continue;
+    if (obstacleDist2(o, x, z, rs) >= rs * rs) continue;
+    const top = obstacleTop(o, ocx, ocz);
+    if (top > h && top <= refTop) {
+      h = top;
+      kind = SUPPORT_BOX;
     }
   }
   support.h = h;

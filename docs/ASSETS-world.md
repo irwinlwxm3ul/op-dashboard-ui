@@ -33,6 +33,7 @@ committed as plain binary glTF (no Draco / meshopt compression, textures embedde
 | prop | `props/container_green.glb`, `container_red.glb` | ISO 20 ft shipping containers | 1 336 / 1 032 | 102 / 80 KB |
 | prop | `props/fence_wood.glb` | rural two-rail wooden fence, 2.06 m | 40 | 145 KB |
 | prop | `props/fence_chainlink.glb` | 2.4 m chain-link panel + post (alpha-tested wire) | 1 470 | 563 KB |
+| prop | `props/hay_bales.glb` | barn hay stack: 12 twine-bound square bales, 1.6 x 0.9 x 1.2 m (see [Hay bales](#hay-bales)) | 1 884 | 161 KB |
 | nature | `nature/tree_pine.glb` | 5 pines (+ LOD1 each) | <= 2 000 / ~650-800 | 993 KB |
 | nature | `nature/tree_oak.glb` | 5 broadleaf trees (+ LOD1) | <= 2 000 / ~640 | 1.15 MB |
 | nature | `nature/tree_birch.glb` | 5 birches, leaves re-tinted summer green (+ LOD1) | <= 2 000 / ~640 | 1.06 MB |
@@ -262,3 +263,45 @@ of arbitrary glTF files (`label=path[#node]`) for candidate review.
   CC0 scans (Poly Haven trees) are 100 k+ triangles and unusable for ~4 000 instanced trees.
   LOD1 at ~640 triangles is visually close to LOD0 thanks to card thinning; impostors are
   rendered from the real models.
+
+## Hay bales
+
+`props/hay_bales.glb` (1 884 triangles, 161 KB, one mesh / material `hay_bales`, size
+1.612 x 0.891 x 1.223 m) dresses the barns' hay boxes: the world generator's straw-coloured
+(`PAL.hay`) `crate`+`wood` boxes, 1.6 x 0.9 x 1.2 m and sometimes two high. It is a free prop
+(`boxes: []`), so `propModelsForBox('crate', 'wood')` still returns only the crates;
+`src/client/render/world/propPlacement.ts` picks it by colour (luma > 0.6) and scales it to the box
+along the box's long side. It is instanced like the other props, drawn up to 0.7 x the quality's
+prop model distance, and the procedural box stays as the far fallback and whenever the file does
+not load.
+
+**Graveyard Kit (5.0)** by Kenney - CC0 1.0 - model `hay-bale-bundled`
+* Original: https://kenney.nl/assets/graveyard-kit
+* Mirror: https://github.com/series-ai/jam-ready-assets/tree/2d7c41049c1db4d670b1ded88a7aeec0d7c2f38c/kenney-graveyard-kit/3D/seasonal-holiday
+  (commit `2d7c41049c1db4d670b1ded88a7aeec0d7c2f38c`; the files are Git LFS objects, fetched from
+  media.githubusercontent.com at that commit: `Models/GLB format/hay-bale-bundled.glb` sha256
+  `94e00bc82083ebd34580a686ad2b10920a53d9c54edb5fed61e4837e987739ee`,
+  `Models/GLB format/Textures/colormap.png` sha256
+  `a94b4dc4f77a4b8aec96bde94f63912a1ce12aa98eec2c1e9a37c89e20a5f091`). This is Kenney's own kit
+  with its own licence file, unlike the RUN-licensed packs in the same repository (see Rejected
+  candidates).
+* Licence (from the kit's `License.txt`): "License: (Creative Commons Zero, CC0)
+  http://creativecommons.org/publicdomain/zero/1.0/ - You can use this content for personal,
+  educational, and commercial purposes. Support by crediting 'Kenney' or 'www.kenney.nl' (this is
+  not a requirement)".
+* Credit: not required. Optional: "Hay bales: Kenney (www.kenney.nl), CC0".
+* Modifications: the twine's 4 mm side walls dropped (outer surface kept); the bale body decimated
+  180 -> 120 triangles (meshoptimizer); the 512 px Kenney colour palette replaced by a 64 x 64
+  straw / sisal-twine palette that keeps the original light-to-dark shading ramp, with the mean
+  straw albedo matching `PAL.hay` (0xc4ac6a); 12 bales of 0.8 x 0.45 x 0.4 m stacked 2 x 3 in two
+  layers with small seeded jitter (position, yaw, width, random 180-degree flips) and a per-bale
+  vertex-colour shade (0.84-1.0, some greyer) so the stack reads as separate bales; the bottoms
+  of the lowest layer removed (they rest on the floor). 12 x 364 = 4 368 -> 1 884 triangles.
+* Build: a one-off page script on the `world.page.js` helpers (load, simplify, merge,
+  exportGlb), outside `scripts/assets/world/` for now. `gen-manifest.mjs` does not know this
+  entry yet: after regenerating `manifest-world.ts`, re-add `WORLD_SOURCES.kenneyGraveyard`, the
+  `'hay_bales'` id and its `PROP_MODELS` entry.
+* Other sources checked: the Quaternius mirror (agentkaerf/FreeModels @ `db3df04`: no hay model in
+  any pack), Poly Haven (no hay bale model), KayKit Block Bits `hay_bale` (a voxel-style cube), and
+  hay GLBs in other GitHub repositories without a licence file or under the RUN licence.
+  kenney.nl, poly.pizza and Sketchfab are blocked from the build sandbox.

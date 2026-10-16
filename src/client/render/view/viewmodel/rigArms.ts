@@ -6,9 +6,9 @@
 //
 // Calibration: at the weapon hold the rig must hold the gun exactly like the third-person
 // character does. The right wrist therefore comes from the rig's measured weapon socket (weapon
-// frame in the right-hand bone), the left wrist from the authored Rifle_Aim / Pistol_Aim_Neutral
-// clips (left hand on the handguard / wrapped around the pistol), shifted to each gun's support
-// point. A per-gun calibration maps the procedural hand frame to the rig wrist frame, so every
+// frame in the right-hand bone), the left wrist (and the finger curl) from the authored Rifle_Aim
+// clip (palm-up support hand), shifted under each gun's support point (cupping the grip for
+// pistols). A per-gun calibration maps the procedural hand frame to the rig wrist frame, so every
 // other pose (items, throws, reload paths) carries over unchanged.
 
 import * as THREE from 'three';
@@ -53,7 +53,6 @@ interface Side {
 interface Calib {
   right: THREE.Matrix4;
   left: THREE.Matrix4;
-  pistol: boolean;
 }
 
 // Scratch
@@ -78,16 +77,16 @@ export class RigArms {
   private readonly L: Side;
   private readonly fingers: THREE.Bone[] = [];
   private readonly fingerRifle = new Map<THREE.Bone, THREE.Quaternion>();
-  private readonly fingerPistol = new Map<THREE.Bone, THREE.Quaternion>();
   /** Right wrist in the weapon frame (inverse of the rig's weapon socket). */
   private readonly rightInGun = new THREE.Matrix4();
-  /** Left wrist in the weapon frame for a rifle hold / a two-handed pistol hold. */
+  /** Left wrist in the weapon frame for the rifle hold (palm-up under the handguard). */
   private readonly leftRifle = new THREE.Matrix4();
-  private readonly leftPistol = new THREE.Matrix4();
   /** Left palm point (weapon frame) of the rifle hold, used to shift onto each gun's support. */
   private readonly leftRiflePalm = new THREE.Vector3();
   private readonly calibs = new WeakMap<GunModel, Calib>();
-  private pistolFingers: boolean | null = null;
+  /** Exported (rest) local transform of every bone. */
+  private readonly rest = new Map<THREE.Bone, { p: THREE.Vector3; q: THREE.Quaternion; s: THREE.Vector3 }>();
+  private fingersSet = false;
 
   private constructor(asset: CharacterAsset, parent: THREE.Object3D) {
     this.variant = asset.variant.id;
@@ -126,7 +125,11 @@ export class RigArms {
     mesh.castShadow = false;
     mesh.receiveShadow = false;
 
-    mesh.skeleton.pose();
+    // Rest pose = the node transforms as exported (they carry the rig's facing / scale fix, which
+    // the inverse bind matrices do not: never use skeleton.pose() here).
+    root.traverse((o) => {
+      if ((o as THREE.Bone).isBone) this.rest.set(o as THREE.Bone, { p: o.position.clone(), q: o.quaternion.clone(), s: o.scale.clone() });
+    });
     root.updateMatrixWorld(true);
     // Put the right shoulder joint at SHOULDER_R (root-local == parent-local: no root rotation).
     const upperR = bone('UpperArmR');
@@ -160,8 +163,7 @@ export class RigArms {
     this.rightInGun.copy(m1).invert();
 
     // Hold poses from the rig's own clips: finger curls + the left wrist relative to the gun.
-    this.sampleHold(asset, mesh, 'aimRifle', this.fingerRifle, this.leftRifle, true);
-    this.sampleHold(asset, mesh, 'aimPistol', this.fingerPistol, this.leftPistol, false);
+    this.sampleHold(asset, this.fingerRifle, this.leftRifle);
     this.resetArms();
   }
 
@@ -187,11 +189,11 @@ export class RigArms {
    */
   pose(rightHand: THREE.Object3D, leftHand: THREE.Object3D, gun: GunModel | null, fallbackGun: GunModel): void {
     const calib = this.calibFor(gun ?? fallbackGun);
-    if (this.pistolFingers !== calib.pistol) {
-      this.pistolFingers = calib.pistol;
-      const pose = calib.pistol ? this.fingerPistol : this.fingerRifle;
+    if (!this.fingersSet) {
+      // One grip curl for everything (the rifle hold wraps a pistol grip and a handguard).
+      this.fingersSet = true;
       for (const f of this.fingers) {
-        const q = pose.get(f);
+        const q = this.fingerRifle.get(f);
         if (q) f.quaternion.copy(q);
       }
     }
@@ -275,18 +277,15 @@ export class RigArms {
 
   /** Sample a hold clip at t = 0: finger curls and the left wrist relative to the weapon frame. */
   private sampleHold(
-    asset: CharacterAsset, mesh: THREE.SkinnedMesh, key: 'aimRifle' | 'aimPistol',
-    fingers: Map<THREE.Bone, THREE.Quaternion>, leftInGun: THREE.Matrix4, rifle: boolean,
+    asset: CharacterAsset, fingers: Map<THREE.Bone, THREE.Quaternion>, leftInGun: THREE.Matrix4,
   ): void {
-    const clip = getCharacterClip(asset, key, 'full');
-    mesh.skeleton.pose();
-    if (clip) {
-      const mixer = new THREE.AnimationMixer(this.root);
-      const action = mixer.clipAction(clip);
-      action.play();
+    const clip = getCharacterClip(asset, 'aimRifle', 'full');
+    this.restoreRest();
+    // Read the pose while the action is active: stopping it restores the original bone state.
+    const mixer = clip ? new THREE.AnimationMixer(this.root) : null;
+    if (mixer && clip) {
+      mixer.clipAction(clip).play();
       mixer.setTime(0);
-      mixer.stopAllAction();
-      mixer.uncacheRoot(this.root);
     }
     this.root.updateMatrixWorld(true);
     for (const f of this.fingers) fingers.set(f, f.quaternion.clone());
@@ -294,14 +293,25 @@ export class RigArms {
     m1.copy(this.R.wrist.matrixWorld).multiply(m2.copy(this.rightInGun).invert());
     m1.invert();
     leftInGun.multiplyMatrices(m1, this.L.wrist.matrixWorld);
-    if (rifle) {
-      // Palm point: half way from the wrist to the middle knuckle.
-      this.L.wrist.getWorldPosition(v1);
-      if (this.L.middle1) this.L.middle1.getWorldPosition(v2);
-      else v2.copy(v1);
-      this.leftRiflePalm.copy(v1).add(v2).multiplyScalar(0.5).applyMatrix4(m1);
+    // Palm point: half way from the wrist to the middle knuckle.
+    this.L.wrist.getWorldPosition(v1);
+    if (this.L.middle1) this.L.middle1.getWorldPosition(v2);
+    else v2.copy(v1);
+    this.leftRiflePalm.copy(v1).add(v2).multiplyScalar(0.5).applyMatrix4(m1);
+    if (mixer) {
+      mixer.stopAllAction();
+      mixer.uncacheRoot(this.root);
     }
-    mesh.skeleton.pose();
+    this.restoreRest();
+    this.root.updateMatrixWorld(true);
+  }
+
+  private restoreRest(): void {
+    for (const [b, r] of this.rest) {
+      b.position.copy(r.p);
+      b.quaternion.copy(r.q);
+      b.scale.copy(r.s);
+    }
   }
 
   private calibFor(gun: GunModel): Calib {
@@ -313,18 +323,15 @@ export class RigArms {
     const rigRight = new THREE.Matrix4().makeTranslation(fist.x, fist.y, fist.z).multiply(this.rightInGun);
     const boxRight = new THREE.Matrix4().compose(gun.gripOffset, q1.setFromEuler(gun.gripRot), v2.set(1, 1, 1));
     const right = boxRight.invert().multiply(rigRight);
-    // Left: clip hold, shifted so the palm lands under the gun's support point.
-    let rigLeft: THREE.Matrix4;
-    if (pistol) {
-      rigLeft = this.leftPistol.clone();
-    } else {
-      v3.copy(gun.support).y -= 0.012;
-      v3.sub(this.leftRiflePalm);
-      rigLeft = new THREE.Matrix4().makeTranslation(v3.x, v3.y, v3.z).multiply(this.leftRifle);
-    }
+    // Left: the rifle clip's palm-up support hand, shifted so the palm lands under the support
+    // point (handguard underside), or cupping the bottom of the grip for pistols.
+    if (pistol) v3.set(-0.004, -0.075, 0.012);
+    else v3.set(gun.support.x - 0.012, gun.support.y - 0.012, gun.support.z);
+    v3.sub(this.leftRiflePalm);
+    const rigLeft = new THREE.Matrix4().makeTranslation(v3.x, v3.y, v3.z).multiply(this.leftRifle);
     const boxLeft = new THREE.Matrix4().compose(gun.support, q1.setFromEuler(gun.supportRot), v2.set(1, 1, 1));
     const left = boxLeft.invert().multiply(rigLeft);
-    c = { right, left, pistol };
+    c = { right, left };
     this.calibs.set(gun, c);
     return c;
   }

@@ -17,7 +17,7 @@ import {
 } from '../../shared/items';
 import type { RecoilKick, SpreadContext } from '../../shared/items';
 import { createMoveEvents, createMoveIntent, eyePosition, lineOfSight, stepCharacter, stepDrop } from '../../shared/physics';
-import type { MoveEvents, MoveIntent } from '../../shared/physics';
+import type { CharObstacle, MoveEvents, MoveIntent } from '../../shared/physics';
 import type { NetVehicle, SelfState } from '../../shared/protocol';
 import { LIFE_CODES, MODE_CODES } from '../../shared/protocol';
 import {
@@ -29,7 +29,7 @@ import type {
   ConsumableId, MatchConfig, MovementMode, PlaneState, PlayerInput, PlayerState, Vec3, VehicleState, VehicleType, WeaponDef, WeaponId,
   WeaponInstance, World,
 } from '../../shared/types';
-import { VEHICLES, stepVehicle } from '../../shared/vehicles';
+import { VEHICLES, footObstacles, stepVehicle } from '../../shared/vehicles';
 import type { VehicleControls, VehicleStepEvents } from '../../shared/vehicles';
 
 // ---------------------------------------------------------------------------
@@ -80,6 +80,12 @@ export interface PredictEnv {
   vehicle: VehicleState | null;
   /** Nearby vehicles for driver-side collisions (may include `vehicle`). */
   others: VehicleState[];
+  /**
+   * Vehicles a player on foot collides with, as the client sees them (interpolated states). The
+   * server makes every hull solid to bodies on foot; without this list prediction walks through
+   * vehicles and gets corrected. Falls back to `others`.
+   */
+  footVehicles?: readonly VehicleState[];
 }
 
 /** Things that happened during one predicted tick (for local feedback events). */
@@ -241,6 +247,7 @@ const ctl: VehicleControls = { throttle: 0, steer: 0, handbrake: false, boost: f
 const planeScratch: Vec3 = { x: 0, y: 0, z: 0 };
 const eyeA: Vec3 = { x: 0, y: 0, z: 0 };
 const eyeB: Vec3 = { x: 0, y: 0, z: 0 };
+const obstacles: CharObstacle[] = [];
 
 /**
  * Advance the predicted player by one input (one TICK_DT), mirroring the sim's per-player tick:
@@ -339,7 +346,9 @@ export function predictTick(
     default: {
       // ground / swim
       rt.sprinting = buildMoveIntent(p, input, pressed, intent);
-      stepCharacter(p, intent, dt, env.world, ev.move);
+      // Vehicle hulls are solid, exactly as in the sim's player tick.
+      footObstacles(env.footVehicles ?? env.others, p.pos, p.vel, dt, obstacles);
+      stepCharacter(p, intent, dt, env.world, ev.move, obstacles);
       if (ev.move.jumped) p.use = null;
       break;
     }

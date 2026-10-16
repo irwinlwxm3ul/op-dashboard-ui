@@ -23,8 +23,6 @@ export const HITBOX_HISTORY_MS = 1000;
 /** Input rate limiting: token bucket refills at TICK_RATE * this per second. */
 export const INPUT_RATE_SLACK = 1.25;
 export const INPUT_BURST = 8;
-/** Max pending inputs queued per player; older ones are dropped. */
-export const MAX_INPUT_QUEUE = 6;
 
 // ---- Map ----
 export const MAP_SIZE = 1024;

@@ -18,9 +18,10 @@ import {
 } from '../constants';
 import { CONSUMABLES, boostSpeedMul, tickBoost } from '../items';
 import { eyePosition, lineOfSight, stepCharacter, stepDrop } from '../physics';
-import type { MoveEvents } from '../physics';
+import type { CharObstacle, MoveEvents } from '../physics';
 import type { PlayerState } from '../types';
 import { BTN, STANCE_FROM_CODE } from '../types';
+import { footObstacles } from '../vehicles';
 import { completeUse, handleAction, handleDeadAction, openChute, reviveLineOfSight } from './actions';
 import { cancelRevive, damageInfo, damagePlayer, killPlayer } from './combat';
 import type { GameSim } from './GameSim';
@@ -35,6 +36,8 @@ import {
 import { activeDef, cancelUse, updateWeapons } from './weapons';
 
 const fallInfo = damageInfo(null, 'fall');
+/** Vehicle hulls near the stepping player (scratch). */
+const obstacles: CharObstacle[] = [];
 const eyeA = { x: 0, y: 0, z: 0 };
 const eyeB = { x: 0, y: 0, z: 0 };
 
@@ -265,7 +268,9 @@ function applyInput(sim: GameSim, rt: PlayerRt, dt: number, fresh: boolean): voi
       it.speedMul = (w ? w.moveSpeedMul : 1) * adsMul * useMul * boostSpeedMul(p.boost);
       it.downed = downed;
       it.dive = 0;
-      const ev = stepCharacter(p, it, dt, sim.world, rt.moveEv);
+      // Vehicle hulls are solid to bodies on foot (client prediction passes the same obstacles).
+      footObstacles(sim.vehicleList, p.pos, p.vel, dt, obstacles);
+      const ev = stepCharacter(p, it, dt, sim.world, rt.moveEv, obstacles);
       if (ev.jumped) {
         cancelUse(p);
         sim.emit({ type: 'jump', player: p.id }, undefined, p.pos, EVENT_RANGE.movement);

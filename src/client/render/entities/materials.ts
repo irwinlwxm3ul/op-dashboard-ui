@@ -20,6 +20,11 @@ export interface EntityMaterialOptions {
   instanced?: boolean;
   /** Dither fade support (uniform `uFade` or attribute `iFade`). */
   dither?: boolean;
+  /**
+   * BatchedMesh: the per-instance dither code is the alpha of the instance colour
+   * (`setColorAt(id, Vector4)`); needs `dither`.
+   */
+  batchFade?: boolean;
   /** Fresnel rim light. */
   rim?: boolean;
   /** Fog multiplier; 0 disables fog entirely (far impostors). */
@@ -112,7 +117,9 @@ float entIgn(vec2 p) {
 const FRAG_DITHER = /* glsl */ `
 #ifdef ENT_DITHER
 {
-#ifdef ENT_INSTANCED
+#if defined(ENT_BATCH_FADE) && defined(USE_COLOR_ALPHA)
+  float entFade = vColor.a;
+#elif defined(ENT_INSTANCED)
   float entFade = vFade;
 #else
   float entFade = uFade;
@@ -127,6 +134,9 @@ const FRAG_DITHER = /* glsl */ `
 `;
 
 const FRAG_MASK = /* glsl */ `
+#if defined(ENT_BATCH_FADE) && defined(USE_COLOR_ALPHA)
+  diffuseColor.a = opacity; // the instance colour's alpha is the dither code, not opacity
+#endif
 #ifdef ENT_MASK
 {
 #ifdef ENT_INSTANCED
@@ -209,6 +219,7 @@ export function applyEntityShader(mat: THREE.Material, opts: EntityMaterialOptio
   if (opts.mask) defines.ENT_MASK = '';
   if (opts.instanced) defines.ENT_INSTANCED = '';
   if (opts.dither) defines.ENT_DITHER = '';
+  if (opts.batchFade) defines.ENT_BATCH_FADE = '';
   if (opts.rim) defines.ENT_RIM = '';
   if (opts.outlineMask !== undefined) defines.ENT_OUTLINE_MASK = opts.outlineMask.toFixed(3);
   mat.defines = defines;

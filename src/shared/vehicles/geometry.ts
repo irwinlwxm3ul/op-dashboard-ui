@@ -1,8 +1,10 @@
 // Orientation helpers and spatial queries against a vehicle's oriented box: seat placement, exit
-// spots, ray casts (bullets) and point tests (run-over).
+// spots, ray casts (bullets), point tests (run-over) and the hull as a character-controller
+// obstacle (players on foot collide with vehicles).
 
 import { PLAYER_RADIUS } from '../constants';
-import type { RockDef, TreeDef, Vec3, VehicleState, World, WorldBox } from '../types';
+import type { CharObstacle } from '../physics';
+import type { EntityId, RockDef, TreeDef, Vec3, VehicleState, World, WorldBox } from '../types';
 import { VEHICLES, rideHeight } from './defs';
 
 // ---------------------------------------------------------------------------
@@ -135,6 +137,109 @@ export function vehicleHitsPoint(v: VehicleState, p: Vec3, radius: number): bool
   if (lz < -he.z - radius || lz > he.z + radius) return false;
   const ly = dx * u.x + dy * u.y + dz * u.z;
   return ly >= -he.y - def.groundClearance - radius && ly <= he.y + radius;
+}
+
+// ---------------------------------------------------------------------------
+// Character-controller obstacle (players on foot vs vehicle hulls)
+// ---------------------------------------------------------------------------
+
+/** Obstacle plus the pose it was built from (rebuilt only when the vehicle moved). */
+interface CachedObstacle extends CharObstacle {
+  kType: string;
+  kx: number;
+  ky: number;
+  kz: number;
+  kYaw: number;
+  kPitch: number;
+  kRoll: number;
+}
+
+const obstacleCache = new WeakMap<VehicleState, CachedObstacle>();
+
+/**
+ * The vehicle's hull as a character-controller obstacle: the oriented box projected onto its yaw
+ * frame (footprint), extended down through the ground clearance like `vehicleHitsPoint` (nobody
+ * crawls under a car), with the tilted roof plane as its top. Cached per vehicle object and
+ * rebuilt when its pose changed, so parked vehicles cost nothing. Deterministic: the server and
+ * client prediction get identical obstacles from identical vehicle states.
+ */
+export function vehicleObstacle(v: VehicleState): CharObstacle {
+  let o = obstacleCache.get(v);
+  if (o && o.kType === v.type && o.kx === v.pos.x && o.ky === v.pos.y && o.kz === v.pos.z
+    && o.kYaw === v.yaw && o.kPitch === v.pitch && o.kRoll === v.roll) return o;
+  if (!o) {
+    o = {
+      x: 0, z: 0, c: 1, s: 0, hx: 0, hz: 0, br: 0, y0: 0, y1: 0, top: 0, gx: 0, gz: 0,
+      kType: '', kx: 0, ky: 0, kz: 0, kYaw: 0, kPitch: 0, kRoll: 0,
+    };
+    obstacleCache.set(v, o);
+  }
+  o.kType = v.type; o.kx = v.pos.x; o.ky = v.pos.y; o.kz = v.pos.z;
+  o.kYaw = v.yaw; o.kPitch = v.pitch; o.kRoll = v.roll;
+  const def = VEHICLES[v.type];
+  const he = def.halfExtents;
+  basisFromAngles(v.yaw, v.pitch, v.roll, basis);
+  const { right: r, up: u, back: k } = basis;
+  const c = Math.cos(v.yaw), s = Math.sin(v.yaw);
+  // Box half extents along the yaw frame axes (+X = (c, 0, -s), +Z = (s, 0, c)) and vertically.
+  const hx = Math.abs(r.x * c - r.z * s) * he.x + Math.abs(u.x * c - u.z * s) * he.y + Math.abs(k.x * c - k.z * s) * he.z;
+  const hz = Math.abs(r.x * s + r.z * c) * he.x + Math.abs(u.x * s + u.z * c) * he.y + Math.abs(k.x * s + k.z * c) * he.z;
+  const hy = Math.abs(r.y) * he.x + Math.abs(u.y) * he.y + Math.abs(k.y) * he.z;
+  o.x = v.pos.x;
+  o.z = v.pos.z;
+  o.c = c;
+  o.s = s;
+  o.hx = hx;
+  o.hz = hz;
+  o.br = Math.sqrt(hx * hx + hz * hz);
+  o.y0 = v.pos.y - hy - def.groundClearance;
+  o.y1 = v.pos.y + hy;
+  if (u.y > 0.5) {
+    // Roof plane through the top face centre with normal `up`, as a height field over XZ.
+    const tx = v.pos.x + u.x * he.y, ty = v.pos.y + u.y * he.y, tz = v.pos.z + u.z * he.y;
+    o.gx = -u.x / u.y;
+    o.gz = -u.z / u.y;
+    o.top = ty + o.gx * (v.pos.x - tx) + o.gz * (v.pos.z - tz);
+  } else {
+    // On its side or upside down: the whole span is solid.
+    o.gx = 0;
+    o.gz = 0;
+    o.top = o.y1;
+  }
+  return o;
+}
+
+/**
+ * Collect the hull obstacles of the vehicles in `list` that a body at (x, z) can touch within
+ * `reach` metres (its radius plus its travel this step), skipping vehicle `skip`. Writes `out`.
+ */
+export function vehicleObstacles(
+  list: readonly VehicleState[], x: number, z: number, reach: number, out: CharObstacle[], skip: EntityId | null = null,
+): CharObstacle[] {
+  out.length = 0;
+  for (let i = 0; i < list.length; i++) {
+    const v = list[i];
+    if (v.id === skip) continue;
+    const he = VEHICLES[v.type].halfExtents;
+    // Bounding radius of the box in any orientation.
+    const R = Math.sqrt(he.x * he.x + he.y * he.y + he.z * he.z) + reach;
+    const dx = v.pos.x - x, dz = v.pos.z - z;
+    if (dx * dx + dz * dz >= R * R) continue;
+    out.push(vehicleObstacle(v));
+  }
+  return out;
+}
+
+/**
+ * The hull obstacles a body on foot at `pos` moving at `vel` can touch during a step of `dt`
+ * seconds. The server's player tick and client prediction both use this, so they hand the
+ * character controller the same obstacles for the same vehicle states.
+ */
+export function footObstacles(
+  list: readonly VehicleState[], pos: Vec3, vel: Vec3, dt: number, out: CharObstacle[],
+): CharObstacle[] {
+  const hs = Math.sqrt(vel.x * vel.x + vel.z * vel.z);
+  return vehicleObstacles(list, pos.x, pos.z, PLAYER_RADIUS + (Number.isFinite(hs) ? hs : 0) * dt + 1.5, out);
 }
 
 // ---------------------------------------------------------------------------

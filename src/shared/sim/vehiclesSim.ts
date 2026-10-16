@@ -169,6 +169,7 @@ export function ejectFromVehicle(sim: GameSim, p: PlayerState, bail: boolean): v
   p.stance = p.life === 'downed' ? 'prone' : 'stand';
   if (bail && speed > BAIL_SPEED && p.life !== 'dead') {
     bailInfo.attacker = null;
+    bailInfo.from = v ? v.pos : null;
     damagePlayer(sim, p, (speed - BAIL_SPEED) * BAIL_DAMAGE_PER_MS, bailInfo);
   }
 }
@@ -199,6 +200,7 @@ function handleCrash(sim: GameSim, vrt: VehicleRt, impact: number): void {
   const cd = crashDamage(impact, v.type);
   if (cd.vehicle <= 0 && cd.occupants <= 0) return;
   if (cd.vehicle > 0) damageVehicle(sim, v, cd.vehicle, null);
+  const pos = vrt.ev.crashPos ?? v.pos;
   if (cd.occupants > 0) {
     for (let s = 0; s < v.seats.length; s++) {
       const id = v.seats[s];
@@ -206,10 +208,10 @@ function handleCrash(sim: GameSim, vrt: VehicleRt, impact: number): void {
       const occ = sim.players.get(id);
       if (!occ) continue;
       crashInfo.attacker = null;
+      crashInfo.from = pos; // the occupant's damage feedback points at the impact
       damagePlayer(sim, occ, cd.occupants, crashInfo);
     }
   }
-  const pos = vrt.ev.crashPos ?? v.pos;
   sim.emit({
     type: 'vehicleCrash', vehicle: v.id, impact: Math.round(impact * 10) / 10,
     pos: { x: Math.round(pos.x * 100) / 100, y: Math.round(pos.y * 100) / 100, z: Math.round(pos.z * 100) / 100 },

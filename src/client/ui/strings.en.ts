@@ -44,6 +44,7 @@ export const uiStrings = {
   'ui.controls.reserved': '{key} is reserved by the browser. Choose another key.',
   'ui.controls.swapped': '“{action}” moved to {key} to avoid a conflict.',
   'ui.controls.resetDone': 'Key bindings were reset to the defaults.',
+  'ui.controls.switchSeatDriver': 'Switch seat (driver)',
 
   // Key caps
   'ui.key.delete': 'Delete',
@@ -60,6 +61,7 @@ export const uiStrings = {
   'ui.feed.died': '{victim} died',
   'ui.hud.useCancelHint': 'Sprint, jump or fire to cancel',
   'ui.hud.fragArmed': '{throw} throw · {cancel} cancel',
+  'ui.hud.seatSwitchHint': '{keys} switch seat',
   'ui.key.mouseLeftShort': 'LMB',
 
   // Credits

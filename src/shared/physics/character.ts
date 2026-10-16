@@ -7,7 +7,8 @@
 //
 // Per tick: stance -> jump -> horizontal velocity (accel / friction / air control) -> sub-stepped
 // integration (<= SUBSTEP_MAX_MOVE per sub-step) with collision against boxes, trunks and rocks,
-// step-up / step-down, ceilings, slopes and water.
+// step-up / step-down, ceilings, slopes and water. Optional dynamic obstacles (vehicle hulls, see
+// CharObstacle) are solid to the body too and their roofs can be stood on.
 
 import {
   AIR_ACCEL, COYOTE_TIME, GROUND_ACCEL, GROUND_FRICTION, JUMP_BUFFER_TIME, JUMP_VELOCITY, MOVE_SPEED,
@@ -16,10 +17,10 @@ import {
 import type { CharacterBody, Stance, Vec3, World } from '../types';
 import {
   SUPPORT_TERRAIN, canStandGathered, ceilingAbove, clampToBounds, gatherNear, resolveCircle, resolved,
-  spanBlocked, support, supportHeight, supportWalkable,
+  setObstacles, spanBlocked, support, supportHeight, supportWalkable,
 } from './colliders';
 import { stepDrop } from './drop';
-import type { MoveEvents, MoveIntent } from './types';
+import type { CharObstacle, MoveEvents, MoveIntent } from './types';
 import { createMoveEvents, resetMoveEvents } from './types';
 import {
   AIR_STEP, CHAR_GRAVITY, CONTACT_SKIN, CROUCH_WALK_MUL, MAX_SPEED_MUL, MAX_SUBSTEPS, SLIDE_FRICTION,
@@ -414,10 +415,13 @@ function stepSwim(body: CharacterBody, intent: MoveIntent, dt: number, world: Wo
  * Advance a character body in mode 'ground' or 'swim' by dt seconds (one tick), switching between
  * the two by water depth. Bodies in 'freefall' / 'parachute' are forwarded to stepDrop (chute
  * state taken from the mode); 'plane' and 'vehicle' bodies are not moved. Mutates only `body`
- * and `out` (returned; a new events object is allocated when omitted).
+ * and `out` (returned; a new events object is allocated when omitted). `obstacles` are moving
+ * solids near the body (vehicle hulls; the caller passes the same list on the server and in
+ * client prediction): the body is pushed out of them and can stand on their tops.
  */
 export function stepCharacter(
   body: CharacterBody, intent: MoveIntent, dt: number, world: World, out: MoveEvents = createMoveEvents(),
+  obstacles?: readonly CharObstacle[] | null,
 ): MoveEvents {
   if (body.mode === 'freefall' || body.mode === 'parachute') {
     return stepDrop(body, intent, dt, world, body.mode === 'parachute', out);
@@ -443,6 +447,7 @@ export function stepCharacter(
   const hs = Math.sqrt(vel.x * vel.x + vel.z * vel.z);
   const maxSpeed = MOVE_SPEED.sprint * MAX_SPEED_MUL;
   gatherNear(world, pos.x, pos.z, R + (Math.max(hs, maxSpeed) + GROUND_ACCEL * dt) * dt + 0.5);
+  setObstacles(obstacles);
 
   if (body.mode === 'ground' && shouldSwim(world, pos.x, pos.z, pos.y)) {
     enterSwim(body, out, !body.onGround);
@@ -450,5 +455,6 @@ export function stepCharacter(
 
   if (body.mode === 'swim') stepSwim(body, intent, dt, world, out);
   else stepGround(body, intent, dt, world, out);
+  setObstacles(null);
   return out;
 }

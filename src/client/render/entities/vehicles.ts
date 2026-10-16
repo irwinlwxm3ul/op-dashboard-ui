@@ -14,7 +14,8 @@ import type { VehicleModel } from '../../assets';
 import type { EntityId, VehicleType } from '../../../shared/types';
 import type { VehicleView } from '../../game/types';
 import { GeoBuilder, type PartStyle, xform } from './geometry';
-import { applyEntityShader, casterDepthMaterial, createEntityMaterial, createEntityUniforms } from './materials';
+import { LOD_HIDDEN_IDX, type LodFade, type LodLevel, createLodFade, effectiveLodDistance, fadeCode, stepLodFade } from './lod';
+import { type EntityUniforms, applyEntityShader, casterDepthMaterial, createEntityMaterial, createEntityUniforms } from './materials';
 import { WRECK_TINT, vehiclePaintHex } from './palette';
 import { ParticleSystem } from './particles';
 import type { SeatInfo } from './animator';
@@ -218,6 +219,12 @@ interface VehicleSlot {
   useGlb: boolean;
   /** Inside the render distance (with the LOD hysteresis band, like the players). */
   shown: boolean;
+  /** Dithered crossfade between the real model (level 0), the batched procedural one (1), hidden (3). */
+  fade: LodFade;
+  /** Share of the drawn pixels that belong to the real model (0..1): blends rider lift / contacts. */
+  glbW: number;
+  /** Dither code last written into the batched instances' colour alpha (NaN = never). */
+  batchCode: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -237,8 +244,10 @@ interface GlbWheel {
 interface GlbVehicle {
   root: THREE.Object3D;
   meshes: THREE.Mesh[];
-  /** Original (template) material of each mesh, to look up the normal / wreck variants. */
-  baseMats: THREE.Material[];
+  /** Per-clone normal / charred materials of each mesh (own uniforms: per-vehicle dither fade). */
+  normalMats: THREE.Material[];
+  wreckMats: THREE.Material[];
+  uniforms: EntityUniforms;
   wheels: GlbWheel[];
   fork: THREE.Object3D | null;
   forkRake: number;
@@ -252,6 +261,8 @@ interface GlbVehicleType {
   normal: Map<THREE.Material, THREE.Material>;
   wreck: Map<THREE.Material, THREE.Material>;
   free: GlbVehicle[];
+  /** Every clone made (for disposal). */
+  all: GlbVehicle[];
   /** Fork node rest position (model space) and rake, for the handlebar grips (bike). */
   forkPos: THREE.Vector3 | null;
   forkRake: number;
@@ -274,12 +285,20 @@ const _white = new THREE.Color(1, 1, 1);
 const _wreck = new THREE.Color().setHex(WRECK_TINT);
 const _v = new THREE.Vector3();
 const _ex = new THREE.Euler(0, 0, 0, 'XYZ');
+const _c4 = new THREE.Vector4();
+const _sph = new THREE.Sphere(new THREE.Vector3(), 3);
+/** Reference field of view for zoom-adjusted distances (matches the player LODs). */
+const REF_FOV = 65;
+/** Real <-> procedural crossfade duration (s). */
+const VEHICLE_FADE_TIME = 0.45;
+/** Upper bound on simultaneous real-model clones (each costs a few draw calls). */
+const MAX_GLB_VEHICLES = 16;
 /** Hand travel round the real UAZ's (static) steering wheel per unit steer (rad). */
 const REAL_WHEEL_TURN = 1.2;
 
 /** Instance layout per vehicle: [paint, chassis, wheels..., (fork)] */
 export class VehicleRenderer {
-  private readonly material = createEntityMaterial({ rim: true, fogScale: 0.35 });
+  private readonly material = createEntityMaterial({ rim: true, fogScale: 0.35, dither: true, batchFade: true });
   private readonly batch: THREE.BatchedMesh;
   private readonly geo: Record<VehicleType, { paint: number; chassis: number; wheel: number; fork: number }>;
   private readonly slots = new Map<EntityId, VehicleSlot>();
@@ -351,7 +370,7 @@ export class VehicleRenderer {
       if (g.fork >= 0) instances.push(this.batch.addInstance(g.fork));
       s = {
         id: v.id, type: v.type, instances, wheelAngle: 0, seen: 0, smokeAcc: 0, fireAcc: 0, destroyedFor: 0,
-        glb: null, useGlb: false, shown: false,
+        glb: null, useGlb: false, shown: false, fade: createLodFade(LOD_HIDDEN_IDX), glbW: 0, batchCode: Number.NaN,
       };
       this.slots.set(v.id, s);
       _c.setHex(vehiclePaintHex(v.id));
@@ -411,7 +430,7 @@ export class VehicleRenderer {
         forkPos = new THREE.Vector3().setFromMatrixPosition(_m);
         forkRake = forkNode.rotation.x;
       }
-      this.glbTypes[type] = { model: entry.model, template: entry.template, normal, wreck, free: [], forkPos, forkRake };
+      this.glbTypes[type] = { model: entry.model, template: entry.template, normal, wreck, free: [], all: [], forkPos, forkRake };
     }
   }
 
@@ -421,19 +440,29 @@ export class VehicleRenderer {
     const pooled = t.free.pop();
     if (pooled) {
       pooled.root.visible = true;
+      this.glbInUse++;
       return pooled;
     }
     const root = t.template.clone(true);
     root.matrixAutoUpdate = false;
     const meshes: THREE.Mesh[] = [];
-    const baseMats: THREE.Material[] = [];
+    const normalMats: THREE.Material[] = [];
+    const wreckMats: THREE.Material[] = [];
+    const uniforms = createEntityUniforms(0.35);
+    // Per-clone material copies sharing one uniform set, so each vehicle dithers on its own.
+    const own = (src: THREE.Material): THREE.Material => {
+      const m = src.clone();
+      applyEntityShader(m, src.transparent ? { dither: true } : { rim: true, dither: true }, uniforms);
+      return m;
+    };
     root.traverse((o) => {
       const mesh = o as THREE.Mesh;
       if (!mesh.isMesh) return;
       const m = (Array.isArray(mesh.material) ? mesh.material[0] : mesh.material) as THREE.Material;
       meshes.push(mesh);
-      baseMats.push(m);
-      mesh.material = t.normal.get(m) ?? m;
+      normalMats.push(own(t.normal.get(m) ?? m));
+      wreckMats.push(own(t.wreck.get(m) ?? m));
+      mesh.material = normalMats[normalMats.length - 1];
       mesh.castShadow = !m.transparent;
       mesh.receiveShadow = true;
     });
@@ -453,7 +482,9 @@ export class VehicleRenderer {
         fork.rotation.order = 'XYZ';
       }
     }
-    const g: GlbVehicle = { root, meshes, baseMats, wheels, fork, forkRake, wrecked: false };
+    const g: GlbVehicle = { root, meshes, normalMats, wreckMats, uniforms, wheels, fork, forkRake, wrecked: false };
+    t.all.push(g);
+    this.glbInUse++;
     this.parentObj.add(root);
     return g;
   }
@@ -464,6 +495,7 @@ export class VehicleRenderer {
     g.root.visible = false;
     this.glbTypes[s.type]?.free.push(g);
     s.glb = null;
+    this.glbInUse--;
   }
 
   /** Whether a vehicle is currently drawn (inside the render distance); riders follow it. */
@@ -477,13 +509,14 @@ export class VehicleRenderer {
    */
   riderLift(vehicleId: EntityId, seat: number): number {
     const s = this.slots.get(vehicleId);
-    if (!s || !s.glb) return 0;
+    if (!s || !s.glb || s.glbW <= 0) return 0;
     const model = this.glbTypes[s.type]?.model;
     const def = VEHICLES[s.type];
     if (!model || seat < 0 || seat >= def.seatOffsets.length) return 0;
     const surface = model.seatSurfaceY[seat];
     if (surface === null || surface === undefined) return 0;
-    return Math.max(0, surface - (def.seatOffsets[seat].y + SEAT_HIP_HEIGHT));
+    // Blended with the crossfade so riders move smoothly between the two models' seats.
+    return Math.max(0, surface - (def.seatOffsets[seat].y + SEAT_HIP_HEIGHT)) * s.glbW;
   }
 
   /**
@@ -494,13 +527,27 @@ export class VehicleRenderer {
    * riding alone) and bike riders' feet on the footpegs. Writes info.contacts / hands / feet.
    */
   riderContacts(v: VehicleView, info: SeatInfo, lift: number): void {
-    const c = info.contacts;
+    const s = this.slots.get(v.id);
+    const t = this.glbTypes[v.type];
+    const w = s && s.glb && t ? s.glbW : 0;
+    // During the real <-> procedural crossfade the contacts blend like the drawn models do.
+    this.contactsFor(v, info, lift, w >= 1 ? t : undefined, info.contacts);
+    if (w > 0 && w < 1 && t) {
+      const c = info.contacts, r = this.contactScratch;
+      this.contactsFor(v, info, lift, t, r);
+      for (let i = 0; i < 12; i++) c[i] += (r[i] - c[i]) * w;
+    }
+  }
+
+  private readonly contactScratch = new Float32Array(12);
+
+  /** Contacts for one model (real when `real` is given, else procedural) into `c`. */
+  private contactsFor(v: VehicleView, info: SeatInfo, lift: number, real: GlbVehicleType | undefined, c: Float32Array): void {
     info.hands = false;
     info.feet = false;
     const def = VEHICLES[v.type];
     const seat = info.seat;
     if (seat < 0 || seat >= def.seatOffsets.length) return;
-    const real = this.slots.get(v.id)?.glb ? this.glbTypes[v.type] : undefined;
     if (v.type === 'bike') {
       if (seat === 0) {
         // Grips rotate with the fork: R = Rx(rake) * Ry(steer) about the fork pivot.
@@ -576,11 +623,7 @@ export class VehicleRenderer {
     if (g.fork) g.fork.rotation.set(g.forkRake, steerAngle, 0, 'XYZ');
     if (g.wrecked !== v.destroyed) {
       g.wrecked = v.destroyed;
-      const t = this.glbTypes[s.type]!;
-      for (let i = 0; i < g.meshes.length; i++) {
-        const base = g.baseMats[i];
-        g.meshes[i].material = (v.destroyed ? t.wreck.get(base) : t.normal.get(base)) ?? base;
-      }
+      for (let i = 0; i < g.meshes.length; i++) g.meshes[i].material = v.destroyed ? g.wreckMats[i] : g.normalMats[i];
     }
   }
 
@@ -588,10 +631,15 @@ export class VehicleRenderer {
    * Update all vehicles. `camPos` for distance culling; `scale` = viewport px focal length for
    * particle sizing; `maxDist` = render distance.
    */
-  update(vehicles: ReadonlyMap<EntityId, VehicleView>, camPos: THREE.Vector3, dt: number, scale: number, maxDist: number): void {
+  update(
+    vehicles: ReadonlyMap<EntityId, VehicleView>, camPos: THREE.Vector3, dt: number, scale: number, maxDist: number,
+    fovDeg = REF_FOV, frustum: THREE.Frustum | null = null,
+  ): void {
     this.frameNo++;
     this.cam.copy(camPos);
     this.dt = dt;
+    this.fov = fovDeg;
+    this.frustum = frustum;
     const showD = Math.max(0, maxDist - LOD_HYSTERESIS), hideD = maxDist + LOD_HYSTERESIS;
     this.showD2 = showD * showD;
     this.hideD2 = hideD * hideD;
@@ -612,6 +660,10 @@ export class VehicleRenderer {
   private dt = 0;
   private showD2 = 0;
   private hideD2 = 0;
+  private fov = REF_FOV;
+  private frustum: THREE.Frustum | null = null;
+  /** Real-model clones currently in use (capped). */
+  private glbInUse = 0;
 
   private readonly collectStale = (s: VehicleSlot): void => {
     if (s.seen !== this.frameNo) this.removeList.push(s.id);
@@ -626,18 +678,41 @@ export class VehicleRenderer {
     const d2 = dx * dx + dy * dy + dz * dz;
     // Render-distance cut with hysteresis (no flicker at the edge; riders follow this flag).
     s.shown = s.shown ? d2 < this.hideD2 : d2 < this.showD2;
-    const visible = s.shown;
-    // Real model near the camera (hysteresis band), procedural batched model beyond.
-    if (this.glbTypes[v.type]) {
-      s.useGlb = visible && (s.useGlb ? d2 < GLB_FAR * GLB_FAR : d2 < GLB_NEAR * GLB_NEAR);
+    // Real model near the camera, the batched procedural one beyond: picked on the zoom-adjusted
+    // distance (on screen; off-screen vehicles use the true one) with hysteresis, and crossfaded
+    // with the entity dither like the player LODs.
+    let target: LodLevel = LOD_HIDDEN_IDX;
+    if (s.shown) {
+      let d = Math.sqrt(d2);
+      if (this.frustum) {
+        _sph.center.set(v.pos.x, v.pos.y, v.pos.z);
+        if (this.frustum.intersectsSphere(_sph)) d = effectiveLodDistance(d, this.fov, REF_FOV);
+      }
+      if (this.glbTypes[v.type]) s.useGlb = s.useGlb ? d < GLB_FAR : d < GLB_NEAR && this.glbInUse < MAX_GLB_VEHICLES;
+      else s.useGlb = false;
+      target = s.useGlb ? 0 : 1;
     } else {
       s.useGlb = false;
     }
-    if (s.useGlb && !s.glb) s.glb = this.acquireGlb(v.type);
-    else if (!s.useGlb && s.glb) this.releaseGlb(s);
-    const batchVisible = visible && !s.glb;
+    stepLodFade(s.fade, target, dt, VEHICLE_FADE_TIME);
+    const codeGlb = fadeCode(s.fade, 0, 1), codeBatch = fadeCode(s.fade, 1, 1);
+    if (codeGlb !== 0 && !s.glb) s.glb = this.acquireGlb(v.type);
+    else if (codeGlb === 0 && s.glb) this.releaseGlb(s);
+    const glbVis = s.glb ? Math.abs(codeGlb) : 0, batchVis = Math.abs(codeBatch);
+    s.glbW = glbVis + batchVis > 0 ? glbVis / (glbVis + batchVis) : 0;
+    const batchVisible = codeBatch !== 0;
     for (let i = 0; i < s.instances.length; i++) this.batch.setVisibleAt(s.instances[i], batchVisible);
-    if (!visible) return;
+    if (batchVisible && codeBatch !== s.batchCode) {
+      // Per-instance dither code in the instance colour's alpha (rgb = paint / wreck tint).
+      s.batchCode = codeBatch;
+      for (let i = 0; i < s.instances.length; i++) {
+        this.batch.getColorAt(s.instances[i], _c4);
+        _c4.w = codeBatch;
+        this.batch.setColorAt(s.instances[i], _c4);
+      }
+    }
+    if (s.glb) s.glb.uniforms.uFade.value = codeGlb;
+    if (codeGlb === 0 && codeBatch === 0) return;
     // Body transform (Ry * Rx * Rz).
     _e.set(v.pitch, v.yaw, v.roll, 'YXZ');
     _q.setFromEuler(_e);
@@ -740,8 +815,13 @@ export class VehicleRenderer {
     for (const type of TYPES) {
       const t = this.glbTypes[type];
       if (!t) continue;
-      for (const g of t.free) g.root.removeFromParent();
+      for (const g of t.all) {
+        g.root.removeFromParent();
+        for (const m of g.normalMats) m.dispose();
+        for (const m of g.wreckMats) m.dispose();
+      }
       t.free.length = 0;
+      t.all.length = 0;
     }
     for (const m of this.glbMaterials) m.dispose();
   }

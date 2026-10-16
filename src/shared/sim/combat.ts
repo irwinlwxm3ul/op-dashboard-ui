@@ -20,9 +20,9 @@ import type { PlayerRt } from './players';
 import { damageVehicle, ejectFromVehicle } from './vehiclesSim';
 import { targetBoxHit, testTargetDummies } from './training';
 import {
-  EVENT_RANGE, FLAG_COOLDOWN, FLAG_HS_MIN_HITS, FLAG_HS_RATIO, FLAG_SNAP_COUNT, FLAG_SNAP_MIN_DIST,
-  FLAG_SNAP_PERIOD, FLAG_SNAP_RAD, NOISE_IMPACT_RADIUS, RAY_BROADPHASE, REWIND_SLACK_MS, SPILL_RADIUS,
-  TRAINING_RESPAWN_DELAY, VEHICLE_BULLET_MUL,
+  ENV_HIT_INTERVAL, ENV_HIT_STALE, EVENT_RANGE, FLAG_COOLDOWN, FLAG_HS_MIN_HITS, FLAG_HS_RATIO, FLAG_SNAP_COUNT,
+  FLAG_SNAP_MIN_DIST, FLAG_SNAP_PERIOD, FLAG_SNAP_RAD, NOISE_IMPACT_RADIUS, RAY_BROADPHASE, REWIND_SLACK_MS,
+  SPILL_RADIUS, TRAINING_RESPAWN_DELAY, VEHICLE_BULLET_MUL,
 } from './tuning';
 
 export type HitResult = 'none' | 'damage' | 'knock' | 'kill';
@@ -33,7 +33,11 @@ export interface DamageInfo {
   source: DamageSource;
   part: HitPart;
   distance: number;
-  /** Hit point and attacker position (hit events); null = no hit event. */
+  /**
+   * Hit point and attacker position (hit events). For damage without an enemy (environment, self)
+   * `from` is where it came from (blast, vehicle; null = no direction) and `pos` defaults to the
+   * victim's body centre.
+   */
   pos: Vec3 | null;
   from: Vec3 | null;
   armorHit: boolean;
@@ -66,10 +70,45 @@ function rv(v: Vec3): Vec3 {
   return { x: round2(v.x), y: round2(v.y), z: round2(v.z) };
 }
 
+const envCenter: Vec3 = { x: 0, y: 0, z: 0 };
+
+/**
+ * Feedback for damage nobody else dealt (zone, falls, crashes, bail-outs, ownerless or own blasts
+ * without a hit event): a 'hit' sent only to the victim with attacker === victim, which the client
+ * routes to the hurt flash / sound and keeps out of hit markers, damage numbers and the kill feed.
+ * At most one per ENV_HIT_INTERVAL per source (zone damage ticks every tick), carrying the damage
+ * taken since the previous one; knocks and kills are reported at once.
+ */
+function emitEnvHit(sim: GameSim, v: PlayerState, dealt: number, result: HitResult, info: DamageInfo): void {
+  const rt = sim.rtById.get(v.id);
+  if (!rt || result === 'none') return;
+  let slot = null;
+  for (const e of rt.envHits) if (e.source === info.source) { slot = e; break; }
+  if (!slot) {
+    slot = { source: info.source, sentAt: -Infinity, lastAt: -Infinity, pending: 0 };
+    rt.envHits.push(slot);
+  }
+  const t = sim.time;
+  // Damage of an earlier exposure that was never reported is old news (the health bar showed it).
+  if (t - slot.lastAt > ENV_HIT_STALE) slot.pending = 0;
+  slot.lastAt = t;
+  slot.pending += dealt;
+  if (result === 'damage' && t - slot.sentAt < ENV_HIT_INTERVAL - 1e-6) return;
+  slot.sentAt = t;
+  const damage = Math.round(slot.pending * 10) / 10;
+  slot.pending = 0;
+  const pos = info.pos ?? bodyCenter(v, envCenter);
+  sim.emit({
+    type: 'hit', attacker: v.id, victim: v.id, damage, part: info.part, armor: false, armorBroke: false,
+    pos: rv(pos), from: rv(info.from ?? pos), source: info.source, result, distance: 0,
+  }, [v.id]);
+}
+
 /**
  * Apply `amount` damage (already armor-reduced by the caller where applicable) to a player.
  * Alive players lose health and are knocked or killed at 0; downed players lose downedHp.
- * Friendly fire is off (self damage is allowed).
+ * Friendly fire is off (self damage is allowed). Damage without an enemy that emits no hit event
+ * of its own reaches the victim as a private self-hit (see emitEnvHit).
  */
 export function damagePlayer(sim: GameSim, v: PlayerState, amount: number, info: DamageInfo): HitResult {
   if (v.life === 'dead' || !(amount > 0) || sim.phase === 'ended' || v.mode === 'plane') return 'none';
@@ -98,6 +137,8 @@ export function damagePlayer(sim: GameSim, v: PlayerState, amount: number, info:
       armor: info.armorHit, armorBroke: info.armorBroke, pos: rv(info.pos), from: rv(info.from ?? info.pos),
       source: info.source, result, distance: Math.round(info.distance),
     }, [a.id, v.id]);
+  } else if (!enemy) {
+    emitEnvHit(sim, v, dealt, result, info);
   }
   if (result === 'knock') {
     knockPlayer(sim, v, enemy ? a : null, info.source, info.part === 'head', info.distance);

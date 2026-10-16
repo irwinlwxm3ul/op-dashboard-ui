@@ -18,9 +18,9 @@ import { FISTS_DRAW_TIME, VEHICLE_SLEEP_SPEED } from '../../shared/sim/tuning';
 import { BTN, STANCE_FROM_CODE } from '../../shared/types';
 import type {
   ClientAction, EntityId, GameEvent, LifeState, LootItem, MatchResults, MovementMode, PlayerInput, PlayerState, SurfaceMaterial,
-  TrainingTarget, Vec3, VehicleState, World, WorldBox, ZoneState,
+  TrainingTarget, Vec3, VehicleState, VehicleType, World, WorldBox, ZoneState,
 } from '../../shared/types';
-import { seatWorldPosition, stepVehicle, vehicleHitsPoint } from '../../shared/vehicles';
+import { VEHICLES, seatWorldPosition, stepVehicle, vehicleHitsPoint } from '../../shared/vehicles';
 import type { VehicleStepEvents } from '../../shared/vehicles';
 import { generateWorld } from '../../shared/world';
 import { sanitizeAction, sanitizeInput, validateClientMessage } from '../../shared/validate';
@@ -236,8 +236,8 @@ export class ClientGame implements ClientGameApi {
   private readonly eyeScratch = v3();
   private readonly interactionEnv: InteractionEnv;
   private readonly inputCtx: InputContext = {
-    mode: 'ground', life: 'alive', stance: 'stand', seat: -1, weapons: [null, null, null], activeSlot: -1,
-    frags: 0, ads: 0, adsZoom: 1, scoped: false,
+    mode: 'ground', life: 'alive', stance: 'stand', seat: -1, seatCanShoot: false, weapons: [null, null, null],
+    activeSlot: -1, frags: 0, ads: 0, adsZoom: 1, scoped: false,
   };
 
   // Frame
@@ -666,11 +666,7 @@ export class ClientGame implements ClientGameApi {
     env.ended = s !== null && s.phase === 'ended';
     env.plane = s?.plane ?? null;
     env.planeTime = s ? s.time / 1000 : 0;
-    env.seatVehicle = null;
-    if (p.vehicleId !== null) {
-      const rv = this.remoteVehicles.get(p.vehicleId);
-      env.seatVehicle = this.predVehicle && this.predVehicle.id === p.vehicleId ? this.predVehicle.type : rv ? rv.state.type : null;
-    }
+    env.seatVehicle = this.seatVehicleType(p);
     env.vehicle = this.predVehicle && p.vehicleId === this.predVehicle.id && p.seat === 0 ? this.predVehicle : null;
     // Other vehicles for driver-side collisions: persistent copies rebased at every reconcile
     // (stepVehicle pushes `others` around on contact; never hand it render objects).
@@ -720,6 +716,13 @@ export class ClientGame implements ClientGameApi {
     }
   }
 
+  /** Type of the vehicle the player sits in (the predicted one while driving), null on foot / unknown. */
+  private seatVehicleType(p: PlayerState): VehicleType | null {
+    if (p.vehicleId === null) return null;
+    if (this.predVehicle && this.predVehicle.id === p.vehicleId) return this.predVehicle.type;
+    return this.remoteVehicles.get(p.vehicleId)?.state.type ?? null;
+  }
+
   private refreshInputContext(p: PlayerState): void {
     const c = this.inputCtx;
     const w = activeWeapon(p);
@@ -727,6 +730,9 @@ export class ClientGame implements ClientGameApi {
     c.life = p.life;
     c.stance = p.stance;
     c.seat = p.vehicleId !== null ? p.seat : -1;
+    // Passengers in seats that can shoot keep the weapon keys (seat change = Shift + 1-4).
+    const vt = c.seat >= 0 ? this.seatVehicleType(p) : null;
+    c.seatCanShoot = vt !== null && VEHICLES[vt].seatCanShoot[c.seat] === true;
     c.weapons = p.weapons;
     c.activeSlot = p.activeSlot;
     c.frags = p.items.frag ?? 0;

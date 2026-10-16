@@ -35,7 +35,9 @@ import { releaseAtlases, retainAtlases } from '../../fx/textures';
 import {
   easeInOutSine, easeOutBack, easeOutCubic, pulse, sineNoise, smooth01, springStep, window4, type Spring1,
 } from '../cameraMath';
+import type { CharacterVariantId } from '../../../assets';
 import { Arm, type HandStyle } from './arms';
+import { RigArms, variantForPlayer } from './rigArms';
 import { instantiateWeapon } from '../../../assets';
 import { BOLT_KNOB, buildGun, buildModelGun, type GunModel } from './guns';
 import { HeldItems } from './heldItems';
@@ -236,6 +238,23 @@ export class Viewmodel {
   }
 
   private selfId: number | null = null;
+  /** Arms from the local player's character rig (null until loaded / when unavailable). */
+  private rigArms: RigArms | null = null;
+  private rigVariant: CharacterVariantId | null = null;
+
+  /** Load the rig arms for the local player's character variant (once per variant). */
+  private ensureRigArms(playerId: number): void {
+    const variant = variantForPlayer(playerId);
+    if (variant === this.rigVariant) return;
+    this.rigVariant = variant;
+    RigArms.load(variant, this.pivot).then((arms) => {
+      if (!arms) return;
+      if (this.disposed || this.rigVariant !== variant) { arms.dispose(); return; }
+      this.rigArms?.dispose();
+      this.rigArms = arms;
+      arms.visible = false;
+    }, () => { /* keep the procedural arms */ });
+  }
   /** 0..1 blend of the armed-grenade ready pose (frag key pressed, waiting for fire). */
   private armW = 0;
   /** Casing ejections requested by events, spawned after posing. */
@@ -246,6 +265,7 @@ export class Viewmodel {
     if (this.disposed) return false;
     const self = inp.self;
     this.selfId = self.id;
+    this.ensureRigArms(self.id);
     this.time += dt;
     this.visible = inp.visible;
 
@@ -309,6 +329,8 @@ export class Viewmodel {
     this.modelGuns.clear();
     this.rightArm.dispose();
     this.leftArm.dispose();
+    this.rigArms?.dispose();
+    this.rigArms = null;
     this.items.dispose();
     this.flash.dispose();
     this.hemi.dispose();
@@ -840,8 +862,11 @@ export class Viewmodel {
   private poseHands(inp: VmInput): void {
     const gun = this.gun;
     const showHands = this.visible;
-    this.rightArm.visible = showHands;
-    this.leftArm.visible = showHands;
+    // With the rig arms loaded the procedural arms only provide the hand targets.
+    const boxArms = showHands && this.rigArms === null;
+    this.rightArm.visible = boxArms;
+    this.leftArm.visible = boxArms;
+    if (this.rigArms) this.rigArms.visible = showHands;
     this.items.group.visible = showHands;
     if (!showHands) {
       this.items.show(null);
@@ -911,10 +936,14 @@ export class Viewmodel {
     if (this.styleR) rightStyle = this.styleR;
     if (this.styleL) leftStyle = this.styleL;
 
-    this.rightArm.setStyle(rightStyle);
-    this.leftArm.setStyle(leftStyle);
-    this.rightArm.solve();
-    this.leftArm.solve();
+    if (this.rigArms) {
+      this.rigArms.pose(this.rightArm.hand, this.leftArm.hand, gun, this.getProcGun('ar'));
+    } else {
+      this.rightArm.setStyle(rightStyle);
+      this.leftArm.setStyle(leftStyle);
+      this.rightArm.solve();
+      this.leftArm.solve();
+    }
   }
 
   /** Smoothly interpolate the reload hand target between two gun-local points. */
@@ -1105,7 +1134,9 @@ export class Viewmodel {
           R.position.copy(obj.position);
           R.position.y -= 0.005;
           R.rotation.set(drink * 0.95, 0, lerp(-0.1, 0.05, drink));
-          this.leftArm.visible = false;
+          // Free hand drops out of view.
+          L.position.set(-0.22, -0.5, -0.15);
+          L.rotation.set(0, 0, -0.3);
           this.styleR = 'grip';
           return;
         }

@@ -18,7 +18,7 @@ export type { VehicleControls, VehicleStepEvents } from './physics';
 export { createVehicle, stepVehicle, BOOST_MUL, IDLE_RPM, MAX_RPM } from './physics';
 export type { Basis } from './geometry';
 export {
-  seatWorldPosition, exitPosition, raycastVehicle, vehicleHitsPoint,
+  seatWorldPosition, exitPosition, raycastVehicle, vehicleHitsPoint, vehicleObstacle, vehicleObstacles, footObstacles,
   basisFromAngles, makeBasis, localToWorld, worldToLocal,
 } from './geometry';
 export { crashDamage } from './damage';
