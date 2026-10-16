@@ -16,6 +16,11 @@
 // (magazine out/in, charging handle / slide / bolt on empty, shell-by-shell for the shotgun),
 // sniper bolt and shotgun pump cycles after each shot, pistol slide blowback + lock on empty,
 // muzzle flash + light, shell ejection, healing item animations, grenade throw, fists unarmed.
+//
+// Guns: the imported weapon models (src/client/assets WEAPON_MODELS, Quaternius CC0) replace the
+// procedural guns as soon as they load; the procedural guns remain the fallback. The models are a
+// single mesh, so mechanical motions (bolt, pump, charging handle) are performed by the hands and
+// reloads hand in a spare magazine (cloned from the procedural gun) that slides into the well.
 
 import * as THREE from 'three';
 import { WEAPONS, WEAPON_IDS } from '../../../../shared/items';

@@ -1166,6 +1166,8 @@ describe('parity with the real GameSim', () => {
     const game = lb.game!;
     const sim = lb.runner.sim;
     expect(game.getFrame().self?.mode).toBe('plane');
+    expect(game.getFrame().planePos).not.toBeNull(); // visible even while parked for loading
+    lb.runner.handleMessage('c1', { t: 'loaded' });
     // Wait until the plane is over the island, then jump.
     let guard = 0;
     while (game.getFrame().interaction?.kind !== 'jump' && guard++ < 2000) lb.frame();

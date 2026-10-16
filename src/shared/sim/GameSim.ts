@@ -21,20 +21,31 @@ import type { NoiseEvent, SimEvent, SimView } from './view';
 import { jumpFromPlane } from './actions';
 import { TraceScratch, cancelRevive, damageInfo, damagePlayer, pickSpectateTarget } from './combat';
 import { PlayerGrid } from './grid';
-import { HitboxHistory, createPose } from './lagcomp';
+import { HitboxHistory, VehicleHistory, createPose } from './lagcomp';
 import { LootManager } from './loot';
 import { generateBotName } from './names';
 import { createPlane } from './plane';
 import { updatePlayer } from './playerTick';
 import type { PlayerRt } from './players';
-import { createPlayerRt, createPlayerState, pushInput, resetInput } from './players';
+import { createPlayerRt, createPlayerState, mergeInput, pushInput, resetInput } from './players';
 import { updateProjectiles } from './projectiles';
 import { createTrainingState, emitTargetHit, respawnPlayer } from './training';
 import type { TrainingState } from './training';
-import { NOISE_LIFETIME, PLANE_AUTO_EJECT } from './tuning';
+import { INPUT_CREDIT_MAX, NOISE_LIFETIME, PLANE_AUTO_EJECT } from './tuning';
 import type { VehicleRt } from './vehiclesSim';
 import { ejectFromVehicle, spawnVehicles, stepVehicles, syncOccupants } from './vehiclesSim';
 import { ZoneController, createZone, outsideZone } from './zone';
+
+/** Suspicious-aim flag raised by the server heuristics (logged only, no gameplay effect). */
+export interface CheatFlag {
+  player: EntityId;
+  name: string;
+  kind: 'aimSnap' | 'headshotRatio';
+  /** Metric that crossed the threshold (snap-hit count or headshot ratio). */
+  value: number;
+  /** Sim time (s). */
+  time: number;
+}
 
 export interface TeamInfo {
   id: TeamId;
@@ -70,6 +81,10 @@ export class GameSim implements SimView {
   readonly vrtById = new Map<EntityId, VehicleRt>();
   readonly projList: Projectile[] = [];
   readonly history = new HitboxHistory();
+  /** Vehicle poses per tick (lag-compensated hull tests). */
+  readonly vehHistory = new VehicleHistory();
+  /** Receives suspicious-aim flags (the MatchRunner collects them for the server log). */
+  onFlag: ((flag: CheatFlag) => void) | null = null;
   readonly traceScratch = new TraceScratch();
   readonly training: TrainingState | null;
   readonly lootMgr: LootManager;
@@ -86,7 +101,6 @@ export class GameSim implements SimView {
   private readonly rngPlane: Rng;
   private readonly rngNames: Rng;
   private readonly names = new Set<string>();
-  private readonly nearScratch: PlayerState[] = [];
   private readonly rewindPose = createPose();
 
   constructor(config: MatchConfig) {
@@ -227,6 +241,7 @@ export class GameSim implements SimView {
       }
     }
     this.history.record(this.time, this.playerList);
+    this.vehHistory.record(this.time, this.vehicleList);
     this.playerGrid.rebuild(this.playerList);
   }
 
@@ -250,7 +265,7 @@ export class GameSim implements SimView {
     if (plane && this.phase === 'plane' && plane.traveled >= plane.length * PLANE_AUTO_EJECT) {
       for (const p of this.playerList) if (p.mode === 'plane' && p.life !== 'dead') jumpFromPlane(this, p);
     }
-    updateProjectiles(this, dt);
+    if (this.phase !== 'ended') updateProjectiles(this, dt);
     stepVehicles(this, dt);
     syncOccupants(this);
     this.updateZone(dt);
@@ -263,13 +278,43 @@ export class GameSim implements SimView {
     this.time = Math.round((this.time + dt) * 1e6) / 1e6;
     this.tick++;
     this.history.record(this.time, this.playerList);
+    this.vehHistory.record(this.time, this.vehicleList);
     this.pruneNoises();
     this.playerGrid.rebuild(this.playerList);
   }
 
   queueInput(id: EntityId, input: PlayerInput): void {
     const rt = this.rtById.get(id);
-    if (rt) pushInput(rt, input);
+    if (rt) pushInput(rt, input, this.time);
+  }
+
+  /**
+   * An input over the client's rate budget: its movement is dropped but its actions and edge
+   * buttons are merged into the newest queued input (discrete intent is never lost).
+   */
+  mergeInput(id: EntityId, input: PlayerInput): void {
+    const rt = this.rtById.get(id);
+    if (rt) mergeInput(rt, input, this.time);
+  }
+
+  /**
+   * The host skipped `ticks` ticks (stall backlog dropped): every player may consume that many
+   * extra queued inputs, otherwise the inputs sent during the skipped time would stay queued.
+   */
+  grantInputCredit(ticks: number): void {
+    if (!(ticks > 0)) return;
+    for (const rt of this.rtList) rt.credit = Math.min(INPUT_CREDIT_MAX, rt.credit + ticks);
+  }
+
+  /** Transport-measured round trip time of a player's connection (ms), or null when unknown. */
+  setPlayerLatency(id: EntityId, rttMs: number | null): void {
+    const rt = this.rtById.get(id);
+    if (rt) rt.rttMs = rttMs !== null && Number.isFinite(rttMs) && rttMs >= 0 ? rttMs : -1;
+  }
+
+  /** Report a suspicious-aim flag (no gameplay effect). */
+  raiseFlag(flag: CheatFlag): void {
+    if (this.onFlag) this.onFlag(flag);
   }
 
   drainEvents(): SimEvent[] {
@@ -416,6 +461,9 @@ export class GameSim implements SimView {
     this.endTime = this.time;
     this.winnerTeam = winner;
     if (this.plane) this.plane.active = false;
+    // Nothing in flight may hurt anyone after the result.
+    this.projList.length = 0;
+    this.projectiles.clear();
     this.emit({ type: 'matchEnd', results: this.results() });
   }
 

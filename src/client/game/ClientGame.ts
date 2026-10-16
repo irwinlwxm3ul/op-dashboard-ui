@@ -1217,7 +1217,8 @@ export class ClientGame implements ClientGameApi {
     this.updateZone();
 
     // Plane (deterministic from its path; drawn at the predicted time so the local rider matches).
-    if (latest?.plane && latest.plane.active) {
+    // A plane parked until everyone has loaded is inactive but still present: it stays visible.
+    if (latest?.plane) {
       // Drawn on the local prediction timeline so a rider (and the jump) lines up exactly with it.
       const t = this.predicted && this.predTime >= 0
         ? this.predTime + clamp(this.tickAcc / TICK_DT, 0, 1) * TICK_DT

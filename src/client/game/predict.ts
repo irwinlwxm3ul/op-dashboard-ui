@@ -369,6 +369,9 @@ export function predictTick(
     jumpFromPlane(p, env, planePositionAt(env.plane, env.planeTime, env.time + dt, planeScratch), ev);
   }
 
+  // The sim ticks boost and bleeding once per server tick rather than per input. With one input
+  // per tick (steady state) that is identical; a starvation pause and the following two-input
+  // catch-up tick even out, so applying them per predicted input is the closest mirror.
   tickBoost(p, dt);
   if (p.life === 'downed' && p.revivedBy === null) {
     p.downedHp = Math.max(0, p.downedHp - DOWNED_BLEED_PER_SEC * (1 + 0.5 * (p.knockCount - 1)) * dt);

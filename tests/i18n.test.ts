@@ -8,7 +8,8 @@ import {
 import { en } from '../src/client/i18n/locales/en';
 import { enCore } from '../src/client/i18n/locales/en.core';
 import {
-  compareKeys, comparePlaceholders, emptyValues, extractPlaceholders, fragmentIssues, incompletePluralFamilies, scanSource,
+  collectHtmlKeyUsage, collectKeyUsage, compareKeys, comparePlaceholders, emptyValues, extractPlaceholders, findUnusedKeys,
+  fragmentIssues, incompletePluralFamilies, scanSource,
 } from '../scripts/check-i18n';
 
 const OTHER_LANGS = LANGUAGES.map((l) => l.code).filter((c): c is Exclude<Lang, 'en'> => c !== 'en');
@@ -59,7 +60,7 @@ describe('locale dictionaries', () => {
   it('every language uses only plural categories that the core dictionary provides', () => {
     for (const { code } of LANGUAGES) {
       const categories = new Intl.PluralRules(code).resolvedOptions().pluralCategories;
-      for (const c of categories) expect(Object.hasOwn(enCore, `hud.kills_${c}`), `${code}: ${c}`).toBe(true);
+      for (const c of categories) expect(Object.hasOwn(enCore, `banner.killCount_${c}`), `${code}: ${c}`).toBe(true);
     }
   });
 
@@ -157,7 +158,7 @@ describe('t', () => {
     // Numbers are formatted, never isolated; translated UI text (keys, items) is left as is.
     expect(t('hud.distanceMeters', { n: 250 })).toBe(`${fmtNumber(250)} م`);
     expect(t('prompt.pickup', { item: 'AR-5' })).toBe('التقاط AR-5');
-    expect(t('hud.plane.pressToJump', { key: 'F' })).toBe('اضغط F للقفز');
+    expect(t('prompt.hold', { key: 'F' })).toBe('استمر بالضغط على F');
   });
 
   it('bidiIsolate strips directional controls from user text and is not applied twice', () => {
@@ -186,32 +187,32 @@ describe('t', () => {
   });
 
   it('selects English plural forms', () => {
-    expect(t('hud.kills', { count: 0 })).toBe('0 kills');
-    expect(t('hud.kills', { count: 1 })).toBe('1 kill');
-    expect(t('hud.kills', { count: 2 })).toBe('2 kills');
+    expect(t('banner.killCount', { count: 0 })).toBe('0 kills');
+    expect(t('banner.killCount', { count: 1 })).toBe('1 kill');
+    expect(t('banner.killCount', { count: 2 })).toBe('2 kills');
     expect(t('banner.killCount', { count: 1 })).toBe('1 kill');
     expect(t('hud.alive', { count: 1234 })).toBe('1,234 alive');
   });
 
   it('selects Russian plural forms', () => {
     setLanguage('ru');
-    expect(t('hud.kills', { count: 1 })).toBe('1 убийство');
-    expect(t('hud.kills', { count: 3 })).toBe('3 убийства');
-    expect(t('hud.kills', { count: 5 })).toBe('5 убийств');
-    expect(t('hud.kills', { count: 11 })).toBe('11 убийств');
-    expect(t('hud.kills', { count: 21 })).toBe('21 убийство');
-    expect(t('hud.kills', { count: 0 })).toBe('0 убийств');
+    expect(t('banner.killCount', { count: 1 })).toBe('1 убийство');
+    expect(t('banner.killCount', { count: 3 })).toBe('3 убийства');
+    expect(t('banner.killCount', { count: 5 })).toBe('5 убийств');
+    expect(t('banner.killCount', { count: 11 })).toBe('11 убийств');
+    expect(t('banner.killCount', { count: 21 })).toBe('21 убийство');
+    expect(t('banner.killCount', { count: 0 })).toBe('0 убийств');
     expect(t('lobby.startingIn', { count: 2 })).toBe('Матч начнётся через 2 секунды');
   });
 
   it('selects Arabic plural forms (zero, one, two, few, many, other)', () => {
     setLanguage('ar');
-    expect(t('hud.kills', { count: 0 })).toBe('لا قتلى');
-    expect(t('hud.kills', { count: 1 })).toBe('قتيل واحد');
-    expect(t('hud.kills', { count: 2 })).toBe('قتيلان');
-    expect(t('hud.kills', { count: 3 })).toBe(`${fmtNumber(3)} قتلى`);
-    expect(t('hud.kills', { count: 11 })).toBe(`${fmtNumber(11)} قتيلًا`);
-    expect(t('hud.kills', { count: 100 })).toBe(`${fmtNumber(100)} قتيل`);
+    expect(t('banner.killCount', { count: 0 })).toBe('لا قتلى');
+    expect(t('banner.killCount', { count: 1 })).toBe('قتيل واحد');
+    expect(t('banner.killCount', { count: 2 })).toBe('قتيلان');
+    expect(t('banner.killCount', { count: 3 })).toBe(`${fmtNumber(3)} قتلى`);
+    expect(t('banner.killCount', { count: 11 })).toBe(`${fmtNumber(11)} قتيلًا`);
+    expect(t('banner.killCount', { count: 100 })).toBe(`${fmtNumber(100)} قتيل`);
   });
 
   it('falls back to _other, then to the key itself, when variants are missing', () => {
@@ -362,6 +363,26 @@ describe('check-i18n key helpers', () => {
       { key: 'c_other', expected: ['count'], actual: [] },
     ]);
     expect(incompletePluralFamilies(ref)).toEqual([{ stem: 'c', missing: ['zero', 'two', 'few', 'many'] }]);
+  });
+
+  it('finds unused keys, understanding literals, template families, concatenation and plural stems', () => {
+    const usage = collectKeyUsage([
+      "tx(el, 'menu.settings');",
+      "const LABELS: TKey[] = ['sp.solo', 'sp.duo'];",
+      'const name = t(`item.${id}`);',
+      'const zone = t(`hud.zone.${stage}`, { time });',
+      'const tip = t(`ui.tip.${i}.title`);',
+      "const src = t('feel.source.' + source);",
+      "const n = t('hud.alive', { count });",
+      'const x = t(`${key}_other`); // no static head: not a family',
+    ].join('\n'));
+    collectHtmlKeyUsage('<h1 data-i18n="app.title"></h1><input data-i18n-placeholder="lobby.chatPlaceholder">', usage);
+    const keys = [
+      'menu.settings', 'menu.controls', 'sp.solo', 'sp.duo', 'sp.squad', 'item.ar', 'item.ammo_556', 'hud.zone.final',
+      'ui.tip.1.title', 'ui.tip.1.body', 'feel.source.zone', 'hud.alive_one', 'hud.alive_other', 'hud.kills_one',
+      'app.title', 'app.tagline', 'lobby.chatPlaceholder',
+    ];
+    expect(findUnusedKeys(keys, usage)).toEqual(['menu.controls', 'sp.squad', 'ui.tip.1.body', 'hud.kills_one', 'app.tagline']);
   });
 
   it('reports fragment keys outside their namespace or defined twice', () => {

@@ -1,6 +1,6 @@
 // i18n consistency checker.
 //
-//   npx tsx scripts/check-i18n.ts [--keys-only | --scan-only] [--verbose]
+//   npx tsx scripts/check-i18n.ts [--keys-only | --scan-only] [--strict-unused] [--verbose]
 //
 // 1. Every locale has exactly the key set of the merged English dictionary (core + ui/feel/flow
 //    fragments), no empty values, and every English plural family provides all CLDR categories.
@@ -16,7 +16,12 @@
 //    t() / txp() params objects. (feel/overlay/dom.ts helpers take class names only.) A line
 //    containing `i18n-ignore` (or a comment line with it directly above) is exempt.
 //
-// Exits 1 when anything is reported, 0 otherwise. The checks are exported for tests.
+// 4. Lists English keys nothing references (string literals anywhere in src/client, template-literal
+//    families such as t(`item.${id}`) or 'feel.source.' + src, plural stems, data-i18n in
+//    index.html). Warning only; --strict-unused makes them fail.
+//
+// Exits 1 when anything is reported (except unused-key warnings), 0 otherwise. The checks are
+// exported for tests.
 
 import { readdirSync, readFileSync } from 'node:fs';
 import { join, relative, resolve, sep } from 'node:path';
@@ -675,6 +680,66 @@ export function scanSource(source: string): ScanViolation[] {
   return scanner.found.sort((a, b) => a.line - b.line);
 }
 
+// ============================================================================
+// Unused keys
+// ============================================================================
+
+/** Evidence that keys are referenced: exact string literals plus dynamic key families. */
+export interface KeyUsage {
+  exact: Set<string>;
+  /** Families built at runtime, e.g. t(`item.${id}`) → /^item\.[\w.-]+$/, 'feel.source.' + src. */
+  families: RegExp[];
+}
+
+/** A literal that reads like the static head of a key (`item.`, `hud.zone.`, `ui.tip.`). */
+const KEY_PREFIX = /^[A-Za-z][\w-]*(?:\.[\w-]+)*\.(?:[\w-]+)?$/;
+const PLURAL_SUFFIX = /_(?:zero|one|two|few|many|other)$/;
+const escapeRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+export function emptyUsage(): KeyUsage {
+  return { exact: new Set(), families: [] };
+}
+
+/** Records the key references of one TypeScript source text into `usage`. */
+export function collectKeyUsage(source: string, usage: KeyUsage = emptyUsage()): KeyUsage {
+  const visit = (tokens: Tok[]) => {
+    for (let i = 0; i < tokens.length; i++) {
+      const tok = tokens[i];
+      if (tok.k === 'str') {
+        usage.exact.add(tok.v);
+        // 'feel.source.' + source
+        if (isP(tokens[i + 1], '+') && KEY_PREFIX.test(tok.v)) usage.families.push(new RegExp(`^${escapeRe(tok.v)}[\\w.-]+$`));
+      } else if (tok.k === 'tpl') {
+        if (tok.quasis.length === 1) usage.exact.add(tok.quasis[0]);
+        else if (KEY_PREFIX.test(tok.quasis[0])) {
+          // `controls.action.${a}` / `ui.tip.${i}.title`: each hole matches one key segment run.
+          usage.families.push(new RegExp(`^${tok.quasis.map(escapeRe).join('[\\w.-]+')}$`));
+        }
+        for (const expr of tok.exprs) visit(expr);
+      }
+    }
+  };
+  visit(new Lexer(source).tokenize());
+  return usage;
+}
+
+/** Records `data-i18n*="key"` references of an HTML document into `usage`. */
+export function collectHtmlKeyUsage(html: string, usage: KeyUsage = emptyUsage()): KeyUsage {
+  for (const m of html.matchAll(/\bdata-i18n(?:-[a-z]+)?\s*=\s*(["'])([^"']+)\1/g)) usage.exact.add(m[2]);
+  return usage;
+}
+
+/** Keys with no reference; a plural variant counts as used when its stem is. */
+export function findUnusedKeys(keys: Iterable<string>, usage: KeyUsage): string[] {
+  const used = (k: string) => usage.exact.has(k) || usage.families.some((re) => re.test(k));
+  const out: string[] = [];
+  for (const key of keys) {
+    const stem = key.replace(PLURAL_SUFFIX, '');
+    if (!used(key) && !(stem !== key && used(stem))) out.push(key);
+  }
+  return out;
+}
+
 /** Every .ts file under `dir`, skipping `excludeDirs` (absolute paths). */
 function listTsFiles(dir: string, excludeDirs: readonly string[]): string[] {
   const out: string[] = [];
@@ -750,6 +815,43 @@ function runKeyChecks(verbose: boolean): number {
   return problems;
 }
 
+/** Key references across the client sources (definitions excluded) and index.html. */
+function projectKeyUsage(): KeyUsage {
+  const clientDir = join(ROOT, 'src', 'client');
+  const usage = emptyUsage();
+  for (const file of listTsFiles(clientDir, [join(clientDir, 'i18n', 'locales')])) {
+    if (file.endsWith(`${sep}strings.en.ts`)) continue; // fragment definitions, not references
+    collectKeyUsage(readFileSync(file, 'utf8'), usage);
+  }
+  try {
+    collectHtmlKeyUsage(readFileSync(join(ROOT, 'index.html'), 'utf8'), usage);
+  } catch {
+    // no index.html: nothing to add
+  }
+  return usage;
+}
+
+/** Reports keys nothing references. Warnings unless `strict` (then each one is a problem). */
+function runUnusedCheck(strict: boolean, verbose: boolean): number {
+  const unused = findUnusedKeys(Object.keys(en), projectKeyUsage());
+  const owners: [string, (k: string) => boolean][] = [
+    ['src/client/ui/strings.en.ts', (k) => k.startsWith('ui.')],
+    ['src/client/feel/strings.en.ts', (k) => k.startsWith('feel.')],
+    ['src/client/app/strings.en.ts', (k) => k.startsWith('flow.')],
+    ['src/client/i18n/locales/en.core.ts', () => true],
+  ];
+  const level = strict ? 'unused' : 'warn: unused';
+  const reported = new Set<string>();
+  for (const [file, owns] of owners) {
+    const keys = unused.filter((k) => !reported.has(k) && owns(k));
+    keys.forEach((k) => reported.add(k));
+    if (keys.length > 0) console.log(`[${level}] ${file}: ${keys.length} key(s) never referenced — ${listPreview(keys, verbose)}`);
+  }
+  if (unused.length === 0) console.log('i18n unused keys: none');
+  else if (!strict) console.log(`i18n unused keys: ${unused.length} (warning; --strict-unused fails on them)`);
+  return strict ? unused.length : 0;
+}
+
 function runScan(): number {
   const clientDir = join(ROOT, 'src', 'client');
   const files = listTsFiles(clientDir, [join(clientDir, 'i18n', 'locales')]);
@@ -770,6 +872,7 @@ export function main(argv: readonly string[]): number {
   const verbose = argv.includes('--verbose');
   let problems = 0;
   if (!scanOnly) problems += runKeyChecks(verbose);
+  if (!scanOnly) problems += runUnusedCheck(argv.includes('--strict-unused'), verbose);
   if (!keysOnly) problems += runScan();
   return problems > 0 ? 1 : 0;
 }

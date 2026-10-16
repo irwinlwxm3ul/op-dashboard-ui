@@ -214,6 +214,19 @@ function actThrow(sim: GameSim, p: PlayerState): void {
   sim.emit({ type: 'throw', player: p.id, projectile: id }, undefined, p.pos, EVENT_RANGE.movement);
 }
 
+const losA: Vec3 = { x: 0, y: 0, z: 0 };
+const losB: Vec3 = { x: 0, y: 0, z: 0 };
+
+/** Reviver and downed teammate can see each other (no reviving through walls / floors). */
+export function reviveLineOfSight(sim: GameSim, p: PlayerState, t: PlayerState): boolean {
+  bodyCenter(t, losB);
+  losB.y += 0.1;
+  bodyCenter(p, losA);
+  if (lineOfSight(sim.world, losA, losB)) return true;
+  sim.eyePos(p.id, losA);
+  return lineOfSight(sim.world, losA, losB);
+}
+
 function actRevive(sim: GameSim, p: PlayerState, id: EntityId): void {
   if (p.life !== 'alive' || p.mode !== 'ground' || p.revive) return;
   const t = sim.players.get(id);
@@ -221,6 +234,7 @@ function actRevive(sim: GameSim, p: PlayerState, id: EntityId): void {
   if (t.revivedBy !== null && t.revivedBy !== p.id) return;
   const d = Math.hypot(t.pos.x - p.pos.x, t.pos.y - p.pos.y, t.pos.z - p.pos.z);
   if (d > REVIVE_RANGE + INTERACT_SLACK) return;
+  if (!reviveLineOfSight(sim, p, t)) return;
   cancelUse(p);
   cancelReload(p);
   p.ads = 0;

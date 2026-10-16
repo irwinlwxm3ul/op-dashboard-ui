@@ -252,9 +252,12 @@ function isStranded(sys: BotSystem, p: PlayerState): boolean {
   return !nav || !nav.reachable(floorLoc);
 }
 
-/** Upper-floor position reachable from the ground through stairs (budgeted nav construction). */
-function floorReachable(sys: BotSystem, x: number, y: number, z: number): boolean {
-  const nav = sys.floors.locate(x, y, z, floorLoc, false);
+/**
+ * Upper-floor position reachable from the ground through stairs. Building navs are built within
+ * the per-tick budget unless `force` (urgent, rare queries such as a downed teammate).
+ */
+function floorReachable(sys: BotSystem, x: number, y: number, z: number, force = false): boolean {
+  const nav = sys.floors.locate(x, y, z, floorLoc, force);
   return !!nav && nav.reachable(floorLoc);
 }
 
@@ -322,7 +325,7 @@ function findDownedTeammate(sys: BotSystem, p: PlayerState): PlayerState | null 
     if (q.revivedBy !== null && q.revivedBy !== p.id) continue;
     // Teammates up on floors / roofs without stairs cannot be reached.
     if (Math.abs(q.pos.y - p.pos.y) > 2.2 && q.pos.y - sys.world.heightAt(q.pos.x, q.pos.z) > UPPER_FLOOR &&
-        !floorReachable(sys, q.pos.x, q.pos.y, q.pos.z)) continue;
+        !floorReachable(sys, q.pos.x, q.pos.y, q.pos.z, true)) continue;
     const d = hyp(q.pos.x - p.pos.x, q.pos.z - p.pos.z);
     if (d > REVIVE_SEARCH) continue;
     const s = d - (q.isBot ? 0 : 40);

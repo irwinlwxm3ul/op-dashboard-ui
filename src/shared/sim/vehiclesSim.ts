@@ -2,6 +2,7 @@
 // burning + explosion, sleeping parked vehicles, and (training) respawning wrecks.
 
 import { MAX_VEHICLES, PLAYER_RADIUS, VEHICLE_ENTER_RANGE } from '../constants';
+import { lineOfSight } from '../physics';
 import type { Rng } from '../rng';
 import {
   VEHICLES, crashDamage, createVehicle, exitPosition, seatWorldPosition, stepVehicle, vehicleHitsPoint,
@@ -66,6 +67,22 @@ export function nearVehicle(p: PlayerState, v: VehicleState): boolean {
   return vehicleHitsPoint(v, center, 1.5);
 }
 
+const losEye = { x: 0, y: 0, z: 0 };
+const losSeat = { x: 0, y: 0, z: 0 };
+
+/**
+ * No entering through walls: the player's eye or body centre must see the vehicle centre or the
+ * chosen seat (vehicles themselves never block world line-of-sight tests).
+ */
+export function vehicleLineOfSight(sim: GameSim, p: PlayerState, v: VehicleState, seat: number): boolean {
+  seatWorldPosition(v, seat, losSeat);
+  losSeat.y += 0.7;
+  bodyCenter(p, center);
+  if (lineOfSight(sim.world, center, v.pos) || lineOfSight(sim.world, center, losSeat)) return true;
+  sim.eyePos(p.id, losEye);
+  return lineOfSight(sim.world, losEye, v.pos) || lineOfSight(sim.world, losEye, losSeat);
+}
+
 export function vehicleFull(v: VehicleState): boolean {
   for (let i = 0; i < v.seats.length; i++) if (v.seats[i] === null) return false;
   return true;
@@ -84,6 +101,7 @@ export function enterVehicle(sim: GameSim, rt: PlayerRt, id: EntityId, seat?: nu
     for (let i = 0; i < v.seats.length; i++) if (v.seats[i] === null) { s = i; break; }
   }
   if (s < 0) return;
+  if (!vehicleLineOfSight(sim, p, v, s)) return;
   v.seats[s] = p.id;
   p.vehicleId = v.id;
   p.seat = s;

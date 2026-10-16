@@ -1,5 +1,16 @@
-// One simulation tick of one player: consume an input, aim, actions, movement (plane / drop /
-// ground / vehicle seat), weapons, healing / revive progress, boost and bleeding.
+// One simulation tick of one player.
+//
+// Input pacing: every queued input is applied exactly once, in order (client prediction replays
+// the same inputs, so nothing may be invented or skipped). A tick with an empty queue pauses the
+// player (no input-driven step) and banks one catch-up credit; after INPUT_PAUSE_MAX_TICKS the
+// client counts as absent and the body is stepped with a neutral input so it still falls / lands.
+// When a backlog persists (depth > CATCHUP_DEPTH for CATCHUP_DELAY_TICKS) two inputs are applied
+// per tick, paid with credit, until the queue is shallow: latency never ratchets up after a stall,
+// and because credit only comes from ticks the player did not move, catching up never yields
+// more movement than real time allows.
+//
+// Per input: aim, actions, movement (plane / drop / ground / vehicle seat), weapons, healing and
+// revive progress. Per tick: boost and bleeding. After the match ended only the aim updates.
 
 import {
   AUTO_CHUTE_HEIGHT, DOWNED_BLEED_PER_SEC, FALL_DAMAGE_PER_MS, FALL_DAMAGE_SPEED, REVIVE_RANGE, REVIVE_TIME,
@@ -9,15 +20,16 @@ import { eyePosition, lineOfSight, stepCharacter, stepDrop } from '../physics';
 import type { MoveEvents } from '../physics';
 import type { PlayerState } from '../types';
 import { BTN, STANCE_FROM_CODE } from '../types';
-import { completeUse, handleAction, handleDeadAction, openChute } from './actions';
+import { completeUse, handleAction, handleDeadAction, openChute, reviveLineOfSight } from './actions';
 import { cancelRevive, damageInfo, damagePlayer, killPlayer } from './combat';
 import type { GameSim } from './GameSim';
 import { planePosition } from './plane';
 import type { PlayerRt } from './players';
-import { EDGE_BUTTONS, popInput } from './players';
+import { LAG_BUCKETS, LAG_BUCKET_TICKS, neutralize, popInput } from './players';
 import {
-  ADS_MOVE_MUL, EVENT_RANGE, MOVE_DEADZONE, NOISE_FOOTSTEP_INTERVAL, NOISE_FOOTSTEP_RADIUS, PITCH_LIMIT,
-  REVIVE_HEALTH, REVIVE_KEEP_SLACK, SPRINT_MIN_FORWARD,
+  ADS_MOVE_MUL, CATCHUP_DELAY_TICKS, CATCHUP_DEPTH, EVENT_RANGE, INPUT_CREDIT_DECAY, INPUT_CREDIT_MAX,
+  INPUT_DRIFT_CREDIT, INPUT_PAUSE_MAX_TICKS, MOVE_DEADZONE, NOISE_FOOTSTEP_INTERVAL, NOISE_FOOTSTEP_RADIUS,
+  PITCH_LIMIT, REVIVE_HEALTH, REVIVE_KEEP_SLACK, SPRINT_MIN_FORWARD,
 } from './tuning';
 import { activeDef, cancelUse, updateWeapons } from './weapons';
 
@@ -50,23 +62,111 @@ function onLanded(sim: GameSim, p: PlayerState, ev: MoveEvents, fromDrop: boolea
   }
 }
 
+/** One tick of one player: input pacing (pause / catch-up), then per-tick effects. */
 export function updatePlayer(sim: GameSim, rt: PlayerRt, dt: number): void {
   const p = rt.p;
-  const fresh = popInput(rt);
-  if (fresh) p.lastSeq = rt.last.seq;
+  if (rt.runOverCooldown > 0) rt.runOverCooldown -= dt;
+  if (rt.giveCooldown > 0) rt.giveCooldown -= dt;
+  advanceLagBuckets(rt);
+  if (sim.phase === 'ended') {
+    // Match over: inputs are still consumed (acks) but only the aim follows them.
+    rt.hasControls = false;
+    if (popInput(rt)) {
+      p.lastSeq = rt.last.seq;
+      applyAim(p, rt);
+    }
+    return;
+  }
+  rt.credit = Math.min(INPUT_CREDIT_MAX, rt.credit + INPUT_DRIFT_CREDIT);
+  if (rt.qLen === 0) {
+    rt.starved++;
+    rt.deepTicks = 0;
+    rt.credit = Math.min(INPUT_CREDIT_MAX, rt.credit + 1);
+    if (rt.starved <= INPUT_PAUSE_MAX_TICKS) {
+      // Paused: the late input will be applied when it arrives. Plane riders still ride along and
+      // a driver's vehicle keeps its last controls (rt.hasControls is left as it was).
+      if (p.mode === 'plane' && sim.plane) planePosition(sim.plane, p.pos);
+    } else {
+      // Absent client: step the body with a neutral input (it falls, lands, stops).
+      neutralize(rt);
+      rt.curArrived = sim.time;
+      applyInput(sim, rt, dt, false);
+    }
+  } else {
+    rt.starved = 0;
+    popInput(rt);
+    applyInput(sim, rt, dt, true);
+    if (rt.qLen > CATCHUP_DEPTH) rt.deepTicks++;
+    else if (rt.qLen <= 1) rt.deepTicks = 0;
+    if (rt.deepTicks >= CATCHUP_DELAY_TICKS && rt.qLen > 1 && rt.credit >= 1) {
+      // Catching up: a second full input step this tick.
+      rt.credit -= 1;
+      popInput(rt);
+      applyInput(sim, rt, dt, true);
+      if (rt.qLen <= 1) rt.deepTicks = 0;
+    } else if (rt.qLen <= 1 && rt.credit > 0) {
+      rt.credit = Math.max(0, rt.credit - INPUT_CREDIT_DECAY);
+    }
+  }
+  if (p.life === 'dead') return;
+  tickBoost(p, dt);
+  // Bleeding out (paused while being revived).
+  if (p.life === 'downed' && p.revivedBy === null) {
+    p.downedHp -= DOWNED_BLEED_PER_SEC * (1 + 0.5 * (p.knockCount - 1)) * dt;
+    if (p.downedHp <= 0) killPlayer(sim, p, p.lastAttacker, 'bleed', rt.knockHeadshot, rt.knockDistance, false);
+  }
+}
+
+/** Rotate the view-lag baseline buckets once per LAG_BUCKET_TICKS ticks. */
+function advanceLagBuckets(rt: PlayerRt): void {
+  if (++rt.lagBucketTicks < LAG_BUCKET_TICKS) return;
+  rt.lagBucketTicks = 0;
+  rt.lagBucketIdx = (rt.lagBucketIdx + 1) % LAG_BUCKETS;
+  rt.lagBuckets[rt.lagBucketIdx] = Infinity;
+}
+
+/** Base aim (recoil is added on top server side). */
+function applyAim(p: PlayerState, rt: PlayerRt): void {
+  const input = rt.last;
+  p.yaw = wrapAngle(input.yaw);
+  p.pitch = input.pitch > PITCH_LIMIT ? PITCH_LIMIT : input.pitch < -PITCH_LIMIT ? -PITCH_LIMIT : input.pitch;
+}
+
+/** Sample the client's view lag and aim speed from a real (fresh) input. */
+function observeInput(sim: GameSim, rt: PlayerRt): void {
+  const input = rt.last;
+  const now = sim.time * 1000;
+  const wait = Math.max(0, now - rt.curArrived * 1000);
+  const lag = Math.max(0, now - input.rt - wait);
+  if (lag < rt.lagBuckets[rt.lagBucketIdx]) rt.lagBuckets[rt.lagBucketIdx] = lag;
+  // Angle between consecutive base aim directions.
+  const y = input.yaw, pt = input.pitch;
+  let d = 0;
+  if (rt.hasPrevAim) {
+    const c = Math.sin(pt) * Math.sin(rt.prevPitch) + Math.cos(pt) * Math.cos(rt.prevPitch) * Math.cos(y - rt.prevYaw);
+    d = Math.acos(c > 1 ? 1 : c < -1 ? -1 : c);
+  }
+  rt.prevYaw = y;
+  rt.prevPitch = pt;
+  rt.hasPrevAim = true;
+  rt.aimDeltas[rt.aimIdx] = d;
+  rt.aimIdx = (rt.aimIdx + 1) % rt.aimDeltas.length;
+}
+
+/** Apply one input step (`fresh` = a real client input, not a neutral stand-in). */
+function applyInput(sim: GameSim, rt: PlayerRt, dt: number, fresh: boolean): void {
+  const p = rt.p;
+  if (fresh) {
+    p.lastSeq = rt.last.seq;
+    observeInput(sim, rt);
+  }
   const input = rt.last;
   const held = input.buttons;
   const pressed = held & ~p.lastButtons;
-  // A repeated input has its edge buttons cleared; remember them as still held so the next real
-  // input (which may still hold the key) does not produce a second press.
-  const nextLast = fresh ? held : held | (p.lastButtons & EDGE_BUTTONS);
+  const nextLast = held;
   rt.hasControls = false;
-  if (rt.runOverCooldown > 0) rt.runOverCooldown -= dt;
-  if (rt.giveCooldown > 0) rt.giveCooldown -= dt;
 
-  // Base aim (recoil is added on top server side).
-  p.yaw = wrapAngle(input.yaw);
-  p.pitch = input.pitch > PITCH_LIMIT ? PITCH_LIMIT : input.pitch < -PITCH_LIMIT ? -PITCH_LIMIT : input.pitch;
+  applyAim(p, rt);
 
   const acts = input.actions!;
   if (p.life === 'dead') {
@@ -198,7 +298,8 @@ export function updatePlayer(sim: GameSim, rt: PlayerRt, dt: number): void {
     const shooting = (held & BTN.FIRE) !== 0 && w !== null;
     const ok = !!t && t.life === 'downed' && p.life === 'alive' && p.mode === 'ground'
       && (held & BTN.INTERACT) !== 0 && still && !shooting
-      && Math.hypot(t.pos.x - p.pos.x, t.pos.y - p.pos.y, t.pos.z - p.pos.z) <= REVIVE_RANGE + REVIVE_KEEP_SLACK;
+      && Math.hypot(t.pos.x - p.pos.x, t.pos.y - p.pos.y, t.pos.z - p.pos.z) <= REVIVE_RANGE + REVIVE_KEEP_SLACK
+      && reviveLineOfSight(sim, p, t);
     if (!ok) cancelRevive(sim, p);
     else {
       p.revive.elapsed += dt;
@@ -216,12 +317,5 @@ export function updatePlayer(sim: GameSim, rt: PlayerRt, dt: number): void {
     }
   }
 
-  tickBoost(p, dt);
-
-  // Bleeding out (paused while being revived).
-  if (p.life === 'downed' && p.revivedBy === null) {
-    p.downedHp -= DOWNED_BLEED_PER_SEC * (1 + 0.5 * (p.knockCount - 1)) * dt;
-    if (p.downedHp <= 0) killPlayer(sim, p, p.lastAttacker, 'bleed', rt.knockHeadshot, rt.knockDistance, false);
-  }
   p.lastButtons = nextLast;
 }

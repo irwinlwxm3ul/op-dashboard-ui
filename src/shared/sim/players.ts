@@ -1,16 +1,26 @@
-// Player state construction, per-player runtime data (never networked) and the bounded input
-// queue (one input consumed per tick; missing inputs repeat the last one without edges/actions).
+// Player state construction, per-player runtime data (never networked) and the input queue.
+//
+// Every input a client sends is applied exactly once, in order (client prediction replays the very
+// same inputs). A tick with an empty queue does not invent input: the player is paused and earns
+// one catch-up credit; once a backlog has built up the player tick consumes two inputs per tick
+// (paid with credit) until the queue is shallow again — see playerTick.ts.
 
-import { MAX_HEALTH, MAX_INPUT_QUEUE } from '../constants';
+import { MAX_HEALTH } from '../constants';
 import { emptyInventory } from '../items';
 import { createMoveEvents, createMoveIntent } from '../physics';
 import type { MoveEvents, MoveIntent } from '../physics';
 import type { VehicleControls } from '../vehicles';
 import type { ClientAction, EntityId, PlayerInput, PlayerState, TeamId, Vec3 } from '../types';
 import { BTN } from '../types';
+import { FLAG_HS_WINDOW, FLAG_SNAP_COUNT, FLAG_SNAP_WINDOW, INPUT_QUEUE_CAPACITY } from './tuning';
 
-/** Buttons that act on their press only; they are cleared when an input is repeated. */
+/** Buttons that act on their press only (kept when an input's movement part has to be merged away). */
 export const EDGE_BUTTONS = BTN.JUMP | BTN.RELOAD;
+/** Max discrete actions carried by one queued input (merged extras beyond are dropped). */
+const MAX_ACTIONS = 8;
+/** View-lag baseline: buckets of LAG_BUCKET_TICKS ticks (6 x 0.5 s = 3 s window). */
+export const LAG_BUCKETS = 6;
+export const LAG_BUCKET_TICKS = 15;
 const PITCH_LIM = (89 * Math.PI) / 180;
 
 /** Server-side bookkeeping for one player (not part of the networked PlayerState). */
@@ -18,10 +28,42 @@ export interface PlayerRt {
   p: PlayerState;
   /** Ring buffer of queued inputs (objects are reused). */
   queue: PlayerInput[];
+  /** Sim time each queue slot's input arrived (parallel to `queue`). */
+  arrivedAt: Float64Array;
   qStart: number;
   qLen: number;
-  /** Last consumed input (repeated when nothing is queued). */
+  /** Input being / last processed (aim and stance survive pauses). */
   last: PlayerInput;
+  /** Arrival sim time of `last` (server-measured queue wait for lag compensation). */
+  curArrived: number;
+  /** Consecutive ticks without a queued input. */
+  starved: number;
+  /** Banked catch-up credit (ticks the player was paused, plus clock-drift allowance). */
+  credit: number;
+  /** Consecutive ticks the queue was deeper than CATCHUP_DEPTH. */
+  deepTicks: number;
+  /** Transport-measured round trip time (ms) or -1 when unknown. */
+  rttMs: number;
+  /** Per-bucket minimum view lag (raw rewind minus queue wait, ms) over the last 3 s. */
+  lagBuckets: Float64Array;
+  lagBucketIdx: number;
+  lagBucketTicks: number;
+  /** Aim heuristics: base-aim change of the most recent inputs (rad), previous aim. */
+  aimDeltas: Float64Array;
+  aimIdx: number;
+  hasPrevAim: boolean;
+  prevYaw: number;
+  prevPitch: number;
+  /** Rolling window of player hits (1 = head). */
+  hsRing: Uint8Array;
+  hsIdx: number;
+  hsCount: number;
+  /** Sim times of the most recent snap-hits. */
+  snapTimes: Float64Array;
+  snapIdx: number;
+  /** Sim time of the last flag per kind. */
+  lastSnapFlag: number;
+  lastHsFlag: number;
   /** Highest seq accepted into the queue (older / duplicate inputs are dropped). */
   lastQueuedSeq: number;
   intent: MoveIntent;
@@ -117,15 +159,36 @@ export function createPlayerState(
 
 export function createPlayerRt(p: PlayerState, spawnIndex: number): PlayerRt {
   const queue: PlayerInput[] = [];
-  for (let i = 0; i < MAX_INPUT_QUEUE; i++) queue.push(neutralInput());
+  for (let i = 0; i < INPUT_QUEUE_CAPACITY; i++) queue.push(neutralInput());
   const last = neutralInput();
   last.yaw = p.yaw;
   return {
     p,
     queue,
+    arrivedAt: new Float64Array(INPUT_QUEUE_CAPACITY),
     qStart: 0,
     qLen: 0,
     last,
+    curArrived: 0,
+    starved: 0,
+    credit: 0,
+    deepTicks: 0,
+    rttMs: -1,
+    lagBuckets: new Float64Array(LAG_BUCKETS).fill(Infinity),
+    lagBucketIdx: 0,
+    lagBucketTicks: 0,
+    aimDeltas: new Float64Array(FLAG_SNAP_WINDOW),
+    aimIdx: 0,
+    hasPrevAim: false,
+    prevYaw: 0,
+    prevPitch: 0,
+    hsRing: new Uint8Array(FLAG_HS_WINDOW),
+    hsIdx: 0,
+    hsCount: 0,
+    snapTimes: new Float64Array(FLAG_SNAP_COUNT).fill(-Infinity),
+    snapIdx: 0,
+    lastSnapFlag: -Infinity,
+    lastHsFlag: -Infinity,
     lastQueuedSeq: -1,
     intent: createMoveIntent(p.yaw),
     moveEv: createMoveEvents(),
@@ -164,55 +227,93 @@ function copyInput(dst: PlayerInput, src: PlayerInput): void {
   dst.rt = src.rt;
   const acts = dst.actions!;
   acts.length = 0;
-  if (src.actions) for (let i = 0; i < src.actions.length && i < 8; i++) acts.push(src.actions[i] as ClientAction);
+  if (src.actions) for (let i = 0; i < src.actions.length && i < MAX_ACTIONS; i++) acts.push(src.actions[i] as ClientAction);
+}
+
+/** Fold the discrete parts of `src` (actions, edge buttons) into `dst` (whose movement wins). */
+export function mergeExtras(dst: PlayerInput, src: PlayerInput): void {
+  dst.buttons |= (src.buttons | 0) & EDGE_BUTTONS;
+  const acts = dst.actions!;
+  if (src.actions) for (let i = 0; i < src.actions.length && acts.length < MAX_ACTIONS; i++) acts.push(src.actions[i]);
+}
+
+function validInput(input: PlayerInput): boolean {
+  return !!input && finite(input.seq) && finite(input.mx) && finite(input.mz) && finite(input.yaw)
+    && finite(input.pitch) && finite(input.rt) && finite(input.buttons);
 }
 
 /**
- * Queue an input (defensive validation: non-finite values are rejected, axes / pitch clamped,
- * old or duplicate seq dropped, queue bounded with drop-oldest).
+ * Queue an input arriving at sim time `now` (defensive validation: non-finite values rejected,
+ * axes / pitch clamped, old or duplicate seq dropped). The ring holds INPUT_QUEUE_CAPACITY inputs;
+ * on overflow (only reachable by a client flooding past its token bucket, or a stall of more than
+ * a second) the oldest input's movement is discarded but its actions and edge buttons are merged
+ * into the next one, so no discrete action is ever lost.
  */
-export function pushInput(rt: PlayerRt, input: PlayerInput): boolean {
-  if (!input || !finite(input.seq) || !finite(input.mx) || !finite(input.mz) || !finite(input.yaw)
-    || !finite(input.pitch) || !finite(input.rt) || !finite(input.buttons)) return false;
+export function pushInput(rt: PlayerRt, input: PlayerInput, now: number): boolean {
+  if (!validInput(input)) return false;
   if (input.seq <= rt.lastQueuedSeq) return false;
   rt.lastQueuedSeq = input.seq;
   const cap = rt.queue.length;
   if (rt.qLen === cap) {
-    // Drop the oldest.
+    const oldest = rt.queue[rt.qStart];
     rt.qStart = (rt.qStart + 1) % cap;
     rt.qLen--;
+    mergeExtras(rt.queue[rt.qStart], oldest);
+    oldest.actions!.length = 0;
   }
-  const slot = rt.queue[(rt.qStart + rt.qLen) % cap];
-  copyInput(slot, input);
+  const idx = (rt.qStart + rt.qLen) % cap;
+  copyInput(rt.queue[idx], input);
+  rt.arrivedAt[idx] = now;
   rt.qLen++;
   return true;
 }
 
 /**
- * Input to process this tick: the next queued one (copied into rt.last, so it becomes the repeat
- * template) or, when the queue is empty, the last input with actions and edge buttons cleared.
- * Returns whether a fresh input was consumed.
+ * Merge only the discrete parts (actions, edge buttons) of an input into the newest queued one —
+ * used when a client exceeds its input rate: the movement is dropped, the intent is kept. When
+ * nothing is queued the input is queued normally.
  */
+export function mergeInput(rt: PlayerRt, input: PlayerInput, now: number): boolean {
+  if (!validInput(input)) return false;
+  if (input.seq <= rt.lastQueuedSeq) return false;
+  if (rt.qLen === 0) return pushInput(rt, input, now);
+  rt.lastQueuedSeq = input.seq;
+  mergeExtras(rt.queue[(rt.qStart + rt.qLen - 1) % rt.queue.length], input);
+  return true;
+}
+
+/** Consume the next queued input into rt.last. Returns false when the queue is empty. */
 export function popInput(rt: PlayerRt): boolean {
-  const last = rt.last;
-  if (rt.qLen === 0) {
-    last.buttons &= ~EDGE_BUTTONS;
-    last.actions!.length = 0;
-    return false;
-  }
-  const src = rt.queue[rt.qStart];
+  if (rt.qLen === 0) return false;
+  const idx = rt.qStart;
+  const src = rt.queue[idx];
   rt.qStart = (rt.qStart + 1) % rt.queue.length;
   rt.qLen--;
-  copyInput(last, src);
+  copyInput(rt.last, src);
+  rt.curArrived = rt.arrivedAt[idx];
   src.actions!.length = 0;
   return true;
 }
 
-/** Clear queued input and reset to a neutral repeat template (control handover to a bot). */
+/** Turn rt.last into a neutral input (no movement, no buttons, no actions; aim and stance kept). */
+export function neutralize(rt: PlayerRt): void {
+  const l = rt.last;
+  l.mx = 0;
+  l.mz = 0;
+  l.buttons = 0;
+  l.actions!.length = 0;
+}
+
+/** Clear queued input and pacing state (control handover to a bot). */
 export function resetInput(rt: PlayerRt): void {
   rt.qLen = 0;
   rt.qStart = 0;
   rt.lastQueuedSeq = -1;
+  rt.starved = 0;
+  rt.credit = 0;
+  rt.deepTicks = 0;
+  rt.rttMs = -1;
+  rt.lagBuckets.fill(Infinity);
   const yaw = rt.p.yaw, pitch = rt.p.pitch, slot = rt.p.activeSlot;
   const l = rt.last;
   l.mx = 0; l.mz = 0; l.buttons = 0; l.actions!.length = 0;

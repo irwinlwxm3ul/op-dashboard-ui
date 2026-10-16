@@ -1,7 +1,8 @@
-// Small recognisable ground-loot meshes, one geometry per ItemId: weapon silhouettes lying on their
-// side, colour-coded ammo boxes, white/red med items, energy can, red jerry can, frag grenade and the
-// same vest / helmet / backpack shapes the soldiers wear. All baked to vertex colours with the base
-// resting on y = 0 and centred on x/z so items spin in place.
+// Ground-loot meshes, one geometry per ItemId: the curated real models once loaded (weapons lying on
+// their side, ammo boxes, med items, gear ...), procedural stand-ins until then or if a model is
+// missing (colour-coded ammo boxes, white/red med items, energy can, red jerry can, frag grenade and
+// the same vest / helmet / backpack shapes the soldiers wear). All baked to vertex colours with the
+// base resting on y = 0 and centred on x/z so items spin in place.
 
 import * as THREE from 'three';
 import type { AmmoId, ConsumableId, GearId, ItemCategory, ItemId, ThrowableId } from '../../../shared/types';

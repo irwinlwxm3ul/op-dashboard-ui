@@ -1,4 +1,5 @@
-// Procedural first-person gun models per WeaponId with their animation anchors.
+// First-person gun models per WeaponId with their animation anchors: procedural guns (fallback,
+// with moving parts) and wrappers around the imported weapon models (buildModelGun).
 //
 // Gun-local space: origin at the firing hand's grip point, -Z towards the muzzle, +Y up. Static
 // parts are merged per material; moving parts (magazine, slide, bolt, pump, charging handle) are

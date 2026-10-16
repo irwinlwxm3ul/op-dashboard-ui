@@ -8,9 +8,11 @@
 //  * After sampling, the spine (Abdomen + Chest) is rotated so the gun points exactly along the
 //    player's aim, and lean / hit flinch / fire kick are added procedurally. Free fall gets its body
 //    pitch from the procedural pose (the clip is upright).
-//  * Gear (helmet / vest / backpack levels, with the team-colour stripes) and the held or slung gun
-//    are ONE extra skinned mesh whose proxy bones ride on the character's Head / Chest bones and
-//    the weapon socket. 3 draw calls per character (body, team armband, gear+gun).
+//  * Worn gear (helmet / vest / backpack levels from PlayerView.gear) uses the real item models
+//    placed with GEAR_WEAR (procedural gear fitted to the body while an item model is missing),
+//    with team-colour marks, and is ONE extra skinned mesh together with the held / slung gun:
+//    proxy bones ride on the character's Head / Torso / Chest bones and the weapon socket.
+//    3 draw calls per character (body, team armband, gear + gun).
 //  * Every material gets the entity shader patch (rim light, dither fade, reduced fog).
 
 import * as THREE from 'three';
