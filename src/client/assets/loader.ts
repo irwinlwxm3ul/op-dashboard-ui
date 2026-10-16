@@ -220,8 +220,17 @@ export function createCharacterInstance(asset: CharacterAsset): CharacterInstanc
   } else {
     root.add(socket);
   }
-  const body = (byName.get(asset.variant.bodyMesh) as THREE.SkinnedMesh | undefined) ?? null;
   const teamBand = (byName.get(asset.variant.teamMesh) as THREE.SkinnedMesh | undefined) ?? null;
+  // The body mesh shares its glTF name with the pelvis bone ("Body"), so GLTFLoader renames the mesh
+  // (e.g. "Body_1") and a name lookup finds the bone. Pick the largest skinned mesh that isn't the band.
+  let body: THREE.SkinnedMesh | null = null;
+  let bodyVerts = -1;
+  root.traverse((o) => {
+    const m = o as THREE.SkinnedMesh;
+    if (!m.isSkinnedMesh || m === teamBand) return;
+    const n = m.geometry.getAttribute('position')?.count ?? 0;
+    if (n > bodyVerts) { bodyVerts = n; body = m; }
+  });
   let ownMaterial: THREE.MeshStandardMaterial | null = null;
   const mixer = new THREE.AnimationMixer(root);
   return {
@@ -230,7 +239,7 @@ export function createCharacterInstance(asset: CharacterAsset): CharacterInstanc
     mixer,
     bones,
     weaponSocket: socket,
-    body: body && body.isSkinnedMesh ? body : null,
+    body,
     teamBand: teamBand && teamBand.isSkinnedMesh ? teamBand : null,
     setTeamColor(color) {
       if (!teamBand) return;

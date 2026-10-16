@@ -11,6 +11,7 @@
 // Node names in this file are the names three.js gives the nodes after loading (GLTFLoader strips
 // '.', so the source rig's "Wrist.R" is "WristR").
 
+import { hash32 } from '../../shared/rng';
 import type { AmmoId, ConsumableId, GearId, ThrowableId, WeaponId } from '../../shared/types';
 
 export type Vec3 = readonly [number, number, number];
@@ -142,8 +143,8 @@ export const CHARACTER_VARIANT_IDS = Object.keys(CHARACTER_VARIANTS) as Characte
 
 /** Deterministic variant for a player id (stable across clients). */
 export function characterVariantFor(playerId: number): CharacterVariantId {
-  const h = Math.imul(playerId ^ 0x9e3779b9, 0x85ebca6b) >>> 0;
-  return CHARACTER_VARIANT_IDS[h % CHARACTER_VARIANT_IDS.length];
+  // Full avalanche hash: small sequential ids (1..64) must spread evenly over all variants.
+  return CHARACTER_VARIANT_IDS[hash32(playerId, 0x51ed) % CHARACTER_VARIANT_IDS.length];
 }
 
 /**
