@@ -616,4 +616,85 @@ export const ja: LocaleDict = {
 
   // --- language
   'lang.label': '言語',
+
+  // --- ui: main menu
+  'ui.main.fontCredit': 'タイトルフォント：Lilita One（SIL Open Font License）。',
+
+  // --- ui: lobby browser
+  'ui.mp.connectHint': '名前を入力して接続すると、オンラインロビーを探せます。',
+  'ui.mp.connectedAs': '{name}として接続中',
+  'ui.mp.disconnect': '切断',
+  'ui.mp.notConnected': '接続すると公開中のロビーが表示されます。',
+  'ui.mp.defaultLobbyName': '{name}のロビー',
+
+  // --- ui: lobby room
+  'ui.lobby.edit': '編集',
+  'ui.lobby.teams': 'チーム',
+  'ui.lobby.readyHint': '降下の準備ができたら、準備完了にしましょう。',
+
+  // --- ui: loading screen
+  'ui.loading.tip': 'ヒント',
+  'ui.tip.1': 'マークスマンライフルやスナイパーライフルの弾は、着弾までに時間がかかり落下もします。遠くの標的は上を、動く標的は進行方向の先を狙いましょう。',
+  'ui.tip.2': 'マップ上の白い円は、次にプレイエリアが縮小する範囲を示しています。',
+  'ui.tip.3': '包帯と救急キットは体力75まで回復します。医療キットなら全回復できます。',
+  'ui.tip.4': 'エナジードリンクでブーストゲージが溜まります。ブースト中は体力が徐々に回復し、走る速度も上がります。',
+  'ui.tip.5': 'デュオとスクワッドでは、ダウンした味方のそばでインタラクトキーを長押しすると蘇生できます。',
+  'ui.tip.6': 'しゃがみや伏せの姿勢では、反動と弾のばらつきが小さくなります。',
+  'ui.tip.7': '車両は速いが音が大きい。燃料計に注意して、ガソリン缶を持ち歩きましょう。',
+  'ui.tip.8': '全体マップを右クリックするとマーカーを設置できます。コンパスとミニマップがその方向を示します。',
+  'ui.tip.9': 'レベルの高いベストやヘルメットほど、壊れるまでに多くのダメージを吸収します。',
+  'ui.tip.10': '次の降下の前にトレーニング場へ行き、弾道の落下を体で覚えましょう。',
+
+  // --- ui: results
+  'ui.results.yourStats': 'あなたの成績',
+  'ui.results.ofTotal': '/ {n}',
+  'ui.results.winners': '勝者：{names}',
+  'ui.results.spectator': 'このマッチは観戦者として視聴しました。',
+
+  // --- ui: settings / controls
+  'ui.unit.degrees': '{n}°',
+  'ui.controls.groupMouse': 'マウス',
+  'ui.controls.capturing': '「{action}」に割り当てる新しいキーを押してください。Escでキャンセル。',
+  'ui.controls.rebindAria': '{action}：{key}。選択すると変更できます。',
+  'ui.controls.reserved': '{key}はブラウザで予約されています。別のキーを選んでください。',
+  'ui.controls.swapped': '重複を避けるため、「{action}」を{key}に移動しました。',
+  'ui.controls.resetDone': 'キー割り当てをデフォルトに戻しました。',
+
+  // --- ui: key caps
+  'ui.key.delete': 'Delete',
+  'ui.key.insert': 'Insert',
+  'ui.key.home': 'Home',
+  'ui.key.end': 'End',
+  'ui.key.pageUp': 'PageUp',
+  'ui.key.pageDown': 'PageDown',
+  'ui.key.menu': 'メニュー',
+
+  // --- ui: hud
+  'ui.hud.teamsLabel': 'チーム',
+  'ui.hud.eliminatedHint': '{key}でメニューを開くと、マッチを抜けられます。',
+  'ui.feed.died': '{victim}が死亡',
+
+  // --- feel
+  'feel.kill.finished': '{name}にとどめを刺した',
+  'feel.kill.distance': '{distance}m',
+  'feel.death.vehicle': '車両事故で死亡した',
+  'feel.source.zone': 'ブルーゾーン',
+  'feel.source.vehicle': '車両',
+  'feel.source.explosion': '爆発',
+  'feel.source.fall': '落下ダメージ',
+  'feel.source.bleed': '出血',
+  'feel.source.drown': '溺水',
+  'feel.unknownPlayer': '不明なプレイヤー',
+  'feel.target.damage': '{damage}ダメージ',
+  'feel.target.distance': '{distance}m',
+
+  // --- flow
+  'flow.loading.world': '地形を生成中…',
+  'flow.loading.scene': 'ワールドを構築中…',
+  'flow.loading.connecting': 'マッチに接続中…',
+  'flow.loading.waiting': 'マッチデータを待っています…',
+  'flow.loading.starting': 'シミュレーションを開始中…',
+  'flow.loading.ready': '準備完了',
+  'flow.clickToPlay': 'クリックしてプレイ',
+  'flow.webglUnsupported': 'お使いのブラウザはWebGL 2に対応していません。DROPZONEのプレイにはWebGL 2が必要です。',
 };

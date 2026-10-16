@@ -617,4 +617,85 @@ export const ar: LocaleDict = {
 
   // --- language
   'lang.label': 'اللغة',
+
+  // --- ui: main menu
+  'ui.main.fontCredit': 'خط العنوان: Lilita One ‏(SIL Open Font License).',
+
+  // --- ui: lobby browser
+  'ui.mp.connectHint': 'اكتب اسمك واتصل لتتصفّح الردهات على الإنترنت.',
+  'ui.mp.connectedAs': 'متصل باسم {name}',
+  'ui.mp.disconnect': 'قطع الاتصال',
+  'ui.mp.notConnected': 'اتصل لترى الردهات المفتوحة.',
+  'ui.mp.defaultLobbyName': 'ردهة {name}',
+
+  // --- ui: lobby room
+  'ui.lobby.edit': 'تعديل',
+  'ui.lobby.teams': 'الفرق',
+  'ui.lobby.readyHint': 'اضغط «أنا جاهز» حين تكون مستعدًا للقفز.',
+
+  // --- ui: loading screen
+  'ui.loading.tip': 'نصيحة',
+  'ui.tip.1': 'رصاص بنادق الرامي المحدد والقنص يستغرق وقتًا ليصل ويهبط في مساره: صوّب فوق الأهداف البعيدة وأمام الأهداف المتحركة.',
+  'ui.tip.2': 'تُظهر الدائرة البيضاء على الخريطة المكان الذي ستضيق إليه منطقة اللعب في المرة القادمة.',
+  'ui.tip.3': 'تعيد الضمادات وحقائب الإسعافات الأولية صحتك حتى 75، أما العُدّة الطبية فتعيدها كاملة.',
+  'ui.tip.4': 'تملأ مشروبات الطاقة شريط التعزيز، الذي يعالجك تدريجيًا ويجعلك تركض أسرع.',
+  'ui.tip.5': 'في مباريات الثنائي والفرقة، استمر بالضغط على مفتاح التفاعل بجوار زميل ساقط لإنعاشه.',
+  'ui.tip.6': 'الانحناء والانبطاح يقلّلان الارتداد وتشتّت الرصاص.',
+  'ui.tip.7': 'المركبات سريعة لكنها صاخبة. راقب مؤشر الوقود واحمل معك جالون وقود.',
+  'ui.tip.8': 'انقر بالزر الأيمن على الخريطة الكاملة لوضع علامة، وستشير إليها البوصلة والخريطة المصغّرة.',
+  'ui.tip.9': 'السترات والخوذ ذات المستوى الأعلى تمتص ضررًا أكبر قبل أن تتحطم.',
+  'ui.tip.10': 'زُر ساحة التدريب لتتعلّم سقوط الرصاصة قبل قفزتك القادمة.',
+
+  // --- ui: results
+  'ui.results.yourStats': 'إحصاءاتك',
+  'ui.results.ofTotal': 'من {n}',
+  'ui.results.winners': 'الفائزون: {names}',
+  'ui.results.spectator': 'شاهدت هذه المباراة بصفتك متفرّجًا.',
+
+  // --- ui: settings / controls
+  'ui.unit.degrees': '{n}°',
+  'ui.controls.groupMouse': 'الفأرة',
+  'ui.controls.capturing': 'اضغط المفتاح الجديد لـ «{action}». Esc للإلغاء.',
+  'ui.controls.rebindAria': '{action}: {key}. فعّل الزر للتغيير.',
+  'ui.controls.reserved': 'المفتاح {key} محجوز للمتصفح. اختر مفتاحًا آخر.',
+  'ui.controls.swapped': 'نُقل «{action}» إلى {key} لتجنّب التعارض.',
+  'ui.controls.resetDone': 'أُعيد ضبط المفاتيح إلى الإعدادات الافتراضية.',
+
+  // --- ui: key caps
+  'ui.key.delete': 'Delete',
+  'ui.key.insert': 'Insert',
+  'ui.key.home': 'Home',
+  'ui.key.end': 'End',
+  'ui.key.pageUp': 'Page Up',
+  'ui.key.pageDown': 'Page Down',
+  'ui.key.menu': 'القائمة',
+
+  // --- ui: hud
+  'ui.hud.teamsLabel': 'الفرق',
+  'ui.hud.eliminatedHint': 'اضغط {key} لفتح القائمة ومغادرة المباراة.',
+  'ui.feed.died': 'مات {victim}',
+
+  // --- feel
+  'feel.kill.finished': 'أجهزت على {name}',
+  'feel.kill.distance': '{distance} م',
+  'feel.death.vehicle': 'متّ في حادث مركبة',
+  'feel.source.zone': 'المنطقة الزرقاء',
+  'feel.source.vehicle': 'مركبة',
+  'feel.source.explosion': 'انفجار',
+  'feel.source.fall': 'ضرر السقوط',
+  'feel.source.bleed': 'نزيف',
+  'feel.source.drown': 'غرق',
+  'feel.unknownPlayer': 'لاعب مجهول',
+  'feel.target.damage': 'ضرر {damage}',
+  'feel.target.distance': '{distance} م',
+
+  // --- flow
+  'flow.loading.world': 'جارٍ إنشاء التضاريس…',
+  'flow.loading.scene': 'جارٍ بناء العالم…',
+  'flow.loading.connecting': 'جارٍ الاتصال بالمباراة…',
+  'flow.loading.waiting': 'بانتظار بيانات المباراة…',
+  'flow.loading.starting': 'جارٍ بدء المحاكاة…',
+  'flow.loading.ready': 'جاهز',
+  'flow.clickToPlay': 'انقر للعب',
+  'flow.webglUnsupported': 'متصفحك لا يدعم WebGL 2، وهو ضروري لتشغيل DROPZONE.',
 };

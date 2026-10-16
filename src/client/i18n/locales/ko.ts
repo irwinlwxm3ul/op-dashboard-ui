@@ -616,4 +616,85 @@ export const ko: LocaleDict = {
 
   // --- language
   'lang.label': '언어',
+
+  // --- ui: main menu
+  'ui.main.fontCredit': '제목 글꼴: Lilita One(SIL Open Font License).',
+
+  // --- ui: lobby browser
+  'ui.mp.connectHint': '이름을 입력하고 연결하면 온라인 로비를 둘러볼 수 있습니다.',
+  'ui.mp.connectedAs': '{name}(으)로 연결됨',
+  'ui.mp.disconnect': '연결 끊기',
+  'ui.mp.notConnected': '연결하면 열린 로비를 볼 수 있습니다.',
+  'ui.mp.defaultLobbyName': '{name}의 로비',
+
+  // --- ui: lobby room
+  'ui.lobby.edit': '편집',
+  'ui.lobby.teams': '팀',
+  'ui.lobby.readyHint': '낙하할 준비가 되면 준비하기를 누르세요.',
+
+  // --- ui: loading screen
+  'ui.loading.tip': '팁',
+  'ui.tip.1': '지정사수소총과 저격소총의 탄은 날아가는 데 시간이 걸리고 아래로 떨어집니다. 먼 표적은 위를, 움직이는 표적은 이동 방향 앞쪽을 조준하세요.',
+  'ui.tip.2': '지도의 흰색 원은 플레이 구역이 다음에 좁혀질 위치를 보여 줍니다.',
+  'ui.tip.3': '붕대와 구급상자는 체력을 75까지 회복합니다. 의료 키트는 체력을 최대로 회복합니다.',
+  'ui.tip.4': '에너지 드링크는 부스트 게이지를 채웁니다. 부스트는 시간이 지나면서 체력을 회복하고 더 빨리 달리게 해 줍니다.',
+  'ui.tip.5': '듀오와 스쿼드 매치에서는 기절한 팀원 옆에서 상호작용 키를 길게 눌러 부활시킬 수 있습니다.',
+  'ui.tip.6': '앉거나 엎드리면 반동과 탄 퍼짐이 줄어듭니다.',
+  'ui.tip.7': '차량은 빠르지만 소리가 큽니다. 연료 게이지를 확인하고 휘발유 통을 챙기세요.',
+  'ui.tip.8': '전체 지도를 우클릭하면 마커를 설치할 수 있습니다. 나침반과 미니맵이 마커 방향을 가리킵니다.',
+  'ui.tip.9': '레벨이 높은 조끼와 헬멧일수록 파괴되기 전까지 더 많은 피해를 흡수합니다.',
+  'ui.tip.10': '다음 낙하 전에 훈련장에서 탄도 낙차를 익혀 보세요.',
+
+  // --- ui: results
+  'ui.results.yourStats': '내 기록',
+  'ui.results.ofTotal': '/ {n}',
+  'ui.results.winners': '승자: {names}',
+  'ui.results.spectator': '이 매치를 관전자로 지켜보았습니다.',
+
+  // --- ui: settings / controls
+  'ui.unit.degrees': '{n}°',
+  'ui.controls.groupMouse': '마우스',
+  'ui.controls.capturing': '“{action}”에 지정할 새 키를 누르세요. Esc로 취소합니다.',
+  'ui.controls.rebindAria': '{action}: {key}. 선택하면 변경할 수 있습니다.',
+  'ui.controls.reserved': '{key} 키는 브라우저에서 예약된 키입니다. 다른 키를 선택하세요.',
+  'ui.controls.swapped': '충돌을 피하기 위해 “{action}”을(를) {key} 키로 옮겼습니다.',
+  'ui.controls.resetDone': '키 설정을 기본값으로 초기화했습니다.',
+
+  // --- ui: key caps
+  'ui.key.delete': 'Delete',
+  'ui.key.insert': 'Insert',
+  'ui.key.home': 'Home',
+  'ui.key.end': 'End',
+  'ui.key.pageUp': 'Page Up',
+  'ui.key.pageDown': 'Page Down',
+  'ui.key.menu': '메뉴',
+
+  // --- ui: hud
+  'ui.hud.teamsLabel': '팀',
+  'ui.hud.eliminatedHint': '{key} 키를 눌러 메뉴를 열고 매치에서 나갈 수 있습니다.',
+  'ui.feed.died': '{victim} 님이 사망',
+
+  // --- feel
+  'feel.kill.finished': '{name} 님에게 마무리 일격을 가했습니다',
+  'feel.kill.distance': '{distance}m',
+  'feel.death.vehicle': '차량 사고로 사망했습니다',
+  'feel.source.zone': '블루존',
+  'feel.source.vehicle': '차량',
+  'feel.source.explosion': '폭발',
+  'feel.source.fall': '낙하 피해',
+  'feel.source.bleed': '출혈',
+  'feel.source.drown': '익사',
+  'feel.unknownPlayer': '알 수 없는 플레이어',
+  'feel.target.damage': '피해량 {damage}',
+  'feel.target.distance': '{distance}m',
+
+  // --- flow
+  'flow.loading.world': '지형 생성 중…',
+  'flow.loading.scene': '월드 구성 중…',
+  'flow.loading.connecting': '매치에 연결하는 중…',
+  'flow.loading.waiting': '매치 데이터를 기다리는 중…',
+  'flow.loading.starting': '시뮬레이션 시작 중…',
+  'flow.loading.ready': '준비 완료',
+  'flow.clickToPlay': '클릭하여 플레이',
+  'flow.webglUnsupported': '브라우저가 WebGL 2를 지원하지 않습니다. DROPZONE을 플레이하려면 WebGL 2가 필요합니다.',
 };
