@@ -15,6 +15,10 @@ import type { BotState } from './state';
 export const THINK_EVERY = 5;
 /** Global line-of-sight raycasts per tick shared by all bots. */
 export const LOS_BUDGET_PER_TICK = 28;
+/** Upper bound of raycasts one bot spends per think. */
+export const MAX_LOS_PER_THINK = 4;
+/** Part of the LOS budget kept for between-think target refreshes. */
+export const LOS_REFRESH_RESERVE = 6;
 /** Global A* node expansions per tick. */
 export const NAV_BUDGET_PER_TICK = 1600;
 /** Nav tiles that may be generated per tick (lazy grid). */
@@ -46,6 +50,8 @@ export class BotSystem {
   now = 0;
   dt = TICK_DT;
   losLeft = 0;
+  /** Line-of-sight tests one thinking bot may spend this tick (fair share of the budget). */
+  losPerThink = MAX_LOS_PER_THINK;
   /** Stats (tests / telemetry). */
   losUsed = 0;
 

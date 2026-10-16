@@ -2,13 +2,13 @@
 // with grid feelers while a path is pending, stuck detection with escalating recovery, and the
 // conversion of a world-space move direction into PlayerInput axes.
 
-import { hyp } from './util';
 import { angleDiff } from '../math';
 import type { PlayerState } from '../types';
 import { NF_BLOCKED, NF_NEAR, NF_UNKNOWN } from './nav';
 import { MAX_PLAN_DIST, PATH_DONE, PATH_FAILED, PATH_IDLE } from './pathfind';
 import type { BotState } from './state';
 import type { BotSystem } from './system';
+import { hyp } from './util';
 
 /** Seconds without progress before the bot counts as stuck. */
 const STUCK_TIME = 1.5;

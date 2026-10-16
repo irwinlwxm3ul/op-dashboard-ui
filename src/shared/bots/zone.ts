@@ -1,9 +1,9 @@
 // Zone awareness: where to rotate to and how urgent it is.
 
-import { hyp } from './util';
 import type { PlayerState } from '../types';
 import type { BotState } from './state';
 import type { BotSystem } from './system';
+import { hyp } from './util';
 
 /** Assumed travel speeds (m/s) for rotation timing. */
 const FOOT_SPEED = 5.6;

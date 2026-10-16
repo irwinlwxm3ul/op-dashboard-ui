@@ -47,9 +47,9 @@ const SPARK_HOT: [number, number, number] = [4.0, 2.6, 1.1];
 const SPARK_COOL: [number, number, number] = [1.6, 0.45, 0.08];
 const ARMOR_HOT: [number, number, number] = [2.6, 3.2, 4.2];
 const ARMOR_COOL: [number, number, number] = [0.4, 0.7, 1.4];
-const FIRE_HOT: [number, number, number] = [5.0, 3.0, 1.2];
-const FIRE_COOL: [number, number, number] = [0.9, 0.22, 0.04];
-const FLASH: [number, number, number] = [3.2, 2.3, 1.2];
+const FIRE_HOT: [number, number, number] = [3.2, 1.55, 0.42];
+const FIRE_COOL: [number, number, number] = [0.7, 0.16, 0.03];
+const FLASH: [number, number, number] = [3.0, 1.9, 0.75];
 
 const rnd = (a: number, b: number): number => a + Math.random() * (b - a);
 
@@ -69,7 +69,7 @@ class ShockRings {
     this.geom.rotateX(-Math.PI / 2);
     for (let i = 0; i < count; i++) {
       const mat = new THREE.MeshBasicMaterial({
-        color: 0xffe2b0, transparent: true, opacity: 0, depthWrite: false,
+        color: 0xffd9a0, transparent: true, opacity: 0, depthWrite: false,
         blending: THREE.AdditiveBlending, side: THREE.DoubleSide, toneMapped: false,
       });
       const m = new THREE.Mesh(this.geom, mat);
@@ -109,7 +109,7 @@ class ShockRings {
       const e = 1 - (1 - t) * (1 - t) * (1 - t);
       const s = Math.max(0.01, this.radius[i] * e);
       m.scale.set(s, 1, s);
-      this.mats[i].opacity = 0.75 * (1 - t) * (1 - t);
+      this.mats[i].opacity = 0.32 * (1 - t) * (1 - t);
     }
   }
 
@@ -373,7 +373,7 @@ export class EffectRecipes {
       w.rot = rnd(0, 6.28); w.rotSpeed = rnd(-1, 1); w.cell = CELL.SMOKE;
       this.alpha.emit(w);
     }
-    if (light) this.lights.flash(x, y, z, 0xffb45e, big ? 40 : 22, big ? 12 : 9, 0.06);
+    if (light) this.lights.flash(x, y, z, 0xffb45e, big ? 10 : 6, big ? 9 : 7, 0.06);
   }
 
   /** Explosion blast (frag or vehicle). */
@@ -383,13 +383,13 @@ export class EffectRecipes {
     const ground = this.world.groundAt(x, z, y + 0.5);
     const nearGround = y - ground < 2.5;
     const water = this.world.waterLevel > ground && Math.abs(y - this.world.waterLevel) < 2;
-    this.lights.flash(x, y + 1, z, 0xffa860, vehicle ? 2600 : 1600, R * 7, vehicle ? 0.55 : 0.4);
+    this.lights.flash(x, y + 1.5, z, 0xffa860, vehicle ? 650 : 380, R * 4.5, vehicle ? 0.55 : 0.4);
     // Core flash
     {
       const s = this.at(x, y + 0.6, z);
-      s.life = 0.14; s.size0 = R * 0.9 * k; s.size1 = R * 1.8 * k;
+      s.life = 0.14; s.size0 = R * 0.8 * k; s.size1 = R * 1.6 * k;
       this.color(FIRE_HOT, FIRE_HOT);
-      s.alpha = 1; s.fadePow = 1.6; s.cell = CELL.GLOW;
+      s.alpha = 0.8; s.fadePow = 1.6; s.cell = CELL.GLOW;
       this.add.emit(s);
     }
     // Fireball
@@ -400,7 +400,7 @@ export class EffectRecipes {
       s.life = rnd(0.45, 0.9) * (vehicle ? 1.4 : 1);
       s.size0 = rnd(0.8, 1.4) * k; s.size1 = rnd(2.4, 4.2) * k;
       this.color(FIRE_HOT, FIRE_COOL, 0.15);
-      s.alpha = 1; s.fadeIn = 0.04; s.fadePow = 1.3; s.drag = 3.5; s.gravity = -2.5;
+      s.alpha = 0.55; s.fadeIn = 0.04; s.fadePow = 1.3; s.drag = 3.5; s.gravity = -2.5;
       s.rot = rnd(0, 6.28); s.rotSpeed = rnd(-2, 2); s.cell = CELL.FIRE;
       this.add.emit(s);
     }
@@ -435,7 +435,7 @@ export class EffectRecipes {
         s.rot = rnd(0, 6.28); s.cell = CELL.DUST;
         this.alpha.emit(s);
       }
-      this.rings.spawn(x, ground + 0.15, z, R * 2.2 * k);
+      this.rings.spawn(x, ground + 0.15, z, R * 1.6 * k);
       if (!water) {
         const nrm = this.world.normalAt(x, z, this.nrm);
         this.decals.add(x, ground, z, nrm.x, nrm.y, nrm.z, R * 1.1 * k, DECAL.SCORCH, 45, 0.9);

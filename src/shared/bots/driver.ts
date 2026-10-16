@@ -5,7 +5,6 @@
 // path planner runs, then every bot is ticked. Bots "think" (perception, goal selection,
 // planning) at ~6 Hz staggered by id and steer / aim / fire every tick.
 
-import { hyp } from './util';
 import { TICK_DT } from '../constants';
 import { clamp, wrapAngle } from '../math';
 import type { BotDriver, SimView } from '../sim/view';
@@ -18,9 +17,11 @@ import { moveAxes } from './movement';
 import { findContact, perceive, refreshTarget, selectTarget } from './perception';
 import { createBotState, type BotGoal, type BotState } from './state';
 import {
-  BotSystem, LOS_BUDGET_PER_TICK, NAV_BUDGET_PER_TICK, THINK_EVERY, TILE_GEN_PER_TICK,
+  BotSystem, LOS_BUDGET_PER_TICK, LOS_REFRESH_RESERVE, MAX_LOS_PER_THINK, NAV_BUDGET_PER_TICK, THINK_EVERY,
+  TILE_GEN_PER_TICK,
 } from './system';
 import { vehicleTick } from './vehicle';
+import { hyp } from './util';
 
 /** Read-only snapshot of a bot's mind (debugging / tests). */
 export interface BotDebugInfo {
@@ -58,7 +59,12 @@ class Driver implements BotDriverEx {
 
   constructor(sim: SimView) {
     this.sys = new BotSystem(sim);
+    // Warm-up outside the tick loop: ballistic tables and one nav tile (so the first landing
+    // does not pay for cold code paths).
     warmBallistics();
+    const w = this.sys.world;
+    const town = w.towns.length > 0 ? w.towns[0] : null;
+    this.sys.grid.ensureCell(this.sys.grid.cell(town ? town.x : 0), this.sys.grid.cell(town ? town.z : 0), true);
   }
 
   update(dt: number): void {
@@ -71,6 +77,15 @@ class Driver implements BotDriverEx {
     if (sim.phase === 'waiting' || sim.phase === 'ended') return;
     sys.rebuildTeams();
     sys.planner.step(NAV_BUDGET_PER_TICK);
+    // Fair share of the raycast budget for the bots thinking this tick (so bots late in the
+    // iteration order are not starved every time).
+    let thinkers = 0;
+    for (const b of sys.bots.values()) {
+      if ((sys.tick + b.thinkSlot) % THINK_EVERY !== 0) continue;
+      const p = sim.players.get(b.id);
+      if (p && p.isBot && p.life !== 'dead') thinkers++;
+    }
+    sys.losPerThink = Math.max(1, Math.min(MAX_LOS_PER_THINK, Math.floor((LOS_BUDGET_PER_TICK - LOS_REFRESH_RESERVE) / Math.max(1, thinkers))));
     for (const p of sim.players.values()) {
       if (!p.isBot || p.life === 'dead') continue;
       let b = sys.bots.get(p.id);

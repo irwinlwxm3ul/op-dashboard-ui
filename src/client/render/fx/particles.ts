@@ -215,6 +215,8 @@ export class ParticleSystem {
       depthWrite: false,
       fog: true,
       blending: additive ? THREE.AdditiveBlending : THREE.NormalBlending,
+      // Velocity-stretched ribbons can face either way depending on the travel direction.
+      side: THREE.DoubleSide,
     });
     // Uniform merge clones values; assign the shared texture afterwards.
     this.material.uniforms.uMap.value = getSpriteAtlas();

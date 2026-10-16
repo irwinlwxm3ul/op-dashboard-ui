@@ -5,14 +5,13 @@ import * as THREE from 'three';
 import { solveTwoBone } from '../cameraMath';
 import { PartBuilder, type MatKey } from './parts';
 
-export type HandStyle = 'grip' | 'palm' | 'fist' | 'hold';
+export type HandStyle = 'grip' | 'palm' | 'fist';
 
 /** Wrist attachment point per hand style (hand-local). */
 const WRIST: Record<HandStyle, THREE.Vector3> = {
   grip: new THREE.Vector3(0.016, -0.07, 0.045),
   palm: new THREE.Vector3(0.0, -0.022, 0.06),
   fist: new THREE.Vector3(0.0, -0.03, 0.05),
-  hold: new THREE.Vector3(0.0, -0.035, 0.05),
 };
 
 function buildHandStyle(mats: Record<MatKey, THREE.Material>, style: HandStyle, mirror: boolean): THREE.Group {
@@ -28,21 +27,18 @@ function buildHandStyle(mats: Record<MatKey, THREE.Material>, style: HandStyle, 
       b.box('glove', 0.03, 0.02, 0.04, 0.03 * s, -0.035, 0.0);                  // knuckle bulk
       break;
     case 'palm':
-      // Palm up under a handguard centred above the origin.
-      b.box('glove', 0.052, 0.024, 0.088, 0.004 * s, -0.004, 0.006);           // palm
-      b.box('glove', 0.014, 0.05, 0.076, -0.03 * s, 0.022, -0.004);             // fingers up the far side
-      b.box('glove', 0.012, 0.032, 0.046, 0.031 * s, 0.014, 0.018, 0, 0, -0.2 * s); // thumb near side
+      // Palm up under a handguard centred above the origin; fingers curl up the near (left) side,
+      // the thumb up the far side.
+      b.box('glove', 0.05, 0.022, 0.084, 0.002 * s, -0.004, 0.006);            // palm
+      for (let i = 0; i < 4; i++) b.box('glove', 0.013, 0.05, 0.017, -0.03 * s, 0.024, -0.03 + i * 0.019); // fingers
+      b.box('glove', 0.012, 0.03, 0.044, 0.03 * s, 0.014, 0.02, 0, 0, -0.2 * s); // thumb
       break;
     case 'fist':
-      b.box('glove', 0.05, 0.055, 0.075, 0, 0, 0);
-      b.box('glove', 0.046, 0.024, 0.03, 0, -0.024, -0.03);                     // curled fingers
-      b.box('glove', 0.016, 0.018, 0.04, -0.026 * s, -0.004, -0.008);           // thumb
-      break;
-    case 'hold':
-      // Open hand holding an item (bandage, can, grenade): palm facing the item at +X (right hand).
-      b.box('glove', 0.022, 0.07, 0.085, -0.03 * s, -0.01, 0.0);               // palm
-      b.box('glove', 0.04, 0.016, 0.07, -0.008 * s, 0.02, -0.01);               // fingers over the top
-      b.box('glove', 0.04, 0.016, 0.04, -0.01 * s, -0.04, 0.015);               // thumb under
+      // Knuckles forward (-Z); back of the hand up.
+      b.box('glove', 0.05, 0.046, 0.058, 0, 0, 0.004);                           // hand
+      for (let i = 0; i < 4; i++) b.box('glove', 0.0115, 0.026, 0.026, (-0.018 + i * 0.012) * s, -0.004, -0.034); // finger rows
+      b.box('glove', 0.05, 0.013, 0.016, 0, 0.012, -0.03);                       // knuckle ridge
+      b.box('glove', 0.017, 0.016, 0.036, -0.024 * s, -0.016, -0.03, 0, 0.45 * s, 0); // thumb across
       break;
   }
   return b.build(`hand-${style}${mirror ? '-l' : '-r'}`);
@@ -81,7 +77,6 @@ export class Arm {
       grip: buildHandStyle(mats, 'grip', mirror),
       palm: buildHandStyle(mats, 'palm', mirror),
       fist: buildHandStyle(mats, 'fist', mirror),
-      hold: buildHandStyle(mats, 'hold', mirror),
     };
     for (const k of Object.keys(this.styles) as HandStyle[]) {
       this.styles[k].visible = k === this.style;
@@ -93,10 +88,10 @@ export class Arm {
       this.geoms.push(g);
       return g;
     };
-    this.upper = new THREE.Mesh(unit(0.05, 0.056), mats.sleeve);
-    this.fore = new THREE.Mesh(unit(0.036, 0.047), mats.sleeve);
-    this.cuff = new THREE.Mesh(unit(0.034, 0.037), mats.cuff);
-    const ballGeom = new THREE.SphereGeometry(0.05, 10, 8);
+    this.upper = new THREE.Mesh(unit(0.044, 0.05), mats.sleeve);
+    this.fore = new THREE.Mesh(unit(0.031, 0.041), mats.sleeve);
+    this.cuff = new THREE.Mesh(unit(0.03, 0.032), mats.cuff);
+    const ballGeom = new THREE.SphereGeometry(0.043, 10, 8);
     this.geoms.push(ballGeom);
     this.elbowBall = new THREE.Mesh(ballGeom, mats.sleeve);
     for (const m of [this.upper, this.fore, this.cuff, this.elbowBall]) {

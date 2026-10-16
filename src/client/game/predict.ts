@@ -12,20 +12,21 @@ import { AUTO_CHUTE_HEIGHT, DOWNED_BLEED_PER_SEC, MIN_CHUTE_DROP, REVIVE_TIME, T
 import { clamp } from '../../shared/math';
 import { hash32, hashFloat } from '../../shared/rng';
 import {
-  CONSUMABLES, WEAPONS, boostSpeedMul, fireInterval, recoilForShot, recoverRecoil, shotDirections, spreadCone, tickBoost,
+  CONSUMABLES, WEAPONS, applyConsumable, boostSpeedMul, canUseConsumable, fireInterval, recoilForShot, recoverRecoil,
+  removeItem, shotDirections, spreadCone, tickBoost,
 } from '../../shared/items';
 import type { RecoilKick, SpreadContext } from '../../shared/items';
-import { createMoveEvents, createMoveIntent, eyePosition, stepCharacter, stepDrop } from '../../shared/physics';
+import { createMoveEvents, createMoveIntent, eyePosition, lineOfSight, stepCharacter, stepDrop } from '../../shared/physics';
 import type { MoveEvents, MoveIntent } from '../../shared/physics';
 import type { NetVehicle, SelfState } from '../../shared/protocol';
 import { LIFE_CODES, MODE_CODES } from '../../shared/protocol';
 import {
   ADS_MOVE_MUL, FISTS_DRAW_TIME, MAX_RECOIL_PITCH, MAX_RECOIL_YAW, MOVE_DEADZONE, PITCH_LIMIT, PLANE_AUTO_EJECT, PLANE_JUMP_BACK,
-  PLANE_JUMP_CARRY, PLANE_JUMP_SPREAD, SPRAY_RESET_INTERVALS, SPRINT_MIN_FORWARD,
+  PLANE_JUMP_CARRY, PLANE_JUMP_SPREAD, SPRAY_RESET_INTERVALS, SPRINT_MIN_FORWARD, THROW_COOLDOWN,
 } from '../../shared/sim/tuning';
 import { BTN, STANCE_FROM_CODE } from '../../shared/types';
 import type {
-  MatchConfig, MovementMode, PlaneState, PlayerInput, PlayerState, Vec3, VehicleState, VehicleType, WeaponDef, WeaponId,
+  ConsumableId, MatchConfig, MovementMode, PlaneState, PlayerInput, PlayerState, Vec3, VehicleState, VehicleType, WeaponDef, WeaponId,
   WeaponInstance, World,
 } from '../../shared/types';
 import { VEHICLES, stepVehicle } from '../../shared/vehicles';
@@ -171,7 +172,9 @@ export function vehicleControls(input: PlayerInput, out: VehicleControls): Vehic
 
 /**
  * Ground / swim MoveIntent exactly as the sim's player tick builds it. `pressed` = buttons that
- * went down this tick. Returns the effective sprint state (gates ADS in the weapon step).
+ * went down this tick. Like the sim, sprinting or pressing jump cancels an item in use BEFORE the
+ * speed multiplier is computed (mutates `p.use`). Returns the effective sprint state (gates ADS
+ * in the weapon step).
  */
 export function buildMoveIntent(p: PlayerState, input: PlayerInput, pressed: number, out: MoveIntent): boolean {
   const held = input.buttons;
@@ -182,6 +185,7 @@ export function buildMoveIntent(p: PlayerState, input: PlayerInput, pressed: num
   const wantStance = downed ? 'prone' : STANCE_FROM_CODE[input.stance] ?? 'stand';
   const sprinting = wantSprint && p.mode === 'ground' && p.stance === 'stand' && wantStance === 'stand'
     && input.mz > SPRINT_MIN_FORWARD && (held & BTN.WALK) === 0;
+  if (p.use && (sprinting || (pressed & BTN.JUMP) !== 0)) p.use = null;
   out.mx = input.mx;
   out.mz = input.mz;
   out.yaw = p.yaw;
@@ -233,6 +237,8 @@ const intent = createMoveIntent();
 const kick: RecoilKick = { pitch: 0, yaw: 0 };
 const ctl: VehicleControls = { throttle: 0, steer: 0, handbrake: false, boost: false };
 const planeScratch: Vec3 = { x: 0, y: 0, z: 0 };
+const eyeA: Vec3 = { x: 0, y: 0, z: 0 };
+const eyeB: Vec3 = { x: 0, y: 0, z: 0 };
 
 /**
  * Advance the predicted player by one input (one TICK_DT), mirroring the sim's per-player tick:
@@ -266,6 +272,21 @@ export function predictTick(
         }
       } else if (a.a === 'chute') {
         if (p.mode === 'freefall' && p.life === 'alive' && p.jumpY - p.pos.y >= MIN_CHUTE_DROP) openChute(p, ev);
+      } else if (a.a === 'use') {
+        predictUse(p, a.item);
+      } else if (a.a === 'cancel') {
+        p.use = null;
+        p.revive = null;
+        cancelReload(p);
+      } else if (a.a === 'swapWeapons') {
+        predictSwap(p);
+      } else if (a.a === 'throw') {
+        // The grenade itself is server side; the inventory / cooldown bookkeeping is predictable.
+        if (canShootFrom(p, env.seatVehicle) && (p.items.frag || 0) > 0 && p.throwCooldown <= 0 && !p.use) {
+          p.items.frag -= 1;
+          p.throwCooldown = THROW_COOLDOWN;
+          cancelReload(p);
+        }
       }
     }
   }
@@ -273,6 +294,12 @@ export function predictTick(
   // ---- Lean (on foot, standing or crouched) ----------------------------------------------------
   const leanR = (held & BTN.LEAN_R) !== 0, leanL = (held & BTN.LEAN_L) !== 0;
   p.lean = p.life === 'alive' && p.mode === 'ground' && p.stance !== 'prone' && leanR !== leanL ? (leanR ? 1 : -1) : 0;
+  // No leaning through walls: the leaned eye must be visible from the upright eye.
+  if (p.lean !== 0) {
+    eyePosition(p, 0, p.yaw, eyeA);
+    eyePosition(p, p.lean, p.yaw, eyeB);
+    if (!lineOfSight(env.world, eyeA, eyeB)) p.lean = 0;
+  }
 
   // ---- Movement ----------------------------------------------------------------------------------
   rt.sprinting = false;
@@ -309,7 +336,6 @@ export function predictTick(
     default: {
       // ground / swim
       rt.sprinting = buildMoveIntent(p, input, pressed, intent);
-      if (p.use && (rt.sprinting || (pressed & BTN.JUMP) !== 0)) p.use = null;
       stepCharacter(p, intent, dt, env.world, ev.move);
       if (ev.move.jumped) p.use = null;
       break;
@@ -324,7 +350,7 @@ export function predictTick(
     if (p.life !== 'alive') p.use = null;
     else {
       p.use.elapsed += dt;
-      if (p.use.elapsed >= p.use.total) p.use = null;
+      if (p.use.elapsed >= p.use.total) completeUse(p);
     }
   }
   if (p.revive) {
@@ -348,6 +374,43 @@ export function predictTick(
     p.downedHp = Math.max(0, p.downedHp - DOWNED_BLEED_PER_SEC * (1 + 0.5 * (p.knockCount - 1)) * dt);
   }
   p.lastButtons = held;
+}
+
+/** Start using a consumable (mirrors the sim's actUse; refuelling needs a server-side vehicle check). */
+function predictUse(p: PlayerState, item: ConsumableId): void {
+  if (p.life !== 'alive' || (p.mode !== 'ground' && p.mode !== 'vehicle')) return;
+  if (p.use && p.use.item === item) return;
+  if (item === 'fuel' || !canUseConsumable(p, item)) return;
+  cancelReload(p);
+  p.revive = null;
+  p.ads = 0;
+  p.use = { item, elapsed: 0, total: CONSUMABLES[item].useTime };
+}
+
+/** Completion of a consumable use (mirrors the sim's completeUse; fuel is applied by the server). */
+function completeUse(p: PlayerState): void {
+  const u = p.use;
+  if (!u) return;
+  p.use = null;
+  if ((p.items[u.item] || 0) <= 0 || u.item === 'fuel') return;
+  applyConsumable(p, u.item);
+  removeItem(p, u.item, 1);
+}
+
+/** Swap the two primary weapons (mirrors the sim's actSwap). */
+function predictSwap(p: PlayerState): void {
+  if (p.life !== 'alive' || (p.mode !== 'ground' && p.mode !== 'vehicle')) return;
+  const a = p.weapons[0], b = p.weapons[1];
+  if (!a && !b) return;
+  p.weapons[0] = b;
+  p.weapons[1] = a;
+  if (p.activeSlot === 0 || p.activeSlot === 1) {
+    const now = p.weapons[p.activeSlot];
+    cancelReload(p);
+    p.ads = 0;
+    p.sprayCount = 0;
+    p.drawTimer = now ? WEAPONS[now.id].drawTime : 0;
+  }
 }
 
 /** Leave the plane (mirrors the sim): behind it with a seeded per-player spread and a little speed. */

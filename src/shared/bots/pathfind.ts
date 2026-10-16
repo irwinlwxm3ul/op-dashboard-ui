@@ -7,8 +7,8 @@
 // relaxed toward the middle of doorways, and results are cached by (goal cell, coarse start) so
 // squadmates heading for the same spot reuse one search.
 
-import { hyp } from './util';
 import { NavGrid, NF_BLOCKED, NF_NEAR, DIR_DX, DIR_DZ } from './nav';
+import { hyp } from './util';
 
 export const PATH_IDLE = 0;
 export const PATH_QUEUED = 1;

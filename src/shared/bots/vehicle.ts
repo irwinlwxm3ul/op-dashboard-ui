@@ -2,7 +2,6 @@
 // drive toward the rotation target with throttle/steer and grid feelers around obstacles,
 // recover from getting stuck by reversing, and exit when close, stuck, out of fuel or burning.
 
-import { hyp } from './util';
 import { VEHICLE_ENTER_RANGE } from '../constants';
 import { angleDiff, clamp } from '../math';
 import type { PlayerState, VehicleState } from '../types';
@@ -16,6 +15,7 @@ import type { BotSystem } from './system';
 import { insideNext, outsideCurrent, updateZoneTarget, zoneActive } from './zone';
 import { findContact } from './perception';
 import { slotRounds } from './aim';
+import { hyp } from './util';
 
 /** Rotations longer than this prefer a vehicle (m). */
 export const VEHICLE_TRIP = 250;

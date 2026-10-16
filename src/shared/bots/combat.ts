@@ -3,7 +3,6 @@
 // switching by range, reloads, frags at enemies behind cover, cover seeking when hurt and
 // finishing downed enemies.
 
-import { hyp } from './util';
 import { GRAVITY } from '../constants';
 import { THROWABLES, WEAPONS } from '../items';
 import { angleDiff, clamp, wrapAngle } from '../math';
@@ -17,6 +16,7 @@ import { NF_BLOCKED } from './nav';
 import { chestHeight, findContact, headHeight } from './perception';
 import { MAX_CONTACTS, type BotState, type Contact } from './state';
 import type { BotSystem } from './system';
+import { hyp } from './util';
 
 export const CM_HOLD = 0;
 export const CM_ADVANCE = 1;
@@ -115,6 +115,8 @@ function standingEnemyVisible(b: BotState): boolean {
 
 /** Choose the active weapon slot (by range in combat, by quality otherwise). */
 export function manageWeapon(sys: BotSystem, b: BotState, p: PlayerState, inCombat: boolean, dist: number): void {
+  // Switching slots would cancel a heal / boost in progress.
+  if (p.use) return;
   const t = sys.now;
   const cur = p.activeSlot;
   let want = b.wantSlot;

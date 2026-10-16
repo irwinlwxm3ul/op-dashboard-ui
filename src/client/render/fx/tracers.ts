@@ -121,6 +121,8 @@ export class TracerSystem {
       transparent: true,
       depthWrite: false,
       blending: THREE.AdditiveBlending,
+      // The ribbon's winding depends on the segment direction relative to the view.
+      side: THREE.DoubleSide,
     });
     this.mesh = new THREE.Mesh(geom, this.material);
     this.mesh.frustumCulled = false;

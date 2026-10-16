@@ -3,13 +3,13 @@
 // the human), jump near the closest point of the flight path, steer the freefall, open the
 // chute early for far targets (or rely on the auto-open), and glide onto the target.
 
-import { hyp } from './util';
 import { MIN_CHUTE_DROP, PARACHUTE_DESCENT, PARACHUTE_HORIZONTAL } from '../constants';
 import { angleDiff } from '../math';
 import type { PlayerState } from '../types';
 import { steerAim } from './combat';
 import type { BotState } from './state';
 import type { BotSystem } from './system';
+import { hyp } from './util';
 
 /** Lateral distance (m) from the flight path that is comfortably reachable. */
 const EASY_REACH = 320;

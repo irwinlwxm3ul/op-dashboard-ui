@@ -121,8 +121,9 @@ function pistol(mats: Record<MatKey, THREE.Material>): GunModel {
 
   m.muzzle.set(0, 0.037, -0.16);
   m.eject.set(0.016, 0.045, -0.025);
-  m.support.set(-0.026, -0.04, 0.004);
-  m.supportRot.set(0.25, 0, -0.5);
+  // Two-handed grip: the support hand wraps the firing hand from the left.
+  m.support.set(-0.021, -0.034, -0.006);
+  m.supportRot.set(-0.28, 0.3, 0.12);
   m.gripRot.set(-0.28, 0, 0);
   m.chargeAnchor.set(-0.02, 0.04, 0.02);
   m.magBottom.set(0, -0.1, 0.03);
@@ -222,7 +223,7 @@ function ar(mats: Record<MatKey, THREE.Material>): GunModel {
 
   // Reticle: tiny unlit dot on the sight axis, drawn above the glass.
   const dot = new THREE.Mesh(
-    new THREE.CircleGeometry(0.0011, 12),
+    new THREE.CircleGeometry(0.0014, 12),
     new THREE.MeshBasicMaterial({ color: 0xff2a1a, toneMapped: false, transparent: true, opacity: 0.95, depthWrite: false }),
   );
   dot.position.set(0, 0.095, -0.0605);
@@ -418,7 +419,7 @@ function sniper(mats: Record<MatKey, THREE.Material>): GunModel {
   m.sightY = 0.106;
   m.sightZ = 0.12;
   m.eyeRelief = 0.1;
-  m.hip.set(0.135, -0.18, -0.31);
+  m.hip.set(0.135, -0.18, -0.34);
   m.casing = 'sniper';
   m.flashScale = 1.3;
   m.scoped = true;

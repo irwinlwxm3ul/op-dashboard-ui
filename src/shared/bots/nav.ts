@@ -21,9 +21,9 @@
 // waypoints in NEAR cells are later "relaxed" away from walls (see relaxPoint) so bots walk
 // through the middle of doorways.
 
-import { hyp } from './util';
 import { STEP_HEIGHT } from '../constants';
 import type { RockDef, TreeDef, World, WorldBox } from '../types';
+import { hyp } from './util';
 
 export const NAV_TILE = 64;
 const TILE_SHIFT = 6;

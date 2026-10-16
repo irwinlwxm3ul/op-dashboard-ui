@@ -38,7 +38,7 @@ import { releaseMaterials, retainMaterials, type MatKey } from './parts';
 
 /** Viewmodel vertical FOV at hip / fully aimed (deg). */
 const VM_FOV_HIP = 60;
-const VM_FOV_ADS = 46;
+const VM_FOV_ADS = 50;
 const HOLSTER_TIME = 0.14;
 const SLIDE_TIME = 0.07;
 const DRY_TIME = 0.18;
@@ -591,7 +591,7 @@ export class Viewmodel {
       // Slight dip along the ADS path so it reads as bringing the gun up to the eye.
       py -= Math.sin(Math.PI * adsE) * 0.012;
     } else {
-      px = 0; py = -0.165; pz = -0.32; rx = 0; ry = 0; rz = 0;
+      px = 0; py = -0.14; pz = -0.33; rx = 0; ry = 0; rz = 0;
     }
 
     // Sprint pose: rifle across the chest, pistol pointed down.
@@ -600,7 +600,7 @@ export class Viewmodel {
       if (!gun || gun.id === 'pistol') {
         px += sp * 0.01; py += sp * -0.02; pz += sp * 0.03; rx += sp * -0.55; ry += sp * 0.12;
       } else {
-        px += sp * -0.04; py += sp * -0.035; pz += sp * 0.045; rx += sp * -0.3; ry += sp * 0.72; rz += sp * 0.42;
+        px += sp * -0.03; py += sp * -0.02; pz += sp * 0.04; rx += sp * -0.22; ry += sp * 0.55; rz += sp * 0.38;
       }
     }
 
@@ -615,8 +615,10 @@ export class Viewmodel {
     const tilt = this.reloadTilt() * this.reloadW;
     if (tilt > 0.001) {
       const k = 1 - adsE * 0.5;
-      px += tilt * -0.035 * k; py += tilt * 0.025 * k; pz += tilt * 0.035;
-      rx += tilt * 0.22; ry += tilt * -0.12; rz += tilt * 0.55;
+      // Roll the gun top-right and swing the muzzle right so its left side and magwell face the
+      // camera, lifted toward the centre where the hands work.
+      px += tilt * -0.045 * k; py += tilt * 0.06 * k; pz += tilt * 0.01;
+      rx += tilt * 0.12; ry += tilt * -0.3; rz += tilt * -0.6;
     }
     // Bolt cycle: tilt toward the bolt, shotgun pump: small rock.
     if (this.boltActive && this.boltT >= 0 && gun) {
@@ -816,10 +818,10 @@ export class Viewmodel {
       this.q2.setFromEuler(this.e2.set(this.e2.x - bw * 0.6, this.e2.y, this.e2.z + bw * 0.5));
       this.rightArm.hand.quaternion.copy(holderQ).multiply(this.q2);
     } else {
-      this.v.set(0.13, 0, 0);
+      this.v.set(0.14, -0.02, 0);
       this.toPivot(this.v, this.v2);
       this.rightArm.hand.position.copy(this.v2);
-      this.q2.setFromEuler(this.e2.set(0.1, 0, 0.15));
+      this.q2.setFromEuler(this.e2.set(0.35, 0.12, 0.3));
       this.rightArm.hand.quaternion.copy(holderQ).multiply(this.q2);
       rightStyle = 'fist';
     }
@@ -839,18 +841,17 @@ export class Viewmodel {
       this.q2.setFromEuler(this.leftR);
       this.leftArm.hand.quaternion.copy(holderQ).multiply(this.q2);
     } else {
-      this.v.set(-0.13, -0.01, -0.02);
+      this.v.set(-0.13, -0.03, -0.04);
       this.toPivot(this.v, this.v2);
       this.leftArm.hand.position.copy(this.v2);
-      this.q2.setFromEuler(this.e2.set(0.1, 0, -0.15));
+      this.q2.setFromEuler(this.e2.set(0.35, -0.12, -0.3));
       this.leftArm.hand.quaternion.copy(holderQ).multiply(this.q2);
     }
 
     // ----- held items, throws, revive (override hands) -----
-    const item = this.poseItems(inp);
-    if (item === 'right' || item === 'both') rightStyle = 'hold';
-    if (item === 'both') leftStyle = 'hold';
-    if (this.shellInHand) leftStyle = 'hold';
+    this.poseItems(inp);
+    if (this.styleR) rightStyle = this.styleR;
+    if (this.styleL) leftStyle = this.styleL;
 
     this.rightArm.setStyle(rightStyle);
     this.leftArm.setStyle(leftStyle);
@@ -935,20 +936,27 @@ export class Viewmodel {
     this.leftR.set(this.leftR.x - k * 0.5, this.leftR.y, this.leftR.z + k * 0.6);
   }
 
-  /** Healing items, grenade throws, revive gesture. Returns which hands are holding something. */
-  private poseItems(inp: VmInput): 'none' | 'right' | 'both' {
+  /**
+   * Healing items, grenade throws, revive gesture and the shotgun shell. Poses hands directly in
+   * pivot space when something overrides them and records the hand shapes to use.
+   */
+  private poseItems(inp: VmInput): void {
     const self = inp.self;
+    this.styleR = null;
+    this.styleL = null;
+    const R = this.rightArm.hand, L = this.leftArm.hand;
     // Shotgun shell in the left hand during shell reloads.
     if (this.shellInHand) {
       const obj = this.items.show('shell');
       if (obj) {
-        this.leftArm.hand.updateMatrix();
-        obj.position.set(0.0, 0.02, -0.02).applyMatrix4(this.leftArm.hand.matrix);
-        obj.quaternion.copy(this.leftArm.hand.quaternion);
+        L.updateMatrix();
+        obj.position.set(0.0, -0.01, -0.03).applyMatrix4(L.matrix);
+        obj.quaternion.copy(L.quaternion);
       }
-      return 'none';
+      this.styleL = 'grip';
+      return;
     }
-    // Grenade throw
+    // Grenade throw: raise, wind back, throw forward (released at ~68 %), follow through.
     if (this.throwT >= 0) {
       const t = this.throwT / THROW_TIME;
       const obj = this.items.show(t < 0.68 ? 'frag' : null);
@@ -957,17 +965,19 @@ export class Viewmodel {
       else if (t < 0.55) { const k = easeInOutSine((t - 0.25) / 0.3); x = lerp(0.14, 0.18, k); y = lerp(-0.1, -0.02, k); z = lerp(-0.26, -0.1, k); }
       else if (t < 0.72) { const k = smooth01((t - 0.55) / 0.17); x = lerp(0.18, 0.04, k); y = lerp(-0.02, -0.07, k); z = lerp(-0.1, -0.55, k); }
       else { const k = smooth01((t - 0.72) / 0.28); x = lerp(0.04, 0.12, k); y = lerp(-0.07, -0.45, k); z = lerp(-0.55, -0.4, k); }
-      this.rightArm.hand.position.set(x, y, z);
-      this.rightArm.hand.rotation.set(0.3 - t * 0.6, 0.2, -0.2);
+      R.position.set(x, y, z);
+      R.rotation.set(0.3 - t * 0.6, 0.2, -0.2);
       if (obj) {
-        obj.position.set(x + 0.035, y + 0.01, z - 0.005);
+        obj.position.set(x, y - 0.005, z - 0.01);
         obj.rotation.set(0.2, t * 2, 0.4);
       }
       // Left arm reaches forward for balance.
       const lw = window4(t, 0.1, 0.3, 0.6, 0.85);
-      this.leftArm.hand.position.set(lerp(-0.2, -0.12, lw), lerp(-0.45, -0.12, lw), lerp(-0.3, -0.5, lw));
-      this.leftArm.hand.rotation.set(0, -0.3, -0.6);
-      return 'right';
+      L.position.set(lerp(-0.2, -0.12, lw), lerp(-0.45, -0.12, lw), lerp(-0.3, -0.5, lw));
+      L.rotation.set(0, -0.3, -0.6);
+      this.styleR = 'grip';
+      this.styleL = 'palm';
+      return;
     }
     // Healing items
     if (this.itemRise > 0.02 && this.itemId) {
@@ -976,68 +986,84 @@ export class Viewmodel {
       const rise = (1 - easeOutCubic(this.itemRise)) * -0.32;
       const prog = self.useProgress >= 0 ? self.useProgress : 1;
       const t = this.time;
-      if (!obj) return 'none';
+      if (!obj) return;
       switch (id) {
         case 'bandage': {
-          obj.position.set(-0.02, -0.13 + rise, -0.3);
+          obj.position.set(-0.02, -0.1 + rise, -0.3);
           obj.rotation.set(0.2, 0.3, 0);
-          this.leftArm.hand.position.set(-0.07, -0.135 + rise, -0.3);
-          this.leftArm.hand.rotation.set(0, 0, -0.3);
-          // Wrapping: right hand circles around the roll.
-          const w = t * 8.5;
-          this.rightArm.hand.position.set(0.05 + Math.cos(w) * 0.035, -0.12 + rise + Math.sin(w) * 0.03, -0.29 + Math.sin(w) * 0.02);
-          this.rightArm.hand.rotation.set(0.2, 0, 0.3 + Math.sin(w) * 0.3);
-          return 'both';
+          // Left hand holds the roll, the right hand winds the strip around (circling).
+          L.position.set(-0.065, -0.105 + rise, -0.29);
+          L.rotation.set(0, 0.3, 1.25);
+          const w = t * 6.5;
+          R.position.set(0.04 + Math.cos(w) * 0.022, -0.095 + rise + Math.sin(w) * 0.02, -0.28 + Math.sin(w) * 0.012);
+          R.rotation.set(0.2, 0, -1.2 + Math.sin(w) * 0.2);
+          this.styleR = 'grip';
+          this.styleL = 'grip';
+          return;
         }
         case 'firstaid':
         case 'medkit': {
+          // Held in both palms, tipped toward the body while it is applied.
           const big = id === 'medkit';
           const apply = window4(prog, 0.25, 0.4, 0.8, 0.95);
-          const y = (big ? -0.15 : -0.13) + rise + apply * -0.03;
+          const y = (big ? -0.115 : -0.1) + rise + apply * -0.025;
           const z = (big ? -0.36 : -0.32) + apply * 0.06;
           obj.position.set(0, y, z);
           obj.rotation.set(-0.4 - apply * 0.3, Math.sin(t * 1.3) * 0.04, Math.sin(t * 2.1) * 0.03);
-          const half = big ? 0.09 : 0.066;
-          this.rightArm.hand.position.set(half, y - 0.01, z + 0.01);
-          this.rightArm.hand.rotation.set(0, 0, 0.2);
-          this.leftArm.hand.position.set(-half, y - 0.01, z + 0.01);
-          this.leftArm.hand.rotation.set(0, 0, -0.2);
-          return 'both';
+          const half = (big ? 0.08 : 0.055);
+          R.position.set(half, y - (big ? 0.06 : 0.045), z + 0.02);
+          R.rotation.set(-0.4, 0, 0.35);
+          L.position.set(-half, y - (big ? 0.06 : 0.045), z + 0.02);
+          L.rotation.set(-0.4, 0, -0.35);
+          this.styleR = 'palm';
+          this.styleL = 'palm';
+          return;
         }
         case 'energy': {
+          // Raise the can toward the mouth (bottom of the view) and tip it.
           const drink = window4(prog, 0.45, 0.6, 0.88, 0.98);
-          obj.position.set(lerp(0.08, 0.02, drink), lerp(-0.14, -0.055, drink) + rise, lerp(-0.3, -0.13, drink));
-          obj.rotation.set(drink * 1.25, 0, lerp(-0.1, 0.05, drink));
-          this.rightArm.hand.position.set(obj.position.x + 0.03, obj.position.y - 0.01, obj.position.z + 0.01);
-          this.rightArm.hand.rotation.set(drink * 1.0, 0, 0);
+          obj.position.set(lerp(0.075, 0.035, drink), lerp(-0.1, -0.085, drink) + rise, lerp(-0.32, -0.26, drink));
+          obj.rotation.set(drink * 0.95, 0, lerp(-0.1, 0.05, drink));
+          R.position.copy(obj.position);
+          R.position.y -= 0.005;
+          R.rotation.set(drink * 0.95, 0, lerp(-0.1, 0.05, drink));
           this.leftArm.visible = false;
-          return 'right';
+          this.styleR = 'grip';
+          return;
         }
         case 'fuel': {
+          // Jerry can held by its handle, tipped forward to pour.
           const pour = window4(prog, 0.15, 0.3, 0.85, 0.97);
-          obj.position.set(0.02, -0.12 + rise - pour * 0.04, -0.48);
+          obj.scale.setScalar(0.85);
+          obj.position.set(0.03, -0.17 + rise - pour * 0.03, -0.5);
           obj.rotation.set(-pour * 0.7, 0.15, Math.sin(t * 1.6) * 0.03);
-          this.rightArm.hand.position.set(0.02, -0.04 + rise - pour * 0.06, -0.47 + pour * 0.02);
-          this.rightArm.hand.rotation.set(-pour * 0.5, 0, 0.1);
-          this.leftArm.hand.position.set(-0.08, -0.2 + rise, -0.44);
-          this.leftArm.hand.rotation.set(0, 0, -0.4);
-          return 'both';
+          obj.updateMatrix();
+          R.position.set(-0.005, 0.072, 0).applyMatrix4(obj.matrix);
+          R.rotation.set(-pour * 0.7, 0.15, Math.PI / 2);
+          L.position.set(-0.07, -0.2, 0.02).applyMatrix4(obj.matrix);
+          L.rotation.set(-pour * 0.7, 0, -0.4);
+          this.styleR = 'grip';
+          this.styleL = 'palm';
+          return;
         }
       }
     }
     this.items.show(null);
-    // Reviving: both hands press down in front (gun lowered).
+    // Reviving: both palms press down in front (gun lowered).
     if (this.reviveW > 0.02) {
       const press = Math.max(0, Math.sin(this.time * 9)) * 0.03;
-      const y = lerp(-0.45, -0.24, this.reviveW) - press;
-      this.rightArm.hand.position.set(0.05, y, -0.36);
-      this.rightArm.hand.rotation.set(-1.1, 0, 0.2);
-      this.leftArm.hand.position.set(-0.05, y - 0.01, -0.38);
-      this.leftArm.hand.rotation.set(-1.1, 0, -0.2);
-      return 'both';
+      const y = lerp(-0.45, -0.22, this.reviveW) - press;
+      R.position.set(0.05, y, -0.36);
+      R.rotation.set(Math.PI - 0.4, 0, 0.2);
+      L.position.set(-0.05, y - 0.01, -0.38);
+      L.rotation.set(Math.PI - 0.4, 0, -0.2);
+      this.styleR = 'palm';
+      this.styleL = 'palm';
     }
-    return 'none';
   }
+  /** Hand shapes requested by poseItems this frame (null = keep the weapon's). */
+  private styleR: HandStyle | null = null;
+  private styleL: HandStyle | null = null;
 
   // ------------------------------------------------------------------------------------------
   // World mapping (muzzle for FX tracers, casings)

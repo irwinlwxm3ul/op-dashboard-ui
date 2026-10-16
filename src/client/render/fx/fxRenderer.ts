@@ -48,7 +48,7 @@ const PRESETS: Record<Quality, QualityPreset> = {
   ultra: { alphaCap: 4500, addCap: 2800, decals: 220, mul: 1.25, lights: 4, muzzleLights: true, casings: true, trails: true },
 };
 
-const TRACER_REMOTE: TracerStyle = { r: 3.0, g: 2.1, b: 1.0, alpha: 0.9, width: 0.028, minPx: 1.6, length: 9 };
+const TRACER_REMOTE: TracerStyle = { r: 3.0, g: 2.1, b: 1.0, alpha: 1, width: 0.03, minPx: 2.0, length: 10 };
 const TRACER_LOCAL: TracerStyle = { r: 2.6, g: 1.9, b: 0.95, alpha: 0.55, width: 0.018, minPx: 1.2, length: 7 };
 const TRACER_PELLET: TracerStyle = { r: 2.4, g: 1.7, b: 0.85, alpha: 0.5, width: 0.014, minPx: 1.0, length: 4 };
 
@@ -289,7 +289,7 @@ export class FxRendererImpl implements FxRenderer {
       this.effects.muzzleFlash(m.x, m.y, m.z, -Math.sin(self.aimYaw) * cp, Math.sin(self.aimPitch), -Math.cos(self.aimYaw) * cp, ev.weapon, 1, false);
       if (this.preset.casings) this.ejectThirdPerson(ev.weapon, m, self.aimYaw, self.aimPitch, self.vel);
     }
-    if (this.effects.muzzleLights) this.lights.flash(m.x, m.y, m.z, 0xffb45e, def.pellets > 1 || !def.hitscan ? 40 : 24, 10, 0.06);
+    if (this.effects.muzzleLights) this.lights.flash(m.x, m.y, m.z, 0xffb45e, def.pellets > 1 || !def.hitscan ? 10 : 6, 8, 0.06);
 
     const ox = m.x - ev.origin.x, oy = m.y - ev.origin.y, oz = m.z - ev.origin.z;
     for (const dir of ev.dirs) {

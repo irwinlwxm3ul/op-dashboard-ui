@@ -2,7 +2,6 @@
 // behaviours: loot, explore buildings, rotate with the zone (optionally by vehicle), heal and
 // boost, revive teammates, follow a human squad leader, investigate noises and wander.
 
-import { hyp } from './util';
 import { REVIVE_RANGE } from '../constants';
 import { WEAPONS, canUseConsumable, isWeaponId } from '../items';
 import { angleDiff } from '../math';
@@ -20,6 +19,7 @@ import type { BotGoal, BotState } from './state';
 import type { BotSystem } from './system';
 import { VEHICLE_BLACKLIST_TIME, VEHICLE_TRIP, approachVehicle, findVehicle } from './vehicle';
 import { insideNext, outsideCurrent, updateZoneTarget, zoneActive, zoneUrgency } from './zone';
+import { hyp } from './util';
 
 const LOOT_RADIUS = 30;
 /** Unarmed bots look further for a gun. */
@@ -97,7 +97,7 @@ export function brainThink(sys: BotSystem, b: BotState, p: PlayerState): void {
   }
 
   // Revive a downed teammate.
-  revivePick = findDownedTeammate(sys, b, p);
+  revivePick = findDownedTeammate(sys, p);
   if (revivePick) offer('revive', sinceContact > 2.5 ? 88 : visible ? 0 : 46);
 
   // Heal / boost.
@@ -106,7 +106,8 @@ export function brainThink(sys: BotSystem, b: BotState, p: PlayerState): void {
     offer('heal', visible && target && hyp(target.x - p.pos.x, target.z - p.pos.z) < 40 ? 0 : 99);
   } else if (heal) {
     if (p.health < 60) offer('heal', quiet ? 70 + (60 - p.health) / 2 : !visible && sinceContact > 1.5 && p.health < 35 ? 72 : 0);
-    else if (sinceContact > 6 && t - b.lastDamageTime > 6) offer('heal', 30);
+    // Smart bots top up before the next fight.
+    else if (sk.healSmart >= 0.5 && sinceContact > 6 && t - b.lastDamageTime > 6) offer('heal', 30);
   }
   if (!p.use && quiet && sk.healSmart >= 0.5 && (p.items.energy || 0) > 0 && p.boost < 45 && canUseConsumable(p, 'energy')) {
     offer('heal', 26);
@@ -156,7 +157,7 @@ export function brainThink(sys: BotSystem, b: BotState, p: PlayerState): void {
   if (!wellEquipped(p) && pickExplore(sys, b, p)) offer('explore', 20 + (p.weapons[0] || p.weapons[1] ? 0 : 14));
 
   // Investigate noises / damage.
-  if (!visible && t - b.investigateTime < 8) offer('investigate', 30 + sk.aggression * 18);
+  if (!visible && t - b.investigateTime < 8 && hasAnyRounds(p)) offer('investigate', 30 + sk.aggression * 18);
 
   // Keep walking to a chosen vehicle while the reason for it (rotation / following) holds.
   if (b.goal === 'vehicle' && b.vehicleId >= 0) offer('vehicle', Math.max(zoneScore, followScore, 40) + 1);
@@ -276,7 +277,7 @@ function onGaveUp(sys: BotSystem, b: BotState): void {
 // Goal helpers
 // ---------------------------------------------------------------------------
 
-function findDownedTeammate(sys: BotSystem, b: BotState, p: PlayerState): PlayerState | null {
+function findDownedTeammate(sys: BotSystem, p: PlayerState): PlayerState | null {
   let best: PlayerState | null = null, bestS = Infinity;
   const mates = sys.teamMembers(p.team);
   for (let i = 0; i < mates.length; i++) {
@@ -456,10 +457,9 @@ function zoneThink(sys: BotSystem, b: BotState, p: PlayerState): void {
   if (d > VEHICLE_TRIP && t - b.vehicleActionAt > 3) {
     const v = findVehicle(sys, b, p, 80, true);
     if (v) {
-      b.vehicleId = v.id;
-      b.vehicleSince = t;
       setGoal(sys, b, 'vehicle');
       b.vehicleId = v.id;
+      b.vehicleSince = t;
       approachVehicle(sys, b, p);
       return;
     }

@@ -69,8 +69,8 @@ export class MuzzleFlash {
     this.t -= dt;
     const k = Math.max(0, this.t / FLASH_TIME);
     const s = this.scale;
-    this.star.scale.setScalar(0.11 * s * (0.75 + 0.25 * k));
-    this.flameA.scale.set(0.11 * s, 1, 0.24 * s * (0.7 + 0.3 * k));
+    this.star.scale.setScalar(0.17 * s * (0.75 + 0.25 * k));
+    this.flameA.scale.set(0.15 * s, 1, 0.32 * s * (0.7 + 0.3 * k));
     this.flameB.scale.copy(this.flameA.scale);
     this.starMat.opacity = k;
     this.flameMat.opacity = k * 0.9;

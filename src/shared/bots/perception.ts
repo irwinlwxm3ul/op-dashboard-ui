@@ -9,20 +9,18 @@
 // * Damage: getting hit gives the attacker's bearing (like the directional damage indicator).
 // Enemy health, armour and inventory are never read.
 
-import { hyp } from './util';
 import { EYE_HEIGHT } from '../constants';
 import { angleDiff, yawTo } from '../math';
 import type { PlayerState } from '../types';
 import { bushCoverHeight } from './mapinfo';
 import { MAX_CONTACTS, type BotState, type Contact } from './state';
 import type { BotSystem } from './system';
+import { hyp } from './util';
 
 /** Forget contacts not seen for this long (s). */
 const FORGET_AFTER = 25;
 /** A contact's visibility flag expires if not re-checked within this time (s). */
 const VISIBILITY_TTL = 0.45;
-/** Max line-of-sight tests one bot spends per think. */
-const MAX_LOS_PER_THINK = 4;
 const MAX_CANDIDATES = 6;
 /** Re-acquiring a contact lost for less than this keeps a short reaction. */
 const REACQUIRE_WINDOW = 1.5;
@@ -198,7 +196,7 @@ export function perceive(sys: BotSystem, b: BotState, p: PlayerState): void {
     candDist[k] = d;
   }
   let spent = 0;
-  for (let i = 0; i < nc && spent < MAX_LOS_PER_THINK; i++) {
+  for (let i = 0; i < nc && spent < sys.losPerThink; i++) {
     const q = sim.players.get(candId[i]);
     if (!q) continue;
     const c = findContact(b, q.id);
