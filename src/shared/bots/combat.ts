@@ -359,7 +359,7 @@ export function combatAct(sys: BotSystem, b: BotState, p: PlayerState): number {
   // Fire discipline: full auto up close, bursts at mid range, single taps (waiting for the
   // bloom to settle) at long range, nothing beyond the weapon's effective range.
   const wi = weaponAt(p, p.activeSlot)!;
-  const inRange = dist <= WEAPON_RANGE[w.id].max;
+  const inRange = dist <= WEAPON_RANGE[w.id].max * sk.fireRangeMul;
   const ready = c.visible && inRange && t >= c.ready && p.drawTimer <= 0 && p.reloadTimer <= 0 && !p.use && wi.mag > 0 &&
     (!wantAds || p.ads > 0.8);
   const tol = Math.max(w.fireMode === 'bolt' ? 0.45 * DEG : 0.9 * DEG, Math.atan2(0.42, dist)) * (w.fireMode === 'auto' && dist < 18 ? 1.8 : 1);

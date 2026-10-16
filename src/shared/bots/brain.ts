@@ -305,7 +305,7 @@ function botSquadLeader(sys: BotSystem, p: PlayerState): PlayerState | null {
 }
 
 /** Best heal item for the situation, or null. */
-export function chooseHeal(sys: BotSystem, p: PlayerState): ConsumableId | null {
+function chooseHeal(sys: BotSystem, p: PlayerState): ConsumableId | null {
   const smart = sys.skill.healSmart;
   const bandage = p.items.bandage || 0, firstaid = p.items.firstaid || 0, medkit = p.items.medkit || 0;
   let item: ConsumableId | null = null;

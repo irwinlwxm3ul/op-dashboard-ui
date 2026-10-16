@@ -28,7 +28,7 @@ import { CasingPool } from '../../fx/casings';
 import { localMuzzle } from '../../fx/muzzle';
 import { releaseAtlases, retainAtlases } from '../../fx/textures';
 import {
-  easeInOutSine, easeOutBack, easeOutCubic, pulse, ramp, sineNoise, smooth01, springStep, window4, type Spring1,
+  easeInOutSine, easeOutBack, easeOutCubic, pulse, sineNoise, smooth01, springStep, window4, type Spring1,
 } from '../cameraMath';
 import { Arm, type HandStyle } from './arms';
 import { BOLT_KNOB, buildGun, type GunModel } from './guns';
@@ -156,7 +156,6 @@ export class Viewmodel {
   // --- scratch ---
   private readonly q = new THREE.Quaternion();
   private readonly q2 = new THREE.Quaternion();
-  private readonly e = new THREE.Euler(0, 0, 0, 'YXZ');
   private readonly e2 = new THREE.Euler();
   private readonly v = new THREE.Vector3();
   private readonly v2 = new THREE.Vector3();
@@ -251,7 +250,7 @@ export class Viewmodel {
 
     this.pose(inp, adsE);
     this.poseParts(self);
-    this.poseHands(inp, adsE);
+    this.poseHands(inp);
     this.flash.update(dt);
     this.casings.update(dt);
 
@@ -784,7 +783,7 @@ export class Viewmodel {
     return out.copy(p).applyMatrix4(this.holder.matrix);
   }
 
-  private poseHands(inp: VmInput, adsE: number): void {
+  private poseHands(inp: VmInput): void {
     const gun = this.gun;
     const showHands = this.visible;
     this.rightArm.visible = showHands;
@@ -857,7 +856,6 @@ export class Viewmodel {
     this.leftArm.setStyle(leftStyle);
     this.rightArm.solve();
     this.leftArm.solve();
-    void adsE;
   }
 
   /** Smoothly interpolate the reload hand target between two gun-local points. */

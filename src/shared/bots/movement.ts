@@ -5,7 +5,7 @@
 import { angleDiff } from '../math';
 import type { PlayerState } from '../types';
 import { NF_BLOCKED, NF_NEAR, NF_UNKNOWN } from './nav';
-import { MAX_PLAN_DIST, PATH_DONE, PATH_FAILED, PATH_IDLE } from './pathfind';
+import { PATH_DONE, PATH_FAILED, PATH_IDLE } from './pathfind';
 import type { BotState } from './state';
 import type { BotSystem } from './system';
 import { hyp } from './util';
@@ -76,15 +76,6 @@ export function requestPath(sys: BotSystem, b: BotState, p: PlayerState): void {
     return;
   }
   sys.planner.request(b.path, px, pz, b.destX, b.destZ);
-}
-
-/** Distance to the current destination (XZ), Infinity without one. */
-export function destDistance(b: BotState, p: PlayerState): number {
-  return b.hasDest ? hyp(b.destX - p.pos.x, b.destZ - p.pos.z) : Infinity;
-}
-
-export function arrived(b: BotState, p: PlayerState): boolean {
-  return b.hasDest && destDistance(b, p) <= b.arrive;
 }
 
 /** True when (x, z) is a destination the bot recently gave up on. */
@@ -244,9 +235,4 @@ export function moveYaw(b: BotState): number {
 /** Is the move direction roughly where the bot is looking (sprint allowed)? */
 export function facingMove(b: BotState): boolean {
   return Math.abs(angleDiff(b.aimYaw, moveYaw(b))) < 0.6;
-}
-
-/** Long trips are planned in legs; true when the destination is beyond one A* window. */
-export function isLongTrip(b: BotState, p: PlayerState): boolean {
-  return destDistance(b, p) > MAX_PLAN_DIST;
 }

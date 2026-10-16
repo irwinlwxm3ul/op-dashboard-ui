@@ -9,8 +9,8 @@ import { NF_BLOCKED } from './nav';
 
 const BUSH_CELL = 16;
 /** Bush footprint radius / height per unit of BushDef.scale. */
-export const BUSH_RADIUS = 1.0;
-export const BUSH_HEIGHT = 1.15;
+const BUSH_RADIUS = 1.0;
+const BUSH_HEIGHT = 1.15;
 
 export interface MapInfo {
   /** Building centre XZ pairs. */

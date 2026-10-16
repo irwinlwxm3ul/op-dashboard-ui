@@ -174,6 +174,8 @@ class MockSim implements SimView {
       p.lastButtons = inp.buttons;
       p.yaw = inp.yaw;
       p.pitch = inp.pitch;
+      // ADS blend like the sim (0.25 s to raise / lower).
+      p.ads = inp.buttons & BTN.ADS ? Math.min(1, p.ads + TICK_DT / 0.25) : Math.max(0, p.ads - TICK_DT / 0.25);
       if (this.physics && p.mode === 'ground' && p.life === 'alive') {
         const it = this.intent;
         it.mx = inp.mx;

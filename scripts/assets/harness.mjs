@@ -117,9 +117,13 @@ export async function runInPage(moduleSource, { mounts = {}, viewport = { width:
           const timer = setTimeout(() => reject(new Error('page task timed out')), timeoutMs);
           window.__done = (r) => { clearTimeout(timer); resolve(r); };
           window.__fail = (e) => { clearTimeout(timer); reject(new Error(String(e && e.stack || e))); };
+          // Module evaluation errors (including top-level await rejections) are
+          // reported through the window error events.
+          window.addEventListener('error', (ev) => window.__fail(ev.error || ev.message));
+          window.addEventListener('unhandledrejection', (ev) => window.__fail(ev.reason));
           const s = document.createElement('script');
           s.type = 'module';
-          s.textContent = `try {\n${src}\n} catch (e) { window.__fail(e); }`;
+          s.textContent = src;
           document.body.appendChild(s);
         }),
       { src: moduleSource, timeoutMs },

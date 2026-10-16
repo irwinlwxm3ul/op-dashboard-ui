@@ -23,6 +23,8 @@ export interface BotSkill {
   aimGain: number;
   /** Maximum vision range (m). */
   visionRange: number;
+  /** Fraction of a weapon's effective range the bot is willing to shoot at. */
+  fireRangeMul: number;
   /** Half angle of the view cone (radians). */
   fovHalf: number;
   /** Fraction of hearing radius actually noticed. */
@@ -64,6 +66,7 @@ export const BOT_SKILLS: Record<BotDifficulty, BotSkill> = {
     turnRate: 3.2,
     aimGain: 7,
     visionRange: 150,
+    fireRangeMul: 0.55,
     fovHalf: 65 * DEG,
     hearing: 0.6,
     recoilComp: 0.3,
@@ -89,6 +92,7 @@ export const BOT_SKILLS: Record<BotDifficulty, BotSkill> = {
     turnRate: 5.5,
     aimGain: 10,
     visionRange: 250,
+    fireRangeMul: 0.75,
     fovHalf: 70 * DEG,
     hearing: 0.8,
     recoilComp: 0.6,
@@ -114,6 +118,7 @@ export const BOT_SKILLS: Record<BotDifficulty, BotSkill> = {
     turnRate: 8,
     aimGain: 14,
     visionRange: 400,
+    fireRangeMul: 1,
     fovHalf: 72 * DEG,
     hearing: 1,
     recoilComp: 0.85,

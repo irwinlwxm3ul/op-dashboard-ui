@@ -186,7 +186,7 @@ export interface BotState {
   actions: ClientAction[];
 }
 
-export function createContact(): Contact {
+function createContact(): Contact {
   return { id: -1, x: 0, y: 0, z: 0, vx: 0, vz: 0, firstSeen: 0, ready: 0, lastSeen: -1e9, lastCheck: -1e9, visible: false, downed: false };
 }
 
