@@ -10,7 +10,9 @@ import * as THREE from 'three';
 import { MAX_PLAYERS } from '../../../shared/constants';
 import type { WeaponId } from '../../../shared/types';
 import type { BodyFrame, MidBodyRenderer, NearBody, NearBodyProvider } from './bodies';
-import { type EntityUniforms, type InstanceAttributes, addInstanceAttributes, createEntityMaterial } from './materials';
+import {
+  type EntityUniforms, type InstanceAttributes, addInstanceAttributes, casterDepthMaterial, createEntityMaterial,
+} from './materials';
 import { B } from './rig';
 import {
   MID_HELMET_TINT, MID_VEST_TINT, NB_HELMET0, NB_PACK1, NB_VEST1, NB_WEAPON0, NEAR_BONE_BASE, NEAR_BONE_COUNT,
@@ -36,6 +38,8 @@ export interface SoldierLook {
   gear: readonly [number, number, number];
   /** Weapon shown in hands / slung (null = none). */
   weapon: WeaponId | null;
+  /** Local-team outline weight (0 = none, 1 = teammate of the local player). */
+  outline: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -74,9 +78,11 @@ export class NearSoldier implements NearBody {
     this.mesh.visible = false;
     this.mesh.castShadow = true;
     this.mesh.receiveShadow = true;
+    this.mesh.customDepthMaterial = casterDepthMaterial('skinned');
   }
 
   setLook(look: SoldierLook): void {
+    this.uniforms.uOutline.value = look.outline;
     this.uniforms.uAccent.value.copy(look.accent);
     this.uniforms.uCloth.value.copy(look.cloth);
     this.uniforms.uSkin.value.copy(look.skin);
@@ -220,9 +226,10 @@ function makePart(geo: THREE.BufferGeometry, mat: THREE.Material, capacity: numb
   return { mesh, attrs, count: 0, capacity };
 }
 
-function pushInstance(part: InstancedPart, m: THREE.Matrix4, accent: THREE.Color, cloth: THREE.Color, fade: number): void {
+function pushInstance(part: InstancedPart, m: THREE.Matrix4, accent: THREE.Color, cloth: THREE.Color, fade: number, outline: number): void {
   if (part.count >= part.capacity) return;
   const i = part.count++;
+  (part.attrs.outline.array as Float32Array)[i] = outline;
   m.toArray(part.mesh.instanceMatrix.array as Float32Array, i * 16);
   const a = part.attrs.accent.array as Float32Array;
   a[i * 3] = accent.r; a[i * 3 + 1] = accent.g; a[i * 3 + 2] = accent.b;
@@ -247,6 +254,9 @@ function finishPart(part: InstancedPart): void {
     part.attrs.fade.clearUpdateRanges();
     part.attrs.fade.addUpdateRange(0, part.count);
     part.attrs.fade.needsUpdate = true;
+    part.attrs.outline.clearUpdateRanges();
+    part.attrs.outline.addUpdateRange(0, part.count);
+    part.attrs.outline.needsUpdate = true;
   }
 }
 
@@ -301,15 +311,18 @@ export class MidCrowd implements MidBodyRenderer {
     for (const p of this.parts) p.count = 0;
   }
 
+  private outline = 0;
+
   private put(part: InstancedPart, root: THREE.Matrix4, bone: THREE.Matrix4, accent: THREE.Color, tint: THREE.Color, fade: number): void {
     _m.multiplyMatrices(root, bone);
-    pushInstance(part, _m, accent, tint, fade);
+    pushInstance(part, _m, accent, tint, fade, this.outline);
   }
 
   add(f: BodyFrame): void {
     const root = f.root, rig = f.rig, look = f.look, showWeapon = f.showWeapon, fade = f.fade;
     if (fade === 0) return;
     const acc = look.accent, cloth = look.cloth, legs = look.legs, white = this.white;
+    const ol = (this.outline = look.outline);
     this.put(this.pelvis, root, rig[B.HIPS], acc, legs, fade);
     this.put(this.torso, root, rig[B.CHEST], acc, cloth, fade);
     this.put(this.head, root, rig[B.HEAD], acc, white, fade);
@@ -327,13 +340,13 @@ export class MidCrowd implements MidBodyRenderer {
       const s = HELMET_SCALE[Math.min(3, helmet)];
       _s.makeScale(s, s, s);
       _m.multiplyMatrices(root, rig[B.HEAD]).multiply(_s);
-      pushInstance(this.helmet, _m, acc, this.helmetTints[Math.min(3, helmet)], fade);
+      pushInstance(this.helmet, _m, acc, this.helmetTints[Math.min(3, helmet)], fade, ol);
     }
     if (pack > 0) {
       const s = PACK_SCALE[Math.min(3, pack)];
       _s.makeScale(s, s, 1 + (s - 1) * 0.6);
       _m.multiplyMatrices(root, rig[B.CHEST]).multiply(_s);
-      pushInstance(this.pack, _m, acc, white, fade);
+      pushInstance(this.pack, _m, acc, white, fade, ol);
     }
     if (showWeapon && look.weapon) {
       const hold = WEAPON_HOLD[look.weapon];
@@ -342,7 +355,7 @@ export class MidCrowd implements MidBodyRenderer {
       } else {
         _s.makeScale(1, 1, hold.length / 0.9);
         _m.multiplyMatrices(root, rig[B.WEAPON]).multiply(_s);
-        pushInstance(this.longGun, _m, acc, white, fade);
+        pushInstance(this.longGun, _m, acc, white, fade, ol);
       }
     }
   }
@@ -371,7 +384,7 @@ export class MidCrowd implements MidBodyRenderer {
 // ---------------------------------------------------------------------------
 
 export class FarCrowd {
-  private readonly material = createEntityMaterial({ mask: true, instanced: true, dither: true, rim: true, fogScale: 0 });
+  private readonly material = createEntityMaterial({ mask: true, instanced: true, dither: true, rim: true, fogScale: 0, outlineMask: 0.85 });
   private readonly part: InstancedPart;
   private readonly white = new THREE.Color(1, 1, 1);
 
@@ -384,10 +397,13 @@ export class FarCrowd {
     this.part.count = 0;
   }
 
-  /** `m` = full model->world matrix (including stance shaping and min-size scale). */
-  add(m: THREE.Matrix4, accent: THREE.Color, fade: number): void {
+  /**
+   * `m` = full model->world matrix (including stance shaping and min-size scale); `outline` 1 for
+   * the local player's teammates (mostly team-coloured silhouette).
+   */
+  add(m: THREE.Matrix4, accent: THREE.Color, fade: number, outline: number): void {
     if (fade === 0) return;
-    pushInstance(this.part, m, accent, this.white, fade);
+    pushInstance(this.part, m, accent, this.white, fade, outline);
   }
 
   end(): void {

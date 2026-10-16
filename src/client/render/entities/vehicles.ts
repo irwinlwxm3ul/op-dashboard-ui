@@ -8,12 +8,13 @@
 // turn dark, and damaged vehicles smoke (< 40 % hp) or burn.
 
 import * as THREE from 'three';
+import { LOD_HYSTERESIS } from '../../../shared/constants';
 import { HANDLING, SEAT_HIP_HEIGHT, VEHICLES, WHEELS } from '../../../shared/vehicles';
 import type { VehicleModel } from '../../assets';
 import type { EntityId, VehicleType } from '../../../shared/types';
 import type { VehicleView } from '../../game/types';
 import { GeoBuilder, type PartStyle, xform } from './geometry';
-import { applyEntityShader, createEntityMaterial, createEntityUniforms } from './materials';
+import { applyEntityShader, casterDepthMaterial, createEntityMaterial, createEntityUniforms } from './materials';
 import { WRECK_TINT, vehiclePaintHex } from './palette';
 import { ParticleSystem } from './particles';
 import type { SeatInfo } from './animator';
@@ -215,6 +216,8 @@ interface VehicleSlot {
   glb: GlbVehicle | null;
   /** Hysteresis state of the real-model distance band. */
   useGlb: boolean;
+  /** Inside the render distance (with the LOD hysteresis band, like the players). */
+  shown: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -312,6 +315,7 @@ export class VehicleRenderer {
     this.batch = new THREE.BatchedMesh(maxInstances, verts + 16, 0, this.material);
     this.batch.name = 'vehicles';
     this.batch.castShadow = true;
+    this.batch.customDepthMaterial = casterDepthMaterial('batched');
     this.batch.receiveShadow = true;
     this.batch.frustumCulled = false;
     const geo = {} as Record<VehicleType, { paint: number; chassis: number; wheel: number; fork: number }>;
@@ -347,7 +351,7 @@ export class VehicleRenderer {
       if (g.fork >= 0) instances.push(this.batch.addInstance(g.fork));
       s = {
         id: v.id, type: v.type, instances, wheelAngle: 0, seen: 0, smokeAcc: 0, fireAcc: 0, destroyedFor: 0,
-        glb: null, useGlb: false,
+        glb: null, useGlb: false, shown: false,
       };
       this.slots.set(v.id, s);
       _c.setHex(vehiclePaintHex(v.id));
@@ -460,6 +464,11 @@ export class VehicleRenderer {
     g.root.visible = false;
     this.glbTypes[s.type]?.free.push(g);
     s.glb = null;
+  }
+
+  /** Whether a vehicle is currently drawn (inside the render distance); riders follow it. */
+  isShown(vehicleId: EntityId): boolean {
+    return this.slots.get(vehicleId)?.shown ?? false;
   }
 
   /**
@@ -583,7 +592,9 @@ export class VehicleRenderer {
     this.frameNo++;
     this.cam.copy(camPos);
     this.dt = dt;
-    this.maxD2 = maxDist * maxDist;
+    const showD = Math.max(0, maxDist - LOD_HYSTERESIS), hideD = maxDist + LOD_HYSTERESIS;
+    this.showD2 = showD * showD;
+    this.hideD2 = hideD * hideD;
     vehicles.forEach(this.visit);
     // Remove vehicles that disappeared.
     this.removeList.length = 0;
@@ -599,7 +610,8 @@ export class VehicleRenderer {
   // Per-frame parameters for the bound visitors below (avoids allocating closures every frame).
   private readonly cam = new THREE.Vector3();
   private dt = 0;
-  private maxD2 = 0;
+  private showD2 = 0;
+  private hideD2 = 0;
 
   private readonly collectStale = (s: VehicleSlot): void => {
     if (s.seen !== this.frameNo) this.removeList.push(s.id);
@@ -612,7 +624,9 @@ export class VehicleRenderer {
     const def = VEHICLES[v.type];
     const dx = v.pos.x - this.cam.x, dy = v.pos.y - this.cam.y, dz = v.pos.z - this.cam.z;
     const d2 = dx * dx + dy * dy + dz * dz;
-    const visible = d2 < this.maxD2;
+    // Render-distance cut with hysteresis (no flicker at the edge; riders follow this flag).
+    s.shown = s.shown ? d2 < this.hideD2 : d2 < this.showD2;
+    const visible = s.shown;
     // Real model near the camera (hysteresis band), procedural batched model beyond.
     if (this.glbTypes[v.type]) {
       s.useGlb = visible && (s.useGlb ? d2 < GLB_FAR * GLB_FAR : d2 < GLB_NEAR * GLB_NEAR);

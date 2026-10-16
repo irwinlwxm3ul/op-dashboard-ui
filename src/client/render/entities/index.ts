@@ -14,6 +14,7 @@ import type { CameraState, CreateEntityRenderer, EntityRenderer, RenderCore } fr
 import { DummyRenderer } from './dummies';
 import { lodThresholds } from './lod';
 import { LootRenderer } from './loot';
+import { disposeCasterDepthMaterials } from './materials';
 import { NameplateRenderer } from './nameplates';
 import { PlaneRenderer } from './plane';
 import { PlayersRenderer, type PlayersUpdateContext } from './players';
@@ -91,6 +92,7 @@ class EntityRendererImpl implements EntityRendererInternals {
       frustum: new THREE.Frustum(),
       seatLift: (id, seat) => this.vehicles.riderLift(id, seat),
       riderContacts: (veh, seat, lift) => this.vehicles.riderContacts(veh, seat, lift),
+      vehicleShown: (id) => this.vehicles.isShown(id),
     };
     this.unsubscribe.push(
       events.on('hit', (ev) => {
@@ -194,6 +196,7 @@ class EntityRendererImpl implements EntityRendererInternals {
     this.loot.dispose();
     this.plane.dispose();
     this.dummies.dispose();
+    disposeCasterDepthMaterials();
     this.root.removeFromParent();
   }
 }

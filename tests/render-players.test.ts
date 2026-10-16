@@ -7,11 +7,11 @@
 
 import * as THREE from 'three';
 import { describe, expect, it } from 'vitest';
-import { PF } from '../../../shared/protocol';
-import type { FrameState, PlayerView } from '../../game/types';
-import type { CameraState } from '../contracts';
-import { lodThresholds } from './lod';
-import { PlayersRenderer, type PlayersUpdateContext } from './players';
+import { PF } from '../src/shared/protocol';
+import type { FrameState, PlayerView } from '../src/client/game/types';
+import type { CameraState } from '../src/client/render/contracts';
+import { lodThresholds } from '../src/client/render/entities/lod';
+import { PlayersRenderer, type PlayersUpdateContext } from '../src/client/render/entities/players';
 
 function makePlayer(id: number, x: number, z: number, team = 2): PlayerView {
   return {
@@ -48,7 +48,7 @@ function makeRig(capacity: number, fov = 65): Rig {
   const ctx: PlayersUpdateContext = {
     camPos: camera.position.clone(), cam, lod: lodThresholds('medium'),
     focalPx: 540 / Math.tan((fov * Math.PI) / 360), shadows: false, time: 0, frustum,
-    seatLift: () => 0, riderContacts: () => undefined,
+    seatLift: () => 0, riderContacts: () => undefined, vehicleShown: () => true,
   };
   return { renderer, frame, ctx, camera, players };
 }

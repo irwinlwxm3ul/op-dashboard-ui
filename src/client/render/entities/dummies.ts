@@ -7,7 +7,7 @@ import { yawTo } from '../../../shared/math';
 import type { World } from '../../../shared/types';
 import type { TrainingTargetView } from '../../game/types';
 import { GeoBuilder, xform } from './geometry';
-import { createEntityMaterial } from './materials';
+import { casterDepthMaterial, createEntityMaterial } from './materials';
 
 const BOARD = 0xb79868;
 const RING = 0x3b2f22;
@@ -65,6 +65,7 @@ export class DummyRenderer {
     this.mesh.setColorAt(0, _white);
     this.mesh.frustumCulled = false;
     this.mesh.castShadow = true;
+    this.mesh.customDepthMaterial = casterDepthMaterial('instanced');
     this.mesh.receiveShadow = true;
     this.mesh.count = 0;
     parent.add(this.mesh);

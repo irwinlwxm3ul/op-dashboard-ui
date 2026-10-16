@@ -29,7 +29,7 @@ import type { SeatInfo } from './animator';
 import type { BodyFrame, NearBody, NearBodyProvider } from './bodies';
 import { GeoBuilder, M_ACCENT, xform } from './geometry';
 import { addItemAsset, itemAsset } from './lootModels';
-import { type EntityUniforms, applyEntityShader, createEntityUniforms } from './materials';
+import { type EntityUniforms, applyEntityShader, casterDepthMaterial, createEntityUniforms } from './materials';
 import { P } from './pose';
 import { slungLongGunMatrix } from './rig';
 import { SLUNG_DEPTH, buildHelmet, buildPack, buildVest } from './soldierModel';
@@ -437,6 +437,7 @@ class GltfNearBody implements NearBody {
       this.materials.push(m);
       this.body.castShadow = true;
       this.body.receiveShadow = true;
+      this.body.customDepthMaterial = casterDepthMaterial('skinned');
     }
     this.band = this.inst.teamBand;
     if (this.band) {
@@ -456,6 +457,7 @@ class GltfNearBody implements NearBody {
     this.gear.name = 'dz_gear';
     this.gear.frustumCulled = false;
     this.gear.castShadow = true;
+    this.gear.customDepthMaterial = casterDepthMaterial('skinned');
     const head = this.inst.bones.head, chest = this.inst.bones.chest;
     this.spine = this.inst.bones.spine;
     this.chest = chest;
@@ -586,6 +588,7 @@ class GltfNearBody implements NearBody {
     const look = f.look;
     this.uniforms.uAccent.value.copy(look.accent);
     this.uniforms.uFade.value = f.fade;
+    this.uniforms.uOutline.value = look.outline;
     this.bandMat?.color.copy(look.accent);
     const shadows = f.shadows && f.fade > 0.5;
     if (this.body) this.body.castShadow = shadows;

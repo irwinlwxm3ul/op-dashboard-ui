@@ -3,6 +3,9 @@
 //   * per-part masks (team accent / skin / fatigue tint) driven by uniforms or per-instance attributes,
 //   * a fresnel rim light that gets stronger with distance (silhouettes pop against foliage),
 //   * a screen-door dither fade (LOD crossfades and death fade-out without transparency sorting),
+//   * the local team's outline: a strong team-colour fresnel edge (uniform `uOutline` or the
+//     per-instance `iOutline`), optionally also pushing accent-masked parts toward the team colour
+//     (far impostors),
 //   * a reduced fog factor so players and vehicles stay readable beyond the terrain haze.
 //
 // Dither code convention (see lod.ts): code > 0 keeps pixels whose noise < code; code < 0 keeps
@@ -24,6 +27,11 @@ export interface EntityMaterialOptions {
   side?: THREE.Side;
   transparent?: boolean;
   opacity?: number;
+  /**
+   * Outlined (local-team) bodies: accent mask weight of masked parts raised to at least this
+   * (0..1; far impostors render mostly in the team colour). Omitted = edge outline only.
+   */
+  outlineMask?: number;
 }
 
 export interface EntityUniforms {
@@ -32,7 +40,14 @@ export interface EntityUniforms {
   uCloth: { value: THREE.Color };
   uFade: { value: number };
   uFogScale: { value: number };
+  /** Local-team outline weight (0..1) for non-instanced drawables. */
+  uOutline: { value: number };
 }
+
+/** Team outline: edge strength, edge exponent (lower = wider), minimum edge brightness. */
+export const OUTLINE = {
+  params: { value: new THREE.Vector4(1.3, 2.4, 0.12, 0) },
+};
 
 /** Rim parameters shared by every entity material (tunable in one place). */
 export const RIM = {
@@ -50,9 +65,11 @@ varying vec3 vMask;
 attribute vec3 iAccent;
 attribute vec3 iCloth;
 attribute float iFade;
+attribute float iOutline;
 varying vec3 vAccent;
 varying vec3 vCloth;
 varying float vFade;
+varying float vOutline;
 #endif
 `;
 
@@ -64,6 +81,7 @@ vMask = aMask;
 vAccent = iAccent;
 vCloth = iCloth;
 vFade = iFade;
+vOutline = iOutline;
 #endif
 `;
 
@@ -75,6 +93,8 @@ uniform float uFade;
 uniform float uFogScale;
 uniform vec3 uRimColor;
 uniform vec4 uRimParams;
+uniform float uOutline;
+uniform vec4 uOutlineParams;
 #ifdef ENT_MASK
 varying vec3 vMask;
 #endif
@@ -82,6 +102,7 @@ varying vec3 vMask;
 varying vec3 vAccent;
 varying vec3 vCloth;
 varying float vFade;
+varying float vOutline;
 #endif
 float entIgn(vec2 p) {
   return fract(52.9829189 * fract(dot(p, vec2(0.06711056, 0.00583715))));
@@ -115,9 +136,18 @@ const FRAG_MASK = /* glsl */ `
   vec3 entAccent = uAccent;
   vec3 entCloth = uCloth;
 #endif
+  float entAccentW = vMask.x;
+#ifdef ENT_OUTLINE_MASK
+#ifdef ENT_INSTANCED
+  float entOutlineM = vOutline;
+#else
+  float entOutlineM = uOutline;
+#endif
+  if (vMask.x > 0.0) entAccentW = mix(vMask.x, max(vMask.x, ENT_OUTLINE_MASK), entOutlineM);
+#endif
   diffuseColor.rgb = mix(diffuseColor.rgb, diffuseColor.rgb * entCloth, vMask.z);
   diffuseColor.rgb = mix(diffuseColor.rgb, uSkin, vMask.y);
-  diffuseColor.rgb = mix(diffuseColor.rgb, entAccent, vMask.x);
+  diffuseColor.rgb = mix(diffuseColor.rgb, entAccent, entAccentW);
 }
 #endif
 `;
@@ -130,6 +160,18 @@ const FRAG_RIM = /* glsl */ `
   float entDist = smoothstep(uRimParams.z, uRimParams.w, length(vViewPosition));
   float entRim = pow(1.0 - entNdv, 2.6) * mix(uRimParams.x, uRimParams.y, entDist);
   outgoingLight += uRimColor * entRim * (0.5 + 0.5 * diffuseColor.rgb);
+#ifdef ENT_INSTANCED
+  float entOutline = vOutline;
+  vec3 entOutlineColor = vAccent;
+#else
+  float entOutline = uOutline;
+  vec3 entOutlineColor = uAccent;
+#endif
+  if (entOutline > 0.0) {
+    // Local team: a bright team-colour edge around the silhouette.
+    float entEdge = pow(1.0 - entNdv, uOutlineParams.y);
+    outgoingLight = mix(outgoingLight, entOutlineColor * (uOutlineParams.z + uOutlineParams.x * entEdge), entOutline * min(1.0, entEdge * 1.4));
+  }
 }
 #endif
 `;
@@ -153,6 +195,7 @@ export function createEntityUniforms(fogScale = 0.35): EntityUniforms {
     uCloth: { value: new THREE.Color(0x6b7347) },
     uFade: { value: 1 },
     uFogScale: { value: fogScale },
+    uOutline: { value: 0 },
   };
 }
 
@@ -167,9 +210,10 @@ export function applyEntityShader(mat: THREE.Material, opts: EntityMaterialOptio
   if (opts.instanced) defines.ENT_INSTANCED = '';
   if (opts.dither) defines.ENT_DITHER = '';
   if (opts.rim) defines.ENT_RIM = '';
+  if (opts.outlineMask !== undefined) defines.ENT_OUTLINE_MASK = opts.outlineMask.toFixed(3);
   mat.defines = defines;
   mat.userData.uniforms = uniforms;
-  const key = 'dz-ent:' + mat.type + ':' + Object.keys(defines).sort().join(',');
+  const key = 'dz-ent:' + mat.type + ':' + Object.keys(defines).sort().map((k) => k + '=' + String(defines[k])).join(',');
   mat.customProgramCacheKey = () => key;
   mat.onBeforeCompile = (shader) => {
     shader.uniforms.uAccent = uniforms.uAccent;
@@ -179,6 +223,8 @@ export function applyEntityShader(mat: THREE.Material, opts: EntityMaterialOptio
     shader.uniforms.uFogScale = uniforms.uFogScale;
     shader.uniforms.uRimColor = RIM.color;
     shader.uniforms.uRimParams = RIM.params;
+    shader.uniforms.uOutline = uniforms.uOutline;
+    shader.uniforms.uOutlineParams = OUTLINE.params;
     shader.vertexShader = shader.vertexShader
       .replace('#include <common>', `#include <common>\n${VERT_PARS}`)
       .replace('#include <color_vertex>', `#include <color_vertex>\n${VERT_MAIN}`);
@@ -211,18 +257,48 @@ export interface InstanceAttributes {
   accent: THREE.InstancedBufferAttribute;
   cloth: THREE.InstancedBufferAttribute;
   fade: THREE.InstancedBufferAttribute;
+  outline: THREE.InstancedBufferAttribute;
 }
 
-/** Add per-instance `iAccent` / `iCloth` / `iFade` attributes to an instanced geometry. */
+/** Add per-instance `iAccent` / `iCloth` / `iFade` / `iOutline` attributes to an instanced geometry. */
 export function addInstanceAttributes(geo: THREE.BufferGeometry, capacity: number): InstanceAttributes {
   const accent = new THREE.InstancedBufferAttribute(new Float32Array(capacity * 3).fill(1), 3);
   const cloth = new THREE.InstancedBufferAttribute(new Float32Array(capacity * 3).fill(1), 3);
   const fade = new THREE.InstancedBufferAttribute(new Float32Array(capacity).fill(1), 1);
+  const outline = new THREE.InstancedBufferAttribute(new Float32Array(capacity), 1);
   accent.setUsage(THREE.DynamicDrawUsage);
   cloth.setUsage(THREE.DynamicDrawUsage);
   fade.setUsage(THREE.DynamicDrawUsage);
+  outline.setUsage(THREE.DynamicDrawUsage);
   geo.setAttribute('iAccent', accent);
   geo.setAttribute('iCloth', cloth);
   geo.setAttribute('iFade', fade);
-  return { accent, cloth, fade };
+  geo.setAttribute('iOutline', outline);
+  return { accent, cloth, fade, outline };
+}
+
+// ---------------------------------------------------------------------------
+// Shadow-pass depth materials (one per caster kind, so three's shared default depth material is
+// not re-resolved between skinned / batched / instanced programs every frame)
+// ---------------------------------------------------------------------------
+
+export type DepthCasterKind = 'skinned' | 'batched' | 'instanced';
+
+const depthMaterials = new Map<DepthCasterKind, THREE.MeshDepthMaterial>();
+
+/** Shared depth material for one kind of shadow caster (assign as `customDepthMaterial`). */
+export function casterDepthMaterial(kind: DepthCasterKind): THREE.MeshDepthMaterial {
+  let m = depthMaterials.get(kind);
+  if (!m) {
+    m = new THREE.MeshDepthMaterial();
+    m.name = 'dz-depth-' + kind;
+    depthMaterials.set(kind, m);
+  }
+  return m;
+}
+
+/** Dispose the shared caster depth materials (renderer teardown). */
+export function disposeCasterDepthMaterials(): void {
+  for (const m of depthMaterials.values()) m.dispose();
+  depthMaterials.clear();
 }

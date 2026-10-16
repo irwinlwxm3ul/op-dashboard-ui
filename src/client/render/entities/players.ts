@@ -69,7 +69,7 @@ function bodyFrame(v: PlayerView): BodyFrame {
     _bodyScratch = {
       root: new THREE.Matrix4(), rig: [], look: {
         accent: new THREE.Color(), cloth: new THREE.Color(), legs: new THREE.Color(), skin: new THREE.Color(),
-        gear: [0, 0, 0], weapon: null,
+        gear: [0, 0, 0], weapon: null, outline: 0,
       },
       showWeapon: false, fade: 0, shadows: false, onScreen: true, view: v, logical: createLogicalAnim(), anim: new AnimState(),
       moveX: 0, moveZ: 0, aimPitch: 0, aimYawRel: 0, seat: null, dt: 0, time: 0,
@@ -96,7 +96,7 @@ export class PlayerEntry {
   readonly logical: LogicalAnim = createLogicalAnim();
   readonly look: SoldierLook & { gear: [number, number, number] } = {
     accent: new THREE.Color(), cloth: new THREE.Color(), legs: new THREE.Color(), skin: new THREE.Color(),
-    gear: [0, 0, 0], weapon: null,
+    gear: [0, 0, 0], weapon: null, outline: 0,
   };
   /** Outfit tint must be refreshed from the active near backend. */
   outfitDirty = true;
@@ -158,6 +158,8 @@ export class PlayerEntry {
       this.lookTeam = v.team;
       this.lookLocalTeam = localTeam;
     }
+    // The local player's team renders with an outline (not the local player's own body).
+    this.look.outline = v.team === localTeam && !v.isSelf ? 1 : 0;
     const g = this.look.gear;
     g[0] = Math.max(0, Math.min(3, v.gear[0] | 0));
     g[1] = Math.max(0, Math.min(3, v.gear[1] | 0));
@@ -180,6 +182,8 @@ export interface PlayersUpdateContext {
   seatLift: (vehicleId: EntityId, seat: number) => number;
   /** Fills a rider's contact points (hands on the controls, feet on the pegs) for the shown model. */
   riderContacts: (vehicle: VehicleView, seat: SeatInfo, lift: number) => void;
+  /** Whether a vehicle is drawn (render distance with hysteresis): its riders follow it. */
+  vehicleShown: (vehicleId: EntityId) => boolean;
 }
 
 export class PlayersRenderer {
@@ -446,8 +450,14 @@ export class PlayersRenderer {
       if (e.fade.cur !== lvl || e.fade.t < 1) e.fade = createLodFade(lvl);
     } else {
       let target: LodLevel = selectLod(e.fade.cur, eff, ctx.lod);
-      // Never fade in beyond the render distance (true distance, not zoom adjusted).
-      if (e.dist > ctx.lod.far + ctx.lod.hysteresis) target = LOD_HIDDEN_IDX;
+      if (veh) {
+        // Riders are drawn exactly while their vehicle is (same render-distance hysteresis).
+        if (!ctx.vehicleShown(veh.id)) target = LOD_HIDDEN_IDX;
+        else if (target === LOD_HIDDEN_IDX) target = 2;
+      } else if (e.dist > ctx.lod.far + ctx.lod.hysteresis) {
+        // Never fade in beyond the render distance (true distance, not zoom adjusted).
+        target = LOD_HIDDEN_IDX;
+      }
       // Only head for the near LOD with a near body in hand; otherwise stay on mid (fully visible)
       // instead of restarting a fade toward a level that can never be reached.
       if (target === 0 && !e.near && (bodyHidden || !this.takeNear(e))) target = 1;
@@ -595,7 +605,7 @@ export class PlayersRenderer {
     _m2.makeTranslation(0, -FAR_CHEST, 0);
     _m.multiply(_m2);
     _m.premultiply(e.root);
-    this.far.add(_m, e.look.accent, code);
+    this.far.add(_m, e.look.accent, code, e.look.outline);
   }
 
   dispose(): void {
