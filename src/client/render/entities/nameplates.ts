@@ -38,7 +38,7 @@ html[dir=rtl] .dz-np-hp,html[dir=rtl] .dz-np-dhp{transform-origin:100% 50%}
 .dz-np-enemy .dz-np-name{color:#fff;border-bottom:2px solid currentColor;padding-bottom:1px}
 @keyframes dz-np-pulse{0%,100%{transform:scale(.8);opacity:.55}50%{transform:scale(1.15);opacity:1}}
 .dz-np-edge{position:absolute;left:0;top:0;display:flex;flex-direction:column;align-items:center;gap:1px;
-  will-change:transform;font:600 10px/1 system-ui,-apple-system,"Segoe UI",sans-serif;color:#fff;
+  white-space:nowrap;will-change:transform;font:600 10px/1 system-ui,-apple-system,"Segoe UI",sans-serif;color:#fff;
   text-shadow:0 1px 2px rgba(0,0,0,.95)}
 .dz-np-arrow{width:0;height:0;border-left:8px solid transparent;border-right:8px solid transparent;
   border-bottom:14px solid currentColor;filter:drop-shadow(0 0 2px rgba(0,0,0,.9))}

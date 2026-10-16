@@ -38,7 +38,7 @@ export interface EntityUniforms {
 export const RIM = {
   color: { value: new THREE.Color(0xdfe8ff) },
   /** near strength, far strength, near distance (m), far distance (m) */
-  params: { value: new THREE.Vector4(0.22, 0.75, 20, 320) },
+  params: { value: new THREE.Vector4(0.22, 0.6, 20, 320) },
 };
 
 const VERT_PARS = /* glsl */ `

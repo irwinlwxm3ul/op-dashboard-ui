@@ -10,6 +10,8 @@
 // upward segment BACKWARD), roll = rotation about Z (positive tilts an upward segment to the LEFT),
 // yaw = rotation about Y (positive turns left). Knee > 0 bends the shin backward.
 
+import { MOVE_SPEED } from '../../../shared/constants';
+
 export const P = {
   // Hips (pelvis) placement in model space and orientation (Euler YXZ).
   HX: 0, HY: 1, HZ: 2, HPITCH: 3, HROLL: 4, HYAW: 5,
@@ -98,26 +100,30 @@ export function normalizeWeights(w: Float32Array, eps = 1e-3): number {
 
 export type GaitKind = 'stand' | 'crouch' | 'prone' | 'swim' | 'downed';
 
+/** Below this speed (m/s) a standing player uses the slow-walk cadence. */
+const SLOW_GAIT_SPEED = 3;
+/** Above this speed (m/s) a standing player uses the sprint cadence even without the flag. */
+const SPRINT_GAIT_SPEED = MOVE_SPEED.walk + 0.6;
+
 /**
  * Stride length (m travelled per full gait cycle = two footfalls) for a gait at a horizontal speed.
- * The animation cycle frequency is speed / stride, so remote footsteps derived from velocity
- * (feel module: one step per half stride) stay in sync with the legs.
+ * The animation cycle frequency is speed / stride, so footfalls land every half cycle. The per-step
+ * lengths mirror the footstep cadence the feel module uses for remote players and the local player
+ * (walk 1.6 m, sprint 2.05 m, slow walk 1.15 m, crouch 1.05 m, crawl 0.8 m, swim 1.7 m), so feet
+ * hit the ground exactly when the footstep sounds play.
  */
 export function strideLength(gait: GaitKind, speed: number, sprinting: boolean): number {
   switch (gait) {
     case 'crouch':
-      return 1.1 + 0.6 * Math.min(1, speed / 2.7);
+      return 2 * 1.05;
     case 'prone':
-      return 1.15;
     case 'downed':
-      return 1.0;
+      return 2 * 0.8;
     case 'swim':
-      return 2.2;
-    default: {
-      // Walk 1.4 m at a stroll, ~2.5 m at the 4.7 m/s run, ~3.2 m sprinting.
-      const base = 1.4 + 1.1 * Math.min(1, speed / 4.7);
-      return sprinting ? Math.max(base, 2.5 + 0.7 * Math.min(1, Math.max(0, (speed - 4.7) / 1.6))) : base;
-    }
+      return 2 * 1.7;
+    default:
+      if (sprinting || speed > SPRINT_GAIT_SPEED) return 2 * 2.05;
+      return speed < SLOW_GAIT_SPEED ? 2 * 1.15 : 2 * 1.6;
   }
 }
 

@@ -45,7 +45,8 @@ export interface SeatInfo {
 }
 
 export interface AnimInput {
-  view: PlayerView;
+  /** Player to animate (null = nothing to do). */
+  view: PlayerView | null;
   /** Seat info when riding a vehicle (null otherwise). */
   seat: SeatInfo | null;
   /** Aim yaw relative to the model facing (passengers), rad. */
@@ -228,7 +229,7 @@ function genStand(p: Pose, g: GenParams): void {
   p[P.SPITCH] = -(0.03 + 0.08 * s * m + 0.14 * sp);
   p[P.CPITCH] = -0.02 * m + breath;
   p[P.NPITCH] = 0.05 * s * m + 0.08 * sp;
-  const A = (0.32 + 0.28 * s + 0.18 * sp) * m;
+  const A = (0.42 + 0.22 * s + 0.16 * sp) * m;
   const K = (0.45 + 0.55 * s + 0.45 * sp) * m;
   p[P.LLP] = A * sinP;
   p[P.RLP] = A * sinQ;
@@ -526,7 +527,7 @@ function buildDeathLie(st: AnimState, out: Pose): void {
   out[P.NYAW] = 0.7 * st.deathSide;
   out[P.LLP] = 0.15; out[P.RLP] = -0.05 + 0.3 * Math.max(0, st.deathSide);
   out[P.LLR] = 0.22; out[P.RLR] = 0.12;
-  out[P.LKNEE] = 0.2; out[P.RKNEE] = 0.55 + 0.4 * Math.abs(st.deathSide);
+  out[P.LKNEE] = 0.12; out[P.RKNEE] = 0.28 + 0.22 * Math.abs(st.deathSide);
   // Arms flung out, lying flat.
   const zArm = back ? 0.05 : -0.05;
   out[P.LCX] = -0.56; out[P.LCY] = 0.12; out[P.LCZ] = zArm;
@@ -573,6 +574,7 @@ const gen: GenParams = {
 /** Advance the animation state and write the blended pose into st.pose. */
 export function animate(st: AnimState, inp: AnimInput): void {
   const v = inp.view;
+  if (!v) return;
   const dt = Math.min(0.1, Math.max(0, inp.dt));
   const flags = v.flags;
   const tw = st.weights;

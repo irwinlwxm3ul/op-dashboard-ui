@@ -9,6 +9,7 @@
 import * as THREE from 'three';
 import { MAX_PLAYERS } from '../../../shared/constants';
 import type { WeaponId } from '../../../shared/types';
+import type { BodyFrame, MidBodyRenderer, NearBody, NearBodyProvider } from './bodies';
 import { type EntityUniforms, type InstanceAttributes, addInstanceAttributes, createEntityMaterial } from './materials';
 import { B } from './rig';
 import {
@@ -38,7 +39,7 @@ export interface SoldierLook {
 // Near
 // ---------------------------------------------------------------------------
 
-export class NearSoldier {
+export class NearSoldier implements NearBody {
   readonly mesh: THREE.SkinnedMesh;
   readonly bones: THREE.Bone[] = [];
   readonly uniforms: EntityUniforms;
@@ -76,14 +77,14 @@ export class NearSoldier {
     this.uniforms.uSkin.value.copy(look.skin);
   }
 
-  /**
-   * Pose the soldier. `root` = model->world, `rig` = model-space bone matrices, `fade` = dither code.
-   */
-  apply(root: THREE.Matrix4, rig: THREE.Matrix4[], look: SoldierLook, showWeapon: boolean, fade: number, shadows: boolean): void {
-    this.mesh.matrix.copy(root);
+  /** Pose the soldier from the procedural rig (bone matrices in model space). */
+  apply(f: BodyFrame): void {
+    const look = f.look, rig = f.rig, fade = f.fade;
+    this.setLook(look);
+    this.mesh.matrix.copy(f.root);
     this.mesh.matrixWorldNeedsUpdate = true;
     const [helmet, vest, pack] = look.gear;
-    const wIdx = showWeapon && look.weapon ? WEAPON_IDS.indexOf(look.weapon) : -1;
+    const wIdx = f.showWeapon && look.weapon ? WEAPON_IDS.indexOf(look.weapon) : -1;
     for (let i = 0; i < NEAR_BONE_COUNT; i++) {
       const bone = this.bones[i];
       let visible = true;
@@ -96,7 +97,7 @@ export class NearSoldier {
       bone.matrixWorldNeedsUpdate = true;
     }
     this.uniforms.uFade.value = fade;
-    this.mesh.castShadow = shadows && fade > 0.5;
+    this.mesh.castShadow = f.shadows && fade > 0.5;
     this.mesh.visible = fade !== 0;
   }
 
@@ -110,7 +111,9 @@ export class NearSoldier {
   }
 }
 
-export class NearPool {
+/** Procedural near-LOD backend: pool of skinned procedural soldiers sharing one geometry. */
+export class NearPool implements NearBodyProvider {
+  readonly name = 'procedural';
   readonly geometry = buildNearSoldierGeometry();
   private readonly all: NearSoldier[] = [];
   private readonly free: NearSoldier[] = [];
@@ -138,7 +141,8 @@ export class NearPool {
     return s;
   }
 
-  release(s: NearSoldier): void {
+  release(body: NearBody): void {
+    const s = body as NearSoldier;
     s.ownerId = -1;
     s.hide();
     this.free.push(s);
@@ -211,7 +215,9 @@ function finishPart(part: InstancedPart): void {
 const PACK_SCALE: readonly number[] = [0, 0.78, 1, 1.22];
 const HELMET_SCALE: readonly number[] = [0, 0.94, 1, 1.07];
 
-export class MidCrowd {
+/** Procedural mid-LOD backend: coarse parts, one InstancedMesh per part for all soldiers. */
+export class MidCrowd implements MidBodyRenderer {
+  readonly name = 'procedural';
   private readonly material = createEntityMaterial({ mask: true, instanced: true, dither: true, rim: true, fogScale: 0.3 });
   private readonly parts: InstancedPart[] = [];
   private readonly pelvis: InstancedPart;
@@ -262,7 +268,8 @@ export class MidCrowd {
     pushInstance(part, _m, accent, tint, fade);
   }
 
-  add(root: THREE.Matrix4, rig: THREE.Matrix4[], look: SoldierLook, showWeapon: boolean, fade: number): void {
+  add(f: BodyFrame): void {
+    const root = f.root, rig = f.rig, look = f.look, showWeapon = f.showWeapon, fade = f.fade;
     if (fade === 0) return;
     const acc = look.accent, cloth = look.cloth, white = this.white;
     this.put(this.pelvis, root, rig[B.HIPS], acc, cloth, fade);
@@ -304,6 +311,11 @@ export class MidCrowd {
 
   end(): void {
     for (const p of this.parts) finishPart(p);
+  }
+
+  clear(): void {
+    this.begin();
+    this.end();
   }
 
   dispose(): void {

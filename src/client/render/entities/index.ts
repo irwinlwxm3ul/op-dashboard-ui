@@ -18,6 +18,10 @@ import { NameplateRenderer } from './nameplates';
 import { PlaneRenderer } from './plane';
 import { PlayersRenderer, type PlayersUpdateContext } from './players';
 import { VehicleRenderer } from './vehicles';
+import type { MidBodyRenderer, NearBodyProvider } from './bodies';
+
+export type { BodyFrame, MidBodyRenderer, NearBody, NearBodyProvider } from './bodies';
+export type { LogicalAnim, LogicalAnimOverlay, LogicalAnimState, WeaponClass } from './animState';
 
 export { teamColorHex, teamCss, LOCAL_TEAM_COLOR } from './palette';
 export { selectLod, lodThresholds } from './lod';
@@ -33,7 +37,19 @@ function nearCapacity(q: Quality): number {
   }
 }
 
-class EntityRendererImpl implements EntityRenderer {
+/**
+ * Entity renderer plus the hooks used to plug asset-based character bodies in (the far silhouette
+ * impostor and the procedural soldier fallback stay built in).
+ */
+export interface EntityRendererInternals extends EntityRenderer {
+  /** Scene group that owns every entity object; backends add their meshes under it. */
+  readonly group: THREE.Group;
+  /** Swap near / mid body backends; null restores the procedural soldier. */
+  setBodyBackends(near: NearBodyProvider | null, mid: MidBodyRenderer | null): void;
+  readonly bodyBackends: { near: string; mid: string };
+}
+
+class EntityRendererImpl implements EntityRendererInternals {
   private readonly root = new THREE.Group();
   private readonly players: PlayersRenderer;
   private readonly vehicles: VehicleRenderer;
@@ -60,7 +76,7 @@ class EntityRendererImpl implements EntityRenderer {
     this.nameplates = new NameplateRenderer(overlay, core.canvas, world);
     this.ctx = {
       camPos: this.camPos,
-      cam: null as unknown as CameraState,
+      cam: { pos: { x: 0, y: 0, z: 0 }, yaw: 0, pitch: 0, roll: 0, fov: 70, mode: 'menu', scope: null, ads: 0, hideLocalBody: false },
       lod: lodThresholds(this.quality),
       focalPx: 1000,
       shadows: this.quality !== 'low',
@@ -80,6 +96,18 @@ class EntityRendererImpl implements EntityRenderer {
       }),
       events.on('targetHit', (ev) => this.dummies.onHit(ev.target, ev.damage, ev.part === 'head')),
     );
+  }
+
+  get group(): THREE.Group {
+    return this.root;
+  }
+
+  setBodyBackends(near: NearBodyProvider | null, mid: MidBodyRenderer | null): void {
+    this.players.setBodyBackends(near, mid);
+  }
+
+  get bodyBackends(): { near: string; mid: string } {
+    return this.players.backendNames;
   }
 
   update(frame: FrameState, cam: CameraState, dt: number): void {
@@ -119,5 +147,5 @@ class EntityRendererImpl implements EntityRenderer {
   }
 }
 
-export const createEntityRenderer: CreateEntityRenderer = (core, world, overlay, events) =>
+export const createEntityRenderer: CreateEntityRenderer = (core, world, overlay, events): EntityRendererInternals =>
   new EntityRendererImpl(core, world, overlay, events);

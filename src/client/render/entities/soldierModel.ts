@@ -325,12 +325,12 @@ export function buildMidParts(): MidPartGeometries {
       b.taper(0.38, 0.27, 0.42, 0.285, 0.28, at(I, 0, 0.12, 0), cloth(0xffffff, 0));
     }),
     head: one((b) => {
-      b.sphere(0.11, 6, 4, at(I, 0, DIM.headCenter - 0.01, 0, 0, 0, 0, 0.95, 1.1, 1), solid(0xb98a68, 0));
-      b.cyl(0.055, 0.055, 0.1, 5, at(I, 0, 0.02, 0), solid(0xb98a68, 0));
+      // Elongated low sphere reaching down to the collar (no separate neck at this distance).
+      b.sphere(0.11, 6, 4, at(I, 0, DIM.headCenter - 0.03, 0, 0, 0, 0, 0.95, 1.35, 1), solid(0xb98a68, 0));
     }),
     helmet: one((b) => {
       b.sphere(0.138, 6, 2, at(I, 0, 0.16, 0.005, 0, 0, 0, 1, 0.95, 1.08), cloth(0xffffff, 0), 0, Math.PI / 2);
-      b.cyl(0.14, 0.14, 0.04, 6, at(I, 0, 0.165, 0.005, 0, 0, 0, 1, 1, 1.08), accent(0));
+      b.cyl(0.14, 0.14, 0.04, 6, at(I, 0, 0.165, 0.005, 0, 0, 0, 1, 1, 1.08), accent(0), true);
     }),
     pack: one((b) => {
       b.box(0.32, 0.42, 0.17, at(I, 0, 0.08, 0.26), solid(0x50563c, 0));

@@ -12,14 +12,16 @@ import type { CameraState } from '../contracts';
 import {
   type AnimInput, AnimState, DEATH_FADE_START, DEATH_FADE_TIME, type SeatInfo, animate, deathSink, deathVisibility,
 } from './animator';
-import { FarCrowd, MidCrowd, NearPool, type NearSoldier, type SoldierLook } from './crowd';
+import { type LogicalAnim, createLogicalAnim, resolveLogicalAnim } from './animState';
+import type { BodyFrame, MidBodyRenderer, NearBody, NearBodyProvider } from './bodies';
+import { FarCrowd, MidCrowd, NearPool, type SoldierLook } from './crowd';
 import {
   LOD_HIDDEN_IDX, type LodFade, type LodLevel, type LodThresholds, createLodFade, effectiveLodDistance, fadeCode,
   minScreenScale, selectLod, stepLodFade,
 } from './lod';
 import { teamColor, clothTintHex, skinToneHex } from './palette';
 import { Parachutes } from './parachutes';
-import { smooth } from './pose';
+import { createPose, smooth } from './pose';
 import { B, type RigInput, createBoneMatrices, evaluateRig, headPosition } from './rig';
 import { SLUNG_DEPTH } from './soldierModel';
 
@@ -38,8 +40,22 @@ const _v = new THREE.Vector3();
 const _m = new THREE.Matrix4();
 const _m2 = new THREE.Matrix4();
 const _seat: Vec3 = { x: 0, y: 0, z: 0 };
-const _animIn: AnimInput = { view: null as unknown as PlayerView, seat: null, aimYawRel: 0, localVx: 0, localVz: 0, time: 0, dt: 0 };
-const _rigIn: RigInput = { pose: new Float32Array(0), aimPitch: 0, aimYaw: 0, weapon: null, slungDepth: 0 };
+const _animIn: AnimInput = { view: null, seat: null, aimYawRel: 0, localVx: 0, localVz: 0, time: 0, dt: 0 };
+const _rigIn: RigInput = { pose: createPose(), aimPitch: 0, aimYaw: 0, weapon: null, slungDepth: 0 };
+/** Scratch per-player frame handed to the body backends (created on first use, then reused). */
+let _bodyScratch: BodyFrame | null = null;
+function bodyFrame(v: PlayerView): BodyFrame {
+  if (!_bodyScratch) {
+    _bodyScratch = {
+      root: new THREE.Matrix4(), rig: [], look: {
+        accent: new THREE.Color(), cloth: new THREE.Color(), skin: new THREE.Color(), gear: [0, 0, 0], weapon: null,
+      },
+      showWeapon: false, fade: 0, shadows: false, view: v, logical: createLogicalAnim(),
+      aimPitch: 0, aimYawRel: 0, dt: 0, time: 0,
+    };
+  }
+  return _bodyScratch;
+}
 
 /** Scratch VehicleState used to evaluate seat positions from an interpolated VehicleView. */
 const _veh: VehicleState = {
@@ -53,7 +69,10 @@ export class PlayerEntry {
   view: PlayerView | null = null;
   readonly anim = new AnimState();
   fade: LodFade = createLodFade(LOD_HIDDEN_IDX);
-  near: NearSoldier | null = null;
+  near: NearBody | null = null;
+  /** Provider that owns `near` (bodies are returned to the provider they came from). */
+  nearOwner: NearBodyProvider | null = null;
+  readonly logical: LogicalAnim = createLogicalAnim();
   readonly look: SoldierLook & { gear: [number, number, number] } = {
     accent: new THREE.Color(), cloth: new THREE.Color(), skin: new THREE.Color(), gear: [0, 0, 0], weapon: null,
   };
@@ -125,8 +144,12 @@ export interface PlayersUpdateContext {
 export class PlayersRenderer {
   readonly entries = new Map<EntityId, PlayerEntry>();
   private readonly pool: PlayerEntry[] = [];
-  private readonly nearPool: NearPool;
-  private readonly mid: MidCrowd;
+  /** Procedural backends (always available: the fallback for asset-based bodies). */
+  private readonly procNear: NearPool;
+  private readonly procMid: MidCrowd;
+  private nearPool: NearBodyProvider;
+  private mid: MidBodyRenderer;
+  private nearCapacity: number;
   private readonly far: FarCrowd;
   readonly chutes: Parachutes;
   private frameNo = 0;
@@ -137,14 +160,54 @@ export class PlayersRenderer {
   private dt = 0;
 
   constructor(parent: THREE.Object3D, nearCapacity: number) {
-    this.nearPool = new NearPool(parent, nearCapacity);
-    this.mid = new MidCrowd(parent, MAX_PLAYERS);
+    this.nearCapacity = nearCapacity;
+    this.procNear = new NearPool(parent, nearCapacity);
+    this.procMid = new MidCrowd(parent, MAX_PLAYERS);
+    this.nearPool = this.procNear;
+    this.mid = this.procMid;
     this.far = new FarCrowd(parent, MAX_PLAYERS + 16);
     this.chutes = new Parachutes(parent);
   }
 
   setNearCapacity(n: number): void {
+    this.nearCapacity = n;
     this.nearPool.setCapacity(n);
+    if (this.nearPool !== this.procNear) this.procNear.setCapacity(n);
+  }
+
+  /**
+   * Swap the near / mid body backends (e.g. skinned glTF characters once their assets loaded).
+   * Passing null restores the procedural soldier. Bodies currently assigned are returned to their
+   * provider; players pick up a body from the new provider on the next frame. The caller owns
+   * non-procedural backends and disposes them after swapping them out.
+   */
+  setBodyBackends(near: NearBodyProvider | null, mid: MidBodyRenderer | null): void {
+    const nextNear = near ?? this.procNear;
+    const nextMid = mid ?? this.procMid;
+    if (nextNear !== this.nearPool) {
+      this.entries.forEach(this.releaseNearOf);
+      this.nearPool = nextNear;
+      this.nearPool.setCapacity(this.nearCapacity);
+    }
+    if (nextMid !== this.mid) {
+      this.mid.clear();
+      this.mid = nextMid;
+    }
+  }
+
+  /** Name of the active near / mid backends (diagnostics). */
+  get backendNames(): { near: string; mid: string } {
+    return { near: this.nearPool.name, mid: this.mid.name };
+  }
+
+  private readonly releaseNearOf = (e: PlayerEntry): void => {
+    this.releaseNear(e);
+  };
+
+  private releaseNear(e: PlayerEntry): void {
+    if (e.near && e.nearOwner) e.nearOwner.release(e.near);
+    e.near = null;
+    e.nearOwner = null;
   }
 
   /** Bullet hit on a player: flinch + remembered fall direction. */
@@ -181,8 +244,7 @@ export class PlayersRenderer {
     for (const id of this.stale) {
       const e = this.entries.get(id);
       if (!e) continue;
-      if (e.near) this.nearPool.release(e.near);
-      e.near = null;
+      this.releaseNear(e);
       this.entries.delete(id);
       this.pool.push(e);
     }
@@ -209,7 +271,7 @@ export class PlayersRenderer {
   }
 
   /** Acquire a near soldier for `e`, stealing from a farther holder when the pool is full. */
-  private acquireNear(e: PlayerEntry): NearSoldier | null {
+  private acquireNear(e: PlayerEntry): NearBody | null {
     let s = this.nearPool.acquire(e.id);
     if (s) return s;
     let victim: PlayerEntry | null = null;
@@ -220,8 +282,7 @@ export class PlayersRenderer {
       if (h.dist > e.dist + 2 && (!victim || h.dist > victim.dist)) victim = h;
     }
     if (!victim || !victim.near) return null;
-    this.nearPool.release(victim.near);
-    victim.near = null;
+    this.releaseNear(victim);
     // The victim drops to mid immediately.
     victim.fade.cur = 1;
     if (victim.fade.prev === 0) victim.fade.prev = 1;
@@ -297,14 +358,14 @@ export class PlayersRenderer {
     const wantsNear = !bodyHidden && (e.fade.cur === 0 || (e.fade.prev === 0 && e.fade.t < 1));
     if (wantsNear && !e.near) {
       e.near = this.acquireNear(e);
+      e.nearOwner = e.near ? this.nearPool : null;
       if (!e.near) {
         // Pool exhausted: stay on the mid LOD.
         if (e.fade.cur === 0) e.fade.cur = 1;
         if (e.fade.prev === 0) e.fade.prev = 1;
       }
     } else if (!wantsNear && e.near) {
-      this.nearPool.release(e.near);
-      e.near = null;
+      this.releaseNear(e);
     }
 
     const vis = deadFor >= 0 ? deathVisibility(deadFor) : 1;
@@ -346,16 +407,33 @@ export class PlayersRenderer {
     }
 
     // --- Draw --------------------------------------------------------------------------------------
-    const showWeapon = v.weapon !== null && v.life !== 'dead';
+    const _body = bodyFrame(v);
+    if ((codeNear !== 0 || codeMid !== 0) && e.rigValid) {
+      resolveLogicalAnim(v, e.anim.speed, e.logical);
+      _body.root = e.root;
+      _body.rig = e.bones;
+      _body.look = e.look;
+      _body.showWeapon = v.weapon !== null && v.life !== 'dead';
+      _body.shadows = ctx.shadows;
+      _body.view = v;
+      _body.logical = e.logical;
+      _body.aimPitch = v.pitch;
+      _body.aimYawRel = aimYawRel;
+      _body.dt = dt;
+      _body.time = ctx.time;
+    }
     if (e.near) {
       if (codeNear !== 0 && e.rigValid) {
-        e.near.setLook(e.look);
-        e.near.apply(e.root, e.bones, e.look, showWeapon, codeNear, ctx.shadows);
+        _body.fade = codeNear;
+        e.near.apply(_body);
       } else {
         e.near.hide();
       }
     }
-    if (codeMid !== 0 && e.rigValid) this.mid.add(e.root, e.bones, e.look, showWeapon, codeMid);
+    if (codeMid !== 0 && e.rigValid) {
+      _body.fade = codeMid;
+      this.mid.add(_body);
+    }
     if (codeFar !== 0) this.drawFar(e, v, codeFar, ctx, dt);
     else this.trackFarShape(e, v, dt);
 
@@ -397,8 +475,9 @@ export class PlayersRenderer {
   }
 
   dispose(): void {
-    this.nearPool.dispose();
-    this.mid.dispose();
+    this.entries.forEach(this.releaseNearOf);
+    this.procNear.dispose();
+    this.procMid.dispose();
     this.far.dispose();
     this.chutes.dispose();
     this.entries.clear();

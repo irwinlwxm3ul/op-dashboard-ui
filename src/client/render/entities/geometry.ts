@@ -23,7 +23,6 @@ export const M_ACCENT = [1, 0, 0] as const;
 export const M_SKIN = [0, 1, 0] as const;
 export const M_CLOTH = [0, 0, 1] as const;
 
-const _m = new THREE.Matrix4();
 const _q = new THREE.Quaternion();
 const _e = new THREE.Euler(0, 0, 0, 'YXZ');
 const _p = new THREE.Vector3();
