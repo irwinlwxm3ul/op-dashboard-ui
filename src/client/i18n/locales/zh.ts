@@ -616,4 +616,85 @@ export const zh: LocaleDict = {
 
   // --- language
   'lang.label': '语言',
+
+  // --- ui: main menu
+  'ui.main.fontCredit': '标题字体：Lilita One（SIL Open Font License）。',
+
+  // --- ui: lobby browser
+  'ui.mp.connectHint': '输入你的名称并连接，即可浏览在线房间。',
+  'ui.mp.connectedAs': '已以 {name} 的身份连接',
+  'ui.mp.disconnect': '断开连接',
+  'ui.mp.notConnected': '连接后即可查看开放的房间。',
+  'ui.mp.defaultLobbyName': '{name} 的房间',
+
+  // --- ui: lobby room
+  'ui.lobby.edit': '编辑',
+  'ui.lobby.teams': '队伍',
+  'ui.lobby.readyHint': '准备好跳伞后，请点击“准备”。',
+
+  // --- ui: loading screen
+  'ui.loading.tip': '提示',
+  'ui.tip.1': '射手步枪和狙击枪的子弹有飞行时间且会下坠：打远处目标要抬高准星，打移动目标要留提前量。',
+  'ui.tip.2': '地图上的白圈表示下一个安全区的范围。',
+  'ui.tip.3': '绷带和急救包最多可将生命值恢复到 75，医疗箱可将生命值回满。',
+  'ui.tip.4': '能量饮料可以填充能量条，能量会持续恢复生命值并提高奔跑速度。',
+  'ui.tip.5': '双排和四排对局中，靠近倒地的队友并按住交互键即可将其扶起。',
+  'ui.tip.6': '蹲下和趴下可以减小后坐力和子弹散布。',
+  'ui.tip.7': '载具速度快但动静大。注意油量，并随身带上汽油桶。',
+  'ui.tip.8': '在大地图上右键可放置标记点，指南针和小地图会为你指向它。',
+  'ui.tip.9': '等级越高的防弹衣和头盔，损毁前能吸收的伤害越多。',
+  'ui.tip.10': '去训练场熟悉子弹下坠，为下一次跳伞做好准备。',
+
+  // --- ui: results
+  'ui.results.yourStats': '你的数据',
+  'ui.results.ofTotal': '/ {n}',
+  'ui.results.winners': '获胜者：{names}',
+  'ui.results.spectator': '你以观战者身份观看了这场对局。',
+
+  // --- ui: settings / controls
+  'ui.unit.degrees': '{n}°',
+  'ui.controls.groupMouse': '鼠标',
+  'ui.controls.capturing': '请为“{action}”按下新按键。按 Esc 取消。',
+  'ui.controls.rebindAria': '{action}：{key}。激活即可更改。',
+  'ui.controls.reserved': '{key} 已被浏览器占用，请选择其他按键。',
+  'ui.controls.swapped': '为避免冲突，“{action}”已改绑到 {key}。',
+  'ui.controls.resetDone': '按键绑定已恢复为默认设置。',
+
+  // --- ui: key caps
+  'ui.key.delete': 'Delete',
+  'ui.key.insert': 'Insert',
+  'ui.key.home': 'Home',
+  'ui.key.end': 'End',
+  'ui.key.pageUp': 'Page Up',
+  'ui.key.pageDown': 'Page Down',
+  'ui.key.menu': '菜单键',
+
+  // --- ui: hud
+  'ui.hud.teamsLabel': '队伍',
+  'ui.hud.eliminatedHint': '按 {key} 打开菜单并退出对局。',
+  'ui.feed.died': '{victim} 阵亡了',
+
+  // --- feel
+  'feel.kill.finished': '你淘汰了倒地的 {name}',
+  'feel.kill.distance': '{distance} 米',
+  'feel.death.vehicle': '你死于车祸',
+  'feel.source.zone': '蓝圈',
+  'feel.source.vehicle': '载具',
+  'feel.source.explosion': '爆炸',
+  'feel.source.fall': '坠落伤害',
+  'feel.source.bleed': '流血',
+  'feel.source.drown': '溺水',
+  'feel.unknownPlayer': '未知玩家',
+  'feel.target.damage': '{damage} 伤害',
+  'feel.target.distance': '{distance} 米',
+
+  // --- flow
+  'flow.loading.world': '正在生成地形…',
+  'flow.loading.scene': '正在构建世界…',
+  'flow.loading.connecting': '正在连接对局…',
+  'flow.loading.waiting': '正在等待对局数据…',
+  'flow.loading.starting': '正在启动模拟…',
+  'flow.loading.ready': '就绪',
+  'flow.clickToPlay': '点击开始游戏',
+  'flow.webglUnsupported': '你的浏览器不支持 WebGL 2，无法运行 DROPZONE。',
 };

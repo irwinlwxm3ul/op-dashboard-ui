@@ -616,4 +616,85 @@ export const de: LocaleDict = {
 
   // --- language
   'lang.label': 'Sprache',
+
+  // --- ui: main menu
+  'ui.main.fontCredit': 'Titelschrift: Lilita One (SIL Open Font License).',
+
+  // --- ui: lobby browser
+  'ui.mp.connectHint': 'Gib deinen Namen ein und verbinde dich, um Online-Lobbys zu durchsuchen.',
+  'ui.mp.connectedAs': 'Verbunden als {name}',
+  'ui.mp.disconnect': 'Trennen',
+  'ui.mp.notConnected': 'Verbinde dich, um die offenen Lobbys zu sehen.',
+  'ui.mp.defaultLobbyName': 'Lobby von {name}',
+
+  // --- ui: lobby room
+  'ui.lobby.edit': 'Bearbeiten',
+  'ui.lobby.teams': 'Teams',
+  'ui.lobby.readyHint': 'Melde dich bereit, sobald du absprungbereit bist.',
+
+  // --- ui: loading screen
+  'ui.loading.tip': 'Tipp',
+  'ui.tip.1': 'Geschosse von Präzisions- und Scharfschützengewehren brauchen Zeit und fallen ab: Halte bei fernen Gegnern höher und bei beweglichen vor.',
+  'ui.tip.2': 'Der weiße Kreis auf der Karte zeigt, wohin sich die Spielzone als Nächstes zusammenzieht.',
+  'ui.tip.3': 'Verbände und Erste-Hilfe-Sets heilen dich auf bis zu 75 LP. Medkits heilen dich vollständig.',
+  'ui.tip.4': 'Energydrinks füllen deine Boost-Leiste, die dich nach und nach heilt und schneller laufen lässt.',
+  'ui.tip.5': 'Halte im Duo und im Trupp die Interaktionstaste neben einem niedergestreckten Teamkameraden gedrückt, um ihn wiederzubeleben.',
+  'ui.tip.6': 'Ducken und Hinlegen verringern Rückstoß und Streuung.',
+  'ui.tip.7': 'Fahrzeuge sind schnell, aber laut. Behalte die Tankanzeige im Blick und hab einen Benzinkanister dabei.',
+  'ui.tip.8': 'Rechtsklicke auf die große Karte, um einen Wegpunkt zu setzen – Kompass und Minikarte zeigen dorthin.',
+  'ui.tip.9': 'Westen und Helme höherer Stufen absorbieren mehr Schaden, bevor sie zerstört werden.',
+  'ui.tip.10': 'Besuche das Trainingsgelände, um vor deinem nächsten Absprung den Geschossabfall zu lernen.',
+
+  // --- ui: results
+  'ui.results.yourStats': 'Deine Statistiken',
+  'ui.results.ofTotal': '/ {n}',
+  'ui.results.winners': 'Sieger: {names}',
+  'ui.results.spectator': 'Du hast dieses Match als Zuschauer verfolgt.',
+
+  // --- ui: settings / controls
+  'ui.unit.degrees': '{n}°',
+  'ui.controls.groupMouse': 'Maus',
+  'ui.controls.capturing': 'Drücke die neue Taste für „{action}“. Esc bricht ab.',
+  'ui.controls.rebindAria': '{action}: {key}. Aktivieren, um zu ändern.',
+  'ui.controls.reserved': '{key} ist vom Browser reserviert. Wähle eine andere Taste.',
+  'ui.controls.swapped': '„{action}“ wurde auf {key} gelegt, um einen Konflikt zu vermeiden.',
+  'ui.controls.resetDone': 'Die Tastenbelegung wurde auf die Standardwerte zurückgesetzt.',
+
+  // --- ui: key caps
+  'ui.key.delete': 'Entf',
+  'ui.key.insert': 'Einfg',
+  'ui.key.home': 'Pos1',
+  'ui.key.end': 'Ende',
+  'ui.key.pageUp': 'Bild auf',
+  'ui.key.pageDown': 'Bild ab',
+  'ui.key.menu': 'Menü',
+
+  // --- ui: hud
+  'ui.hud.teamsLabel': 'Teams',
+  'ui.hud.eliminatedHint': 'Drücke {key}, um das Menü zu öffnen und das Match zu verlassen.',
+  'ui.feed.died': '{victim} ist gestorben',
+
+  // --- feel
+  'feel.kill.finished': 'Du hast {name} erledigt',
+  'feel.kill.distance': '{distance} m',
+  'feel.death.vehicle': 'Du bist bei einem Fahrzeugunfall gestorben',
+  'feel.source.zone': 'Blaue Zone',
+  'feel.source.vehicle': 'Fahrzeug',
+  'feel.source.explosion': 'Explosion',
+  'feel.source.fall': 'Fallschaden',
+  'feel.source.bleed': 'Verbluten',
+  'feel.source.drown': 'Ertrinken',
+  'feel.unknownPlayer': 'Unbekannt',
+  'feel.target.damage': '{damage} Schaden',
+  'feel.target.distance': '{distance} m',
+
+  // --- flow
+  'flow.loading.world': 'Gelände wird erzeugt …',
+  'flow.loading.scene': 'Welt wird aufgebaut …',
+  'flow.loading.connecting': 'Verbindung zum Match wird hergestellt …',
+  'flow.loading.waiting': 'Warte auf Matchdaten …',
+  'flow.loading.starting': 'Simulation wird gestartet …',
+  'flow.loading.ready': 'Bereit',
+  'flow.clickToPlay': 'Klicken zum Spielen',
+  'flow.webglUnsupported': 'Dein Browser unterstützt kein WebGL 2, das DROPZONE benötigt.',
 };

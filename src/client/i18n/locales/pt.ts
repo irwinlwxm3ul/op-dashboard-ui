@@ -616,4 +616,85 @@ export const pt: LocaleDict = {
 
   // --- language
   'lang.label': 'Idioma',
+
+  // --- ui: main menu
+  'ui.main.fontCredit': 'Fonte do título: Lilita One (SIL Open Font License).',
+
+  // --- ui: lobby browser
+  'ui.mp.connectHint': 'Digite seu nome e conecte-se para ver as salas on-line.',
+  'ui.mp.connectedAs': 'Conectado como {name}',
+  'ui.mp.disconnect': 'Desconectar',
+  'ui.mp.notConnected': 'Conecte-se para ver as salas abertas.',
+  'ui.mp.defaultLobbyName': 'Sala de {name}',
+
+  // --- ui: lobby room
+  'ui.lobby.edit': 'Editar',
+  'ui.lobby.teams': 'Equipes',
+  'ui.lobby.readyHint': 'Marque-se como pronto quando estiver preparado para saltar.',
+
+  // --- ui: loading screen
+  'ui.loading.tip': 'Dica',
+  'ui.tip.1': 'As balas de fuzis de atirador e de precisão têm tempo de voo e caem: mire acima dos alvos distantes e à frente dos que estão em movimento.',
+  'ui.tip.2': 'O círculo branco no mapa mostra até onde a área de jogo vai diminuir em seguida.',
+  'ui.tip.3': 'Bandagens e kits de primeiros socorros curam até 75 de vida. Kits médicos curam você por completo.',
+  'ui.tip.4': 'Energéticos enchem sua barra de energia, que cura você aos poucos e faz você correr mais rápido.',
+  'ui.tip.5': 'Em partidas de dupla e esquadrão, segure a tecla de interação perto de um companheiro derrubado para reanimá-lo.',
+  'ui.tip.6': 'Agachar e deitar reduzem o recuo e a dispersão.',
+  'ui.tip.7': 'Veículos são rápidos, mas barulhentos. Fique de olho no combustível e leve um galão de gasolina.',
+  'ui.tip.8': 'Clique com o botão direito no mapa completo para colocar um marcador; sua bússola e seu minimapa apontam para ele.',
+  'ui.tip.9': 'Coletes e capacetes de nível mais alto absorvem mais dano antes de serem destruídos.',
+  'ui.tip.10': 'Visite o campo de treino para aprender a queda da bala antes do seu próximo salto.',
+
+  // --- ui: results
+  'ui.results.yourStats': 'Suas estatísticas',
+  'ui.results.ofTotal': '/ {n}',
+  'ui.results.winners': 'Vencedores: {names}',
+  'ui.results.spectator': 'Você assistiu a esta partida como espectador.',
+
+  // --- ui: settings / controls
+  'ui.unit.degrees': '{n}°',
+  'ui.controls.groupMouse': 'Mouse',
+  'ui.controls.capturing': 'Pressione a nova tecla para “{action}”. Esc cancela.',
+  'ui.controls.rebindAria': '{action}: {key}. Ative para alterar.',
+  'ui.controls.reserved': 'A tecla {key} é reservada pelo navegador. Escolha outra.',
+  'ui.controls.swapped': '“{action}” foi movido para {key} para evitar um conflito.',
+  'ui.controls.resetDone': 'Os atalhos de teclado foram restaurados para o padrão.',
+
+  // --- ui: key caps
+  'ui.key.delete': 'Delete',
+  'ui.key.insert': 'Insert',
+  'ui.key.home': 'Home',
+  'ui.key.end': 'End',
+  'ui.key.pageUp': 'Page Up',
+  'ui.key.pageDown': 'Page Down',
+  'ui.key.menu': 'Menu',
+
+  // --- ui: hud
+  'ui.hud.teamsLabel': 'Equipes',
+  'ui.hud.eliminatedHint': 'Pressione {key} para abrir o menu e sair da partida.',
+  'ui.feed.died': '{victim} morreu',
+
+  // --- feel
+  'feel.kill.finished': 'Você finalizou {name}',
+  'feel.kill.distance': '{distance} m',
+  'feel.death.vehicle': 'Você morreu em um acidente de veículo',
+  'feel.source.zone': 'Zona azul',
+  'feel.source.vehicle': 'Veículo',
+  'feel.source.explosion': 'Explosão',
+  'feel.source.fall': 'Dano de queda',
+  'feel.source.bleed': 'Sangramento',
+  'feel.source.drown': 'Afogamento',
+  'feel.unknownPlayer': 'Desconhecido',
+  'feel.target.damage': '{damage} de dano',
+  'feel.target.distance': '{distance} m',
+
+  // --- flow
+  'flow.loading.world': 'Gerando terreno…',
+  'flow.loading.scene': 'Construindo o mundo…',
+  'flow.loading.connecting': 'Conectando à partida…',
+  'flow.loading.waiting': 'Aguardando dados da partida…',
+  'flow.loading.starting': 'Iniciando simulação…',
+  'flow.loading.ready': 'Pronto',
+  'flow.clickToPlay': 'Clique para jogar',
+  'flow.webglUnsupported': 'Seu navegador não suporta WebGL 2, necessário para o DROPZONE.',
 };

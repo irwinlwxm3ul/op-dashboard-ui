@@ -616,4 +616,85 @@ export const ru: LocaleDict = {
 
   // --- language
   'lang.label': 'Язык',
+
+  // --- ui: main menu
+  'ui.main.fontCredit': 'Шрифт заголовка: Lilita One (лицензия SIL Open Font License).',
+
+  // --- ui: lobby browser
+  'ui.mp.connectHint': 'Введите имя и подключитесь, чтобы увидеть сетевые лобби.',
+  'ui.mp.connectedAs': 'Вы подключены как {name}',
+  'ui.mp.disconnect': 'Отключиться',
+  'ui.mp.notConnected': 'Подключитесь, чтобы увидеть открытые лобби.',
+  'ui.mp.defaultLobbyName': 'Лобби {name}',
+
+  // --- ui: lobby room
+  'ui.lobby.edit': 'Изменить',
+  'ui.lobby.teams': 'Команды',
+  'ui.lobby.readyHint': 'Когда будете готовы к высадке, нажмите «Я готов».',
+
+  // --- ui: loading screen
+  'ui.loading.tip': 'Совет',
+  'ui.tip.1': 'Пули марксманских и снайперских винтовок летят не мгновенно и снижаются: цельтесь выше дальних целей и берите упреждение по движущимся.',
+  'ui.tip.2': 'Белый круг на карте показывает, до каких границ сузится игровая зона.',
+  'ui.tip.3': 'Бинты и аптечки восстанавливают здоровье до 75 единиц. Медпакет лечит полностью.',
+  'ui.tip.4': 'Энергетики заполняют шкалу бодрости: она постепенно восстанавливает здоровье и ускоряет бег.',
+  'ui.tip.5': 'В режимах «Дуо» и «Отряд» удерживайте клавишу действия рядом с раненым напарником, чтобы поднять его.',
+  'ui.tip.6': 'В приседе и лёжа отдача и разброс меньше.',
+  'ui.tip.7': 'Транспорт быстрый, но шумный. Следите за топливом и возите с собой канистру.',
+  'ui.tip.8': 'Нажмите ПКМ на большой карте, чтобы поставить метку: на неё будут указывать компас и миникарта.',
+  'ui.tip.9': 'Бронежилеты и шлемы высокого уровня поглощают больше урона, прежде чем сломаются.',
+  'ui.tip.10': 'Загляните на полигон и освойте падение пули перед следующей высадкой.',
+
+  // --- ui: results
+  'ui.results.yourStats': 'Ваша статистика',
+  'ui.results.ofTotal': '/ {n}',
+  'ui.results.winners': 'Победители: {names}',
+  'ui.results.spectator': 'Вы наблюдали за этим матчем как зритель.',
+
+  // --- ui: settings / controls
+  'ui.unit.degrees': '{n}°',
+  'ui.controls.groupMouse': 'Мышь',
+  'ui.controls.capturing': 'Нажмите новую клавишу для действия «{action}». Esc — отмена.',
+  'ui.controls.rebindAria': '{action}: {key}. Активируйте, чтобы изменить.',
+  'ui.controls.reserved': 'Клавиша {key} занята браузером. Выберите другую.',
+  'ui.controls.swapped': 'Действие «{action}» перенесено на {key}, чтобы избежать конфликта.',
+  'ui.controls.resetDone': 'Назначения клавиш сброшены к значениям по умолчанию.',
+
+  // --- ui: key caps
+  'ui.key.delete': 'Delete',
+  'ui.key.insert': 'Insert',
+  'ui.key.home': 'Home',
+  'ui.key.end': 'End',
+  'ui.key.pageUp': 'Page Up',
+  'ui.key.pageDown': 'Page Down',
+  'ui.key.menu': 'Меню',
+
+  // --- ui: hud
+  'ui.hud.teamsLabel': 'Команды',
+  'ui.hud.eliminatedHint': 'Нажмите {key}, чтобы открыть меню и покинуть матч.',
+  'ui.feed.died': '{victim} погибает',
+
+  // --- feel
+  'feel.kill.finished': 'Вы добили: {name}',
+  'feel.kill.distance': '{distance} м',
+  'feel.death.vehicle': 'Вы погибли в аварии',
+  'feel.source.zone': 'Синяя зона',
+  'feel.source.vehicle': 'Транспорт',
+  'feel.source.explosion': 'Взрыв',
+  'feel.source.fall': 'Падение с высоты',
+  'feel.source.bleed': 'Кровотечение',
+  'feel.source.drown': 'Утопление',
+  'feel.unknownPlayer': 'Неизвестный',
+  'feel.target.damage': '{damage} урона',
+  'feel.target.distance': '{distance} м',
+
+  // --- flow
+  'flow.loading.world': 'Генерация ландшафта…',
+  'flow.loading.scene': 'Построение мира…',
+  'flow.loading.connecting': 'Подключение к матчу…',
+  'flow.loading.waiting': 'Ожидание данных матча…',
+  'flow.loading.starting': 'Запуск симуляции…',
+  'flow.loading.ready': 'Готово',
+  'flow.clickToPlay': 'Нажмите, чтобы играть',
+  'flow.webglUnsupported': 'Ваш браузер не поддерживает WebGL 2, а без него DROPZONE не запустится.',
 };

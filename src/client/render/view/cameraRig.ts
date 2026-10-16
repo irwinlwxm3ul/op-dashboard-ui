@@ -139,7 +139,8 @@ export class CameraRig {
       if (!this.wasDead) {
         this.wasDead = true;
         this.deathT = 0;
-        this.orbitYaw = wrapAngle(this.last.yaw + Math.PI);
+        // Start behind the body (where the camera already was) and slowly circle it.
+        this.orbitYaw = wrapAngle(this.last.yaw);
       }
       this.deathT += dt;
       const tgt = frame.viewTargetId !== null && frame.viewTargetId !== frame.localId ? frame.players.get(frame.viewTargetId) : undefined;
