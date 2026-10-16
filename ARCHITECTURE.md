@@ -347,4 +347,5 @@ Client module factories (each module `index.ts`): `createRenderCore`, `createWor
 (render/view), `createFxRenderer` (render/fx), `createFeel` (feel), `createUI` (ui),
 `ClientGame`/`LocalTransport`/`WsTransport`/`settings`/`InputController` (client-net). Signatures in
 `src/client/render/contracts.ts`, `src/client/ui/contracts.ts`, `src/client/game/types.ts`.
-| assets | `public/assets/models/**`, `src/client/assets/**`, `scripts/assets/**`, `docs/ASSETS.md`, `tests/assets.test.ts` |
+| assets | `public/assets/models/{characters,animations,weapons,items}/**`, `src/client/assets/**`, `scripts/assets/**`, `docs/ASSETS.md`, `tests/assets.test.ts` |
+| world-assets | `public/assets/models/{vehicles,props,nature}/**`, `src/client/assets/manifest-world.ts`, `scripts/assets/world/**`, `docs/ASSETS-world.md`, `tests/assets-world.test.ts` |

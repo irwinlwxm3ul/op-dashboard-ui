@@ -222,12 +222,47 @@ function fixQuaternionSigns(arr) {
   }
 }
 
-/** Collapses a track to one key when all its values are (nearly) identical. */
-export function reduceTrack(track, stride, eps = 1e-4) {
-  const v = track.values;
+/**
+ * Lossy keyframe reduction: collapses (nearly) constant tracks to one key, then greedily removes
+ * keys that interpolation between their kept neighbours reproduces within tolerance
+ * (quaternions: `angleTol` radians, vectors: `distTol` metres).
+ */
+export function reduceTrack(track, stride, { eps = 2e-4, angleTol = 0.006, distTol = 0.002 } = {}) {
+  const v = track.values, t = track.times;
+  const n = t.length;
   let constant = true;
   for (let i = stride; i < v.length && constant; i++) if (Math.abs(v[i] - v[i % stride]) > eps) constant = false;
-  if (!constant) return track;
   const T = track.constructor;
-  return new T(track.name, [0], Array.from(v.slice(0, stride)));
+  if (constant) return new T(track.name, [0], Array.from(v.slice(0, stride)));
+  if (n <= 2) return track;
+  const isQuat = stride === 4;
+  const a = new THREE.Quaternion(), b = new THREE.Quaternion(), c = new THREE.Quaternion(), x = new THREE.Quaternion();
+  const errAt = (i0, i1, k) => {
+    const alpha = (t[k] - t[i0]) / (t[i1] - t[i0]);
+    if (isQuat) {
+      a.fromArray(v, i0 * 4); b.fromArray(v, i1 * 4); c.fromArray(v, k * 4);
+      x.slerpQuaternions(a, b, alpha);
+      return x.angleTo(c);
+    }
+    let d = 0;
+    for (let j = 0; j < stride; j++) {
+      const e = v[i0 * stride + j] + (v[i1 * stride + j] - v[i0 * stride + j]) * alpha - v[k * stride + j];
+      d += e * e;
+    }
+    return Math.sqrt(d);
+  };
+  const tol = isQuat ? angleTol : distTol;
+  const keep = [0];
+  let last = 0;
+  for (let i = 2; i < n; i++) {
+    // Can we span last -> i without the keys in between?
+    let ok = true;
+    for (let k = last + 1; k < i && ok; k++) if (errAt(last, i, k) > tol) ok = false;
+    if (!ok) { keep.push(i - 1); last = i - 1; }
+  }
+  keep.push(n - 1);
+  const times = keep.map((i) => t[i]);
+  const values = [];
+  for (const i of keep) for (let j = 0; j < stride; j++) values.push(v[i * stride + j]);
+  return new T(track.name, times, values);
 }

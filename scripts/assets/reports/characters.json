@@ -1,0 +1,770 @@
+{
+ "male": {
+  "droppedRestTracks": 651,
+  "socket": {
+   "position": [
+    0.030210360529613345,
+    0.02094300401865623,
+    -0.06939202366873048
+   ],
+   "quaternion": [
+    -0.33152348493680617,
+    0.6695747713738855,
+    -0.5258095881124133,
+    -0.40655386264813875
+   ]
+  },
+  "misses": {
+   "aim": {
+    "missR": 0,
+    "missL": 0
+   },
+   "hold": {
+    "missR": 0,
+    "missL": 0
+   },
+   "sprint": {
+    "missR": 0.05722481264772056,
+    "missL": 0
+   },
+   "kick": {
+    "missR": 0,
+    "missL": 0
+   },
+   "magOut": {
+    "missR": 0,
+    "missL": 0.02232272681391323
+   },
+   "magPull": {
+    "missR": 0,
+    "missL": 0.1644716628571959
+   },
+   "pouch": {
+    "missR": 0,
+    "missL": 0.2378865465973808
+   },
+   "magIn": {
+    "missR": 0,
+    "missL": 0.03834503913370618
+   },
+   "magSeat": {
+    "missR": 0,
+    "missL": 0.006638958442120868
+   },
+   "reloadSupport": {
+    "missR": 0,
+    "missL": 0
+   }
+  },
+  "eye": [
+   -0.045627221807037086,
+   1.6508947425438356,
+   0.1534121544013644
+  ],
+  "clips": [
+   [
+    "Idle_Loop",
+    2.5,
+    64
+   ],
+   [
+    "Idle_LookAround_Loop",
+    4.6,
+    64
+   ],
+   [
+    "Walk_Loop",
+    1.333,
+    64
+   ],
+   [
+    "Walk_Bwd_Loop",
+    1.333,
+    64
+   ],
+   [
+    "Walk_L_Loop",
+    1.333,
+    64
+   ],
+   [
+    "Walk_R_Loop",
+    1.333,
+    64
+   ],
+   [
+    "Jog_Fwd_Loop",
+    0.933,
+    64
+   ],
+   [
+    "Jog_Bwd_Loop",
+    0.933,
+    64
+   ],
+   [
+    "Jog_Left_Loop",
+    0.933,
+    64
+   ],
+   [
+    "Jog_Right_Loop",
+    0.933,
+    64
+   ],
+   [
+    "Sprint_Loop",
+    0.667,
+    64
+   ],
+   [
+    "Jump_Start",
+    1.333,
+    64
+   ],
+   [
+    "Jump_Loop",
+    2.5,
+    64
+   ],
+   [
+    "Jump_Land",
+    1.267,
+    64
+   ],
+   [
+    "Crouch_Idle_Loop",
+    2.933,
+    64
+   ],
+   [
+    "Crouch_Fwd_Loop",
+    2,
+    64
+   ],
+   [
+    "Crouch_Bwd_Loop",
+    2,
+    64
+   ],
+   [
+    "Crouch_Left_Loop",
+    2,
+    64
+   ],
+   [
+    "Crouch_Right_Loop",
+    2,
+    64
+   ],
+   [
+    "Crawl_Idle_Loop",
+    2.333,
+    64
+   ],
+   [
+    "Crawl_Fwd_Loop",
+    2.167,
+    64
+   ],
+   [
+    "Crawl_Bwd_Loop",
+    2.5,
+    64
+   ],
+   [
+    "Crawl_Left_Loop",
+    1.267,
+    64
+   ],
+   [
+    "Crawl_Right_Loop",
+    1.267,
+    64
+   ],
+   [
+    "Swim_Idle_Loop",
+    3.333,
+    64
+   ],
+   [
+    "Swim_Fwd_Loop",
+    1.333,
+    64
+   ],
+   [
+    "Driving_Loop",
+    1.667,
+    64
+   ],
+   [
+    "Sitting_Idle_Loop",
+    1.667,
+    64
+   ],
+   [
+    "Fixing_Kneeling",
+    5.2,
+    64
+   ],
+   [
+    "Bandage_Loop",
+    0.667,
+    64
+   ],
+   [
+    "Drink",
+    3,
+    64
+   ],
+   [
+    "Consume",
+    1.333,
+    64
+   ],
+   [
+    "PickUp_Kneeling",
+    1.933,
+    64
+   ],
+   [
+    "Interact",
+    2,
+    64
+   ],
+   [
+    "OverhandThrow",
+    1.333,
+    64
+   ],
+   [
+    "Roll",
+    1.467,
+    64
+   ],
+   [
+    "SafetyVault",
+    0.733,
+    64
+   ],
+   [
+    "ClimbUp_1m",
+    0.667,
+    64
+   ],
+   [
+    "Pistol_Idle_Loop",
+    1.667,
+    64
+   ],
+   [
+    "Pistol_Aim_Neutral",
+    0.167,
+    64
+   ],
+   [
+    "Pistol_Aim_Up",
+    0.167,
+    64
+   ],
+   [
+    "Pistol_Aim_Down",
+    0.167,
+    64
+   ],
+   [
+    "Pistol_Shoot",
+    0.633,
+    64
+   ],
+   [
+    "Pistol_Reload",
+    1.667,
+    64
+   ],
+   [
+    "Hit_Chest",
+    0.333,
+    64
+   ],
+   [
+    "Hit_Head",
+    0.433,
+    64
+   ],
+   [
+    "Hit_Stomach",
+    0.667,
+    64
+   ],
+   [
+    "Hit_Shoulder_L",
+    0.533,
+    64
+   ],
+   [
+    "Hit_Shoulder_R",
+    0.5,
+    64
+   ],
+   [
+    "Death01",
+    2.4,
+    64
+   ],
+   [
+    "Death02",
+    2.467,
+    64
+   ],
+   [
+    "Celebration",
+    4,
+    64
+   ],
+   [
+    "Dance_Loop",
+    1,
+    64
+   ],
+   [
+    "Rifle_Hold",
+    1,
+    51
+   ],
+   [
+    "Rifle_Aim",
+    1,
+    51
+   ],
+   [
+    "Rifle_Shoot",
+    0.16,
+    51
+   ],
+   [
+    "Rifle_Sprint",
+    1,
+    51
+   ],
+   [
+    "Rifle_Reload",
+    2.1,
+    51
+   ],
+   [
+    "Parachute_Hang",
+    1,
+    51
+   ]
+  ],
+  "animBytes": 1201052,
+  "variants": {
+   "male_tactical": {
+    "tris": 7754,
+    "bandTris": 24,
+    "height": 1.8538472577929497,
+    "scale": 0.9709537786532337,
+    "bytes": 879132
+   },
+   "male_casual": {
+    "tris": 5776,
+    "bandTris": 24,
+    "height": 1.8579765520989895,
+    "scale": 0.9687958644938267,
+    "bytes": 721884
+   },
+   "male_hoodie": {
+    "tris": 6206,
+    "bandTris": 24,
+    "height": 1.870362744666636,
+    "scale": 0.9623801613525097,
+    "bytes": 772512
+   }
+  }
+ },
+ "female": {
+  "droppedRestTracks": 651,
+  "socket": {
+   "position": [
+    0.02799485917796285,
+    0.020291089049915945,
+    -0.06778478002979182
+   ],
+   "quaternion": [
+    -0.33646044737160713,
+    0.665714394053184,
+    -0.5226656285117556,
+    -0.4128429895038128
+   ]
+  },
+  "misses": {
+   "aim": {
+    "missR": 0,
+    "missL": 0
+   },
+   "hold": {
+    "missR": 0,
+    "missL": 0
+   },
+   "sprint": {
+    "missR": 0.018077492086482405,
+    "missL": 0
+   },
+   "kick": {
+    "missR": 0,
+    "missL": 0
+   },
+   "magOut": {
+    "missR": 0,
+    "missL": 0
+   },
+   "magPull": {
+    "missR": 0,
+    "missL": 0.09982811963715454
+   },
+   "pouch": {
+    "missR": 0,
+    "missL": 0.153950673260971
+   },
+   "magIn": {
+    "missR": 0,
+    "missL": 0
+   },
+   "magSeat": {
+    "missR": 0,
+    "missL": 0
+   },
+   "reloadSupport": {
+    "missR": 0,
+    "missL": 0
+   }
+  },
+  "eye": [
+   -0.037987514540774765,
+   1.646541179188349,
+   0.16129923087834225
+  ],
+  "clips": [
+   [
+    "Idle_Loop",
+    2.5,
+    64
+   ],
+   [
+    "Idle_LookAround_Loop",
+    4.6,
+    64
+   ],
+   [
+    "Walk_Loop",
+    1.333,
+    64
+   ],
+   [
+    "Walk_Bwd_Loop",
+    1.333,
+    64
+   ],
+   [
+    "Walk_L_Loop",
+    1.333,
+    64
+   ],
+   [
+    "Walk_R_Loop",
+    1.333,
+    64
+   ],
+   [
+    "Jog_Fwd_Loop",
+    0.933,
+    64
+   ],
+   [
+    "Jog_Bwd_Loop",
+    0.933,
+    64
+   ],
+   [
+    "Jog_Left_Loop",
+    0.933,
+    64
+   ],
+   [
+    "Jog_Right_Loop",
+    0.933,
+    64
+   ],
+   [
+    "Sprint_Loop",
+    0.667,
+    64
+   ],
+   [
+    "Jump_Start",
+    1.333,
+    64
+   ],
+   [
+    "Jump_Loop",
+    2.5,
+    64
+   ],
+   [
+    "Jump_Land",
+    1.267,
+    64
+   ],
+   [
+    "Crouch_Idle_Loop",
+    2.933,
+    64
+   ],
+   [
+    "Crouch_Fwd_Loop",
+    2,
+    64
+   ],
+   [
+    "Crouch_Bwd_Loop",
+    2,
+    64
+   ],
+   [
+    "Crouch_Left_Loop",
+    2,
+    64
+   ],
+   [
+    "Crouch_Right_Loop",
+    2,
+    64
+   ],
+   [
+    "Crawl_Idle_Loop",
+    2.333,
+    64
+   ],
+   [
+    "Crawl_Fwd_Loop",
+    2.167,
+    64
+   ],
+   [
+    "Crawl_Bwd_Loop",
+    2.5,
+    64
+   ],
+   [
+    "Crawl_Left_Loop",
+    1.267,
+    64
+   ],
+   [
+    "Crawl_Right_Loop",
+    1.267,
+    64
+   ],
+   [
+    "Swim_Idle_Loop",
+    3.333,
+    64
+   ],
+   [
+    "Swim_Fwd_Loop",
+    1.333,
+    64
+   ],
+   [
+    "Driving_Loop",
+    1.667,
+    64
+   ],
+   [
+    "Sitting_Idle_Loop",
+    1.667,
+    64
+   ],
+   [
+    "Fixing_Kneeling",
+    5.2,
+    64
+   ],
+   [
+    "Bandage_Loop",
+    0.667,
+    64
+   ],
+   [
+    "Drink",
+    3,
+    64
+   ],
+   [
+    "Consume",
+    1.333,
+    64
+   ],
+   [
+    "PickUp_Kneeling",
+    1.933,
+    64
+   ],
+   [
+    "Interact",
+    2,
+    64
+   ],
+   [
+    "OverhandThrow",
+    1.333,
+    64
+   ],
+   [
+    "Roll",
+    1.467,
+    64
+   ],
+   [
+    "SafetyVault",
+    0.733,
+    64
+   ],
+   [
+    "ClimbUp_1m",
+    0.667,
+    64
+   ],
+   [
+    "Pistol_Idle_Loop",
+    1.667,
+    64
+   ],
+   [
+    "Pistol_Aim_Neutral",
+    0.167,
+    64
+   ],
+   [
+    "Pistol_Aim_Up",
+    0.167,
+    64
+   ],
+   [
+    "Pistol_Aim_Down",
+    0.167,
+    64
+   ],
+   [
+    "Pistol_Shoot",
+    0.633,
+    64
+   ],
+   [
+    "Pistol_Reload",
+    1.667,
+    64
+   ],
+   [
+    "Hit_Chest",
+    0.333,
+    64
+   ],
+   [
+    "Hit_Head",
+    0.433,
+    64
+   ],
+   [
+    "Hit_Stomach",
+    0.667,
+    64
+   ],
+   [
+    "Hit_Shoulder_L",
+    0.533,
+    64
+   ],
+   [
+    "Hit_Shoulder_R",
+    0.5,
+    64
+   ],
+   [
+    "Death01",
+    2.4,
+    64
+   ],
+   [
+    "Death02",
+    2.467,
+    64
+   ],
+   [
+    "Celebration",
+    4,
+    64
+   ],
+   [
+    "Dance_Loop",
+    1,
+    64
+   ],
+   [
+    "Rifle_Hold",
+    1,
+    51
+   ],
+   [
+    "Rifle_Aim",
+    1,
+    51
+   ],
+   [
+    "Rifle_Shoot",
+    0.16,
+    51
+   ],
+   [
+    "Rifle_Sprint",
+    1,
+    51
+   ],
+   [
+    "Rifle_Reload",
+    2.1,
+    51
+   ],
+   [
+    "Parachute_Hang",
+    1,
+    51
+   ]
+  ],
+  "animBytes": 1200016,
+  "variants": {
+   "female_tactical": {
+    "tris": 7900,
+    "bandTris": 24,
+    "height": 1.829805671586655,
+    "scale": 0.9837110180335106,
+    "bytes": 968988
+   },
+   "female_adventurer": {
+    "tris": 6812,
+    "bandTris": 24,
+    "height": 1.8280840510269627,
+    "scale": 0.984637439940912,
+    "bytes": 842028
+   },
+   "female_casual": {
+    "tris": 6424,
+    "bandTris": 24,
+    "height": 1.8520413227379322,
+    "scale": 0.9719005606953749,
+    "bytes": 797956
+   }
+  }
+ }
+}
