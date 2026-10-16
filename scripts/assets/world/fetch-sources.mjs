@@ -21,7 +21,10 @@ for (const key of keys) {
   }
   git(dir, 'config', 'core.sparseCheckout', 'true');
   fs.writeFileSync(path.join(dir, '.git', 'info', 'sparse-checkout'), s.sparse.join('\n') + '\n');
-  const head = (() => { try { return git(dir, 'rev-parse', 'HEAD'); } catch { return ''; } })();
+  // A fresh repository has no HEAD yet (rev-parse fails quietly).
+  const head = (() => {
+    try { return execFileSync('git', ['rev-parse', '--verify', '-q', 'HEAD'], { cwd: dir, stdio: ['ignore', 'pipe', 'ignore'] }).toString().trim(); } catch { return ''; }
+  })();
   if (head !== s.commit) {
     git(dir, 'fetch', '-q', '--depth', '1', '--filter=blob:none', 'origin', s.commit);
     git(dir, 'checkout', '-q', '--detach', s.commit);
