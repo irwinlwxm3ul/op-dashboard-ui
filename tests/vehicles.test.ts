@@ -314,6 +314,27 @@ describe('driving', () => {
     expect(Math.abs(lateral(drift))).toBeLessThan(1);
   });
 
+  it('a handbrake-initiated drift holds a steady angle and recovers when steering is released', () => {
+    const w = makeWorld();
+    const slip = (u: VehicleState): number => Math.atan2(lateral(u), Math.abs(u.speed));
+    for (const t of TYPES) {
+      const v = spawn(t, 0, 400);
+      run(v, ctl(1), 75, w);
+      run(v, ctl(1, -1, true), 15, w); // half a second of handbrake into a left turn
+      let maxSlip = 0;
+      for (let i = 0; i < 60; i++) {
+        stepVehicle(v, ctl(1, -1), DT, w, []);
+        maxSlip = Math.max(maxSlip, Math.abs(slip(v)));
+      }
+      expect(maxSlip).toBeGreaterThan(0.25); // a real drift (> ~15 deg)
+      expect(maxSlip).toBeLessThan(0.8); // ...that does not spin out while held
+      expect(Math.abs(slip(v))).toBeGreaterThan(0.2);
+      expect(v.speed).toBeGreaterThan(10);
+      run(v, ctl(1, 0), 45, w);
+      expect(Math.abs(slip(v))).toBeLessThan(0.05);
+    }
+  });
+
   it('bike leans into turns, cars roll outward', () => {
     const w = makeWorld();
     const bike = spawn('bike', 0, 0);
@@ -564,6 +585,31 @@ describe('terrain, airtime and water', () => {
       expect(airTicks).toBeGreaterThan(20);
       expect(v.onGround).toBe(true);
       expect(v.pos.y).toBeCloseTo(rideHeight(VEHICLES[t]), 1);
+    }
+  });
+
+  it('climbs staircase-built ramps with short treads but not 45 degree stairs', () => {
+    const stairs = (rise: number, tread: number): World => {
+      const boxes: WorldBox[] = [];
+      const n = Math.round(2.4 / rise);
+      for (let k = 0; k < n; k++) {
+        boxes.push(box({ x: -3, y: -1, z: -20 - (k + 1) * tread }, { x: 3, y: rise * (k + 1), z: -20 - k * tread }, 'ramp'));
+      }
+      return makeWorld({ boxes });
+    };
+    for (const t of TYPES) {
+      for (const speed of [8, 25]) {
+        const v = spawn(t, 0, 0);
+        launch(v, speed);
+        const crash = run(v, ctl(0.7), 30 * 3, stairs(0.2, 0.5));
+        expect(crash).toBe(0);
+        expect(v.pos.z).toBeLessThan(-28);
+      }
+      const blocked = spawn(t, 0, 0);
+      launch(blocked, 10);
+      const crash = run(blocked, ctl(1), 30 * 3, stairs(0.4, 0.4));
+      expect(crash).toBeGreaterThan(5);
+      expect(blocked.pos.z).toBeGreaterThan(-21);
     }
   });
 

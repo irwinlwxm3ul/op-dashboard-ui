@@ -8,6 +8,9 @@
 // * Local space: +X right, +Y up, -Z forward. Seat offsets give the seated occupant's body origin
 //   (feet level; hips SEAT_HIP_HEIGHT above, eyes at the physics SEATED_EYE_HEIGHT above).
 // * VehicleControls.steer / VehicleState.steer > 0 = steer right. rpm 0 = engine off.
+// * stepVehicle mutates the vehicles in `others` it collides with (push-out + impulse) and reports
+//   the other vehicle's impact in VehicleStepEvents.hitVehicle / hitVehicleImpact, because that
+//   vehicle's own step will no longer see the contact. ctl === null means nobody drives.
 
 export type { VehicleDef, VehicleHandling, CircleSet } from './defs';
 export { VEHICLES, HANDLING, WHEELS, CIRCLES, SEAT_HIP_HEIGHT, rideHeight } from './defs';
