@@ -10,8 +10,10 @@ import * as THREE from 'three';
 import type { CreateRenderCore, RenderCore, RenderStats } from '../contracts';
 import type { Quality } from '../../game/types';
 import { ENV, computeSunDirection } from './environment';
+import { DynamicResolution, type DynamicResolutionOptions, type TimingSignal } from './dynamicResolution';
 import { installAltitudeFog } from './fogPatch';
 import { FrameTimer } from './frameTimer';
+import { GpuTimer } from './gpuTimer';
 import { OutputPass } from './post';
 import { computePixelRatio, qualityProfile, type QualityProfile } from './quality';
 import { installShadowEdgeFade } from './shadowFade';
@@ -19,10 +21,33 @@ import { createSkyDome, type SkyDome } from './sky';
 
 /** Distance from the shadow focus point back toward the sun where the shadow camera sits (m). */
 const SHADOW_LIGHT_DISTANCE = 400;
+/** Without a GPU timer result for this long, fall back to frame-time driven scaling (ms). */
+const GPU_SAMPLE_TIMEOUT_MS = 3000;
+
+/** RenderStats plus dynamic-resolution diagnostics (extra fields are additive to the contract). */
+export interface RenderStatsEx extends RenderStats {
+  /** Dynamic resolution multiplier applied to the scene target (0.6..1). */
+  resolutionScale: number;
+  /** Effective pixel ratio of the scene render (canvas pixel ratio x resolutionScale). */
+  pixelRatio: number;
+  /** Smoothed GPU frame time in ms when timer queries are available, else -1. */
+  gpuMs: number;
+  /** Which signal drives dynamic resolution. */
+  timing: TimingSignal;
+}
+
+export interface DynamicResolutionSettings extends Partial<DynamicResolutionOptions> {
+  enabled?: boolean;
+}
 
 export const createRenderCore: CreateRenderCore = (container: HTMLElement): RenderCore => new RenderCoreImpl(container);
 
-class RenderCoreImpl implements RenderCore {
+/** Enable/disable/tune dynamic resolution on a core created by createRenderCore (no-op otherwise). */
+export function configureDynamicResolution(core: RenderCore, settings: DynamicResolutionSettings): void {
+  if (core instanceof RenderCoreImpl) core.configureDynamicResolution(settings);
+}
+
+export class RenderCoreImpl implements RenderCore {
   readonly renderer: THREE.WebGLRenderer;
   readonly scene: THREE.Scene;
   readonly camera: THREE.PerspectiveCamera;
@@ -40,7 +65,17 @@ class RenderCoreImpl implements RenderCore {
   private readonly target: THREE.WebGLRenderTarget;
   private readonly output = new OutputPass();
   private readonly timer = new FrameTimer();
-  private readonly statsOut: RenderStats = { fps: 0, frameMs: 0, drawCalls: 0, triangles: 0, geometries: 0, textures: 0 };
+  private readonly statsOut: RenderStatsEx = {
+    fps: 0, frameMs: 0, drawCalls: 0, triangles: 0, geometries: 0, textures: 0,
+    resolutionScale: 1, pixelRatio: 1, gpuMs: -1, timing: 'frame',
+  };
+  private readonly drs = new DynamicResolution();
+  private readonly gpuTimer: GpuTimer | null;
+  private timing: TimingSignal = 'frame';
+  private lastGpuSampleAt = -1;
+  private gpuMsEma = -1;
+  private targetW = 0;
+  private targetH = 0;
   private readonly resizeObserver: ResizeObserver | null = null;
   private readonly onWindowResize = (): void => this.resize();
   private disposed = false;
@@ -133,6 +168,8 @@ class RenderCoreImpl implements RenderCore {
       magFilter: THREE.LinearFilter,
     });
     this.target.texture.name = 'dz-scene-hdr';
+    this.gpuTimer = GpuTimer.create(r.getContext());
+    this.timing = this.gpuTimer ? 'gpu' : 'frame';
 
     if (typeof ResizeObserver !== 'undefined') {
       this.resizeObserver = new ResizeObserver(() => this.resize());
@@ -152,7 +189,29 @@ class RenderCoreImpl implements RenderCore {
     if (q === this._quality && scale === this.renderScale) return;
     this._quality = q;
     this.renderScale = scale;
+    // Different workload: forget timing history and start again from full resolution.
+    this.drs.setEnabled(this.drs.enabled);
     this.applyQuality(false);
+  }
+
+  configureDynamicResolution(settings: DynamicResolutionSettings): void {
+    const { enabled, ...opts } = settings;
+    this.drs.configure(opts);
+    if (enabled !== undefined && enabled !== this.drs.enabled) this.drs.setEnabled(enabled);
+    this.applyTargetSize();
+  }
+
+  /** Scene target = drawing buffer x dynamic resolution scale; the output pass upsamples. */
+  private applyTargetSize(): void {
+    const size = this.renderer.getDrawingBufferSize(this.tmpSize);
+    const k = this.drs.scale;
+    const w = Math.max(1, Math.round(size.x * k));
+    const h = Math.max(1, Math.round(size.y * k));
+    if (w === this.targetW && h === this.targetH) return;
+    this.targetW = w;
+    this.targetH = h;
+    this.target.setSize(w, h);
+    this.output.setResolution(w, h);
   }
 
   private applyQuality(initial: boolean): void {
@@ -164,6 +223,9 @@ class RenderCoreImpl implements RenderCore {
       this.target.dispose();
       this.target.samples = p.msaaSamples;
     }
+    // Force the target size to be re-applied (resize() may early-out when the canvas is unchanged).
+    this.targetW = 0;
+    this.targetH = 0;
     this.output.setFxaa(p.fxaa);
 
     const shadowsChanged = initial || prev.shadows !== p.shadows;
@@ -206,7 +268,10 @@ class RenderCoreImpl implements RenderCore {
     const w = Math.max(1, Math.floor(this.container.clientWidth));
     const h = Math.max(1, Math.floor(this.container.clientHeight));
     const pr = computePixelRatio(this.profile, typeof window !== 'undefined' ? window.devicePixelRatio : 1, this.renderScale);
-    if (w === this.lastWidth && h === this.lastHeight && pr === this.lastPixelRatio) return;
+    if (w === this.lastWidth && h === this.lastHeight && pr === this.lastPixelRatio) {
+      this.applyTargetSize();
+      return;
+    }
     this.lastWidth = w;
     this.lastHeight = h;
     this.lastPixelRatio = pr;
@@ -214,9 +279,7 @@ class RenderCoreImpl implements RenderCore {
     this.renderer.setSize(w, h, false);
     this.camera.aspect = w / h;
     this.camera.updateProjectionMatrix();
-    const size = this.renderer.getDrawingBufferSize(this.tmpSize);
-    this.target.setSize(size.x, size.y);
-    this.output.setResolution(size.x, size.y);
+    this.applyTargetSize();
   }
 
   /** Centre the shadow box slightly ahead of the camera and snap it to shadow-map texels (no shimmer). */
@@ -249,8 +312,10 @@ class RenderCoreImpl implements RenderCore {
     if (this.disposed) return;
     const now = performance.now();
     this.timer.tick(now);
-    if (this.lastFrameMs >= 0) this.skyTime += Math.min(0.25, (now - this.lastFrameMs) / 1000);
+    const frameInterval = this.lastFrameMs >= 0 ? now - this.lastFrameMs : -1;
+    if (frameInterval >= 0) this.skyTime += Math.min(0.25, frameInterval / 1000);
     this.lastFrameMs = now;
+    this.updateDynamicResolution(now, frameInterval);
 
     const r = this.renderer;
     r.info.reset();
@@ -261,6 +326,7 @@ class RenderCoreImpl implements RenderCore {
     this.updateShadowCamera(camPos);
 
     const autoClear = r.autoClear;
+    this.gpuTimer?.begin();
     r.setRenderTarget(this.target);
     r.clear(true, true, false);
     r.autoClear = false;
@@ -268,11 +334,40 @@ class RenderCoreImpl implements RenderCore {
     r.setRenderTarget(null);
     this.output.render(r, this.target.texture);
     r.autoClear = autoClear;
+    this.gpuTimer?.end();
   }
 
-  stats(): RenderStats {
+  /** Feed the dynamic resolution controller (GPU time when measurable, else frame interval). */
+  private updateDynamicResolution(now: number, frameInterval: number): void {
+    let changed = false;
+    if (this.gpuTimer) {
+      const gpuMs = this.gpuTimer.poll();
+      if (gpuMs > 0) {
+        this.lastGpuSampleAt = now;
+        this.gpuMsEma = this.gpuMsEma < 0 ? gpuMs : this.gpuMsEma + (gpuMs - this.gpuMsEma) * 0.1;
+        if (this.timing !== 'gpu') {
+          this.timing = 'gpu';
+          this.drs.reset();
+        }
+        changed = this.drs.update(gpuMs, now, 'gpu');
+      } else if (this.lastGpuSampleAt >= 0 && now - this.lastGpuSampleAt > GPU_SAMPLE_TIMEOUT_MS && this.timing === 'gpu') {
+        // Timer results stopped arriving (disjoint storms, driver quirks): use frame timing.
+        this.timing = 'frame';
+        this.drs.reset();
+      }
+      if (this.lastGpuSampleAt < 0 && frameInterval > 0) this.lastGpuSampleAt = now;
+    }
+    if (this.timing === 'frame' && frameInterval > 0) changed = this.drs.update(frameInterval, now, 'frame');
+    if (changed) this.applyTargetSize();
+  }
+
+  stats(): RenderStatsEx {
     const info = this.renderer.info;
     const s = this.statsOut;
+    s.resolutionScale = this.drs.scale;
+    s.pixelRatio = this.renderer.getPixelRatio() * this.drs.scale;
+    s.gpuMs = this.gpuMsEma;
+    s.timing = this.timing;
     s.fps = this.timer.fps;
     s.frameMs = this.timer.frameMs;
     s.drawCalls = info.render.calls;
@@ -291,6 +386,7 @@ class RenderCoreImpl implements RenderCore {
     this.sky.dispose();
     this.output.dispose();
     this.target.dispose();
+    this.gpuTimer?.dispose();
     this.sun.shadow.map?.dispose();
     this.renderer.dispose();
     this.canvas.remove();

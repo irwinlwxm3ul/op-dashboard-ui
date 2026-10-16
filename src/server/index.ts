@@ -1,6 +1,7 @@
 // DROPZONE game server entry point.
 //
-//   tsx src/server/index.ts            PORT (default 8787), LAG_MS, LAG_JITTER_MS, HOST, NODE_ENV
+//   tsx src/server/index.ts   PORT (default 8787), LAG_MS, LAG_JITTER_MS, HOST, NODE_ENV,
+//                             MATCH_WORKERS=0 (run matches on the main thread instead of workers)
 //
 // When imported (tests) nothing starts; use startServer().
 
@@ -13,6 +14,8 @@ import { startServer } from './server';
 export { startServer } from './server';
 export type { ServerHandle, StartServerOptions } from './server';
 export type { MatchRunnerLike, RunnerClient, RunnerFactory, RunnerOptions, RunnerStats } from './runner';
+export { loadInProcessRunnerFactory } from './runner';
+export { createWorkerRunnerFactory, type WorkerRunnerFactory, type WorkerRunnerFactoryOptions } from './workerRunner';
 export { DEFAULT_LIMITS, type ServerLimits } from './limits';
 
 function envInt(name: string, fallback: number, min: number, max: number): number {
@@ -38,6 +41,7 @@ async function main(): Promise<void> {
     host: process.env.HOST || undefined,
     lagMs: envInt('LAG_MS', 0, 0, 5000),
     jitterMs: envInt('LAG_JITTER_MS', 0, 0, 5000),
+    matchWorkers: process.env.MATCH_WORKERS !== '0',
     log: true,
   });
 

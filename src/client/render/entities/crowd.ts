@@ -27,7 +27,10 @@ type EntityMaterial = THREE.MeshLambertMaterial & { userData: { uniforms: Entity
 /** Loadout / look of one soldier for a frame. */
 export interface SoldierLook {
   accent: THREE.Color;
+  /** Fatigue tint (upper body; also the legs on the near procedural soldier). */
   cloth: THREE.Color;
+  /** Lower-body tint used by the mid LOD (matches asset-based near bodies' trousers). */
+  legs: THREE.Color;
   skin: THREE.Color;
   /** [helmet, vest, pack] levels */
   gear: readonly [number, number, number];
@@ -271,18 +274,18 @@ export class MidCrowd implements MidBodyRenderer {
   add(f: BodyFrame): void {
     const root = f.root, rig = f.rig, look = f.look, showWeapon = f.showWeapon, fade = f.fade;
     if (fade === 0) return;
-    const acc = look.accent, cloth = look.cloth, white = this.white;
-    this.put(this.pelvis, root, rig[B.HIPS], acc, cloth, fade);
+    const acc = look.accent, cloth = look.cloth, legs = look.legs, white = this.white;
+    this.put(this.pelvis, root, rig[B.HIPS], acc, legs, fade);
     this.put(this.torso, root, rig[B.CHEST], acc, cloth, fade);
     this.put(this.head, root, rig[B.HEAD], acc, white, fade);
     this.put(this.upperArm, root, rig[B.UARM_L], acc, cloth, fade);
     this.put(this.upperArm, root, rig[B.UARM_R], acc, cloth, fade);
     this.put(this.foreArm, root, rig[B.FARM_L], acc, cloth, fade);
     this.put(this.foreArm, root, rig[B.FARM_R], acc, cloth, fade);
-    this.put(this.thigh, root, rig[B.THIGH_L], acc, cloth, fade);
-    this.put(this.thigh, root, rig[B.THIGH_R], acc, cloth, fade);
-    this.put(this.shin, root, rig[B.SHIN_L], acc, cloth, fade);
-    this.put(this.shin, root, rig[B.SHIN_R], acc, cloth, fade);
+    this.put(this.thigh, root, rig[B.THIGH_L], acc, legs, fade);
+    this.put(this.thigh, root, rig[B.THIGH_R], acc, legs, fade);
+    this.put(this.shin, root, rig[B.SHIN_L], acc, legs, fade);
+    this.put(this.shin, root, rig[B.SHIN_R], acc, legs, fade);
     const helmet = look.gear[0], vest = look.gear[1], pack = look.gear[2];
     if (vest > 0) this.put(this.vest, root, rig[B.CHEST], acc, this.vestTints[Math.min(3, vest)], fade);
     if (helmet > 0) {

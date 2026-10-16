@@ -35,6 +35,7 @@ export class LobbyManager implements MatchLoopHost {
   constructor(private readonly opts: LobbyManagerOptions) {
     this.loop = new MatchLoop(this, {
       intervalMs: opts.loopIntervalMs,
+      idleIntervalMs: 50,
       lingerMs: opts.matchLingerMs,
       statsMs: opts.statsIntervalMs,
       maxErrors: MAX_RUNNER_ERRORS,
@@ -272,6 +273,10 @@ export class LobbyManager implements MatchLoopHost {
         config,
         clients,
         onEnd: (results) => this.onMatchEnd(session, results),
+        onError: (err) => {
+          this.opts.log.error('match runner failed', { lobby: lobby.id, err });
+          this.onRunnerFailed(session);
+        },
       });
     } catch (e) {
       this.opts.log.error('failed to create match runner', { lobby: lobby.id, err: e });

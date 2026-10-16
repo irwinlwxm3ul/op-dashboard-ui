@@ -7,6 +7,7 @@
 
 import type * as THREE from 'three';
 import type { PlayerView } from '../../game/types';
+import type { AnimState } from './animator';
 import type { LogicalAnim } from './animState';
 import type { SoldierLook } from './crowd';
 
@@ -28,6 +29,11 @@ export interface BodyFrame {
   shadows: boolean;
   view: PlayerView;
   logical: LogicalAnim;
+  /** Procedural animation state (smoothed lean, flinch / kick springs, blended pose incl. drop pitch). */
+  anim: AnimState;
+  /** Horizontal velocity in the model frame (x right, z backward), m/s. */
+  moveX: number;
+  moveZ: number;
   /** Aim pitch (rad) and aim yaw relative to the model facing (seated passengers). */
   aimPitch: number;
   aimYawRel: number;
@@ -49,6 +55,11 @@ export interface NearBodyProvider {
   acquire(ownerId: number): NearBody | null;
   release(body: NearBody): void;
   setCapacity(n: number): void;
+  /**
+   * Optional: outfit colours of the body a player gets (upper / lower body, linear), so the
+   * procedural mid LOD can be tinted to match. Returns false when unknown.
+   */
+  outfitTint?(playerId: number, upper: THREE.Color, lower: THREE.Color): boolean;
   dispose(): void;
 }
 

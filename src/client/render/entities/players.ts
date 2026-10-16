@@ -48,10 +48,11 @@ function bodyFrame(v: PlayerView): BodyFrame {
   if (!_bodyScratch) {
     _bodyScratch = {
       root: new THREE.Matrix4(), rig: [], look: {
-        accent: new THREE.Color(), cloth: new THREE.Color(), skin: new THREE.Color(), gear: [0, 0, 0], weapon: null,
+        accent: new THREE.Color(), cloth: new THREE.Color(), legs: new THREE.Color(), skin: new THREE.Color(),
+        gear: [0, 0, 0], weapon: null,
       },
-      showWeapon: false, fade: 0, shadows: false, view: v, logical: createLogicalAnim(),
-      aimPitch: 0, aimYawRel: 0, dt: 0, time: 0,
+      showWeapon: false, fade: 0, shadows: false, view: v, logical: createLogicalAnim(), anim: new AnimState(),
+      moveX: 0, moveZ: 0, aimPitch: 0, aimYawRel: 0, dt: 0, time: 0,
     };
   }
   return _bodyScratch;
@@ -74,8 +75,11 @@ export class PlayerEntry {
   nearOwner: NearBodyProvider | null = null;
   readonly logical: LogicalAnim = createLogicalAnim();
   readonly look: SoldierLook & { gear: [number, number, number] } = {
-    accent: new THREE.Color(), cloth: new THREE.Color(), skin: new THREE.Color(), gear: [0, 0, 0], weapon: null,
+    accent: new THREE.Color(), cloth: new THREE.Color(), legs: new THREE.Color(), skin: new THREE.Color(),
+    gear: [0, 0, 0], weapon: null,
   };
+  /** Outfit tint must be refreshed from the active near backend. */
+  outfitDirty = true;
   private lookTeam = Number.NaN;
   private lookLocalTeam = Number.NaN;
   readonly rootPos = new THREE.Vector3();
@@ -96,6 +100,9 @@ export class PlayerEntry {
   farLie = 0;
   farCrouch = 0;
   rigValid = false;
+  /** Horizontal velocity in the model frame (x right, z backward). */
+  moveX = 0;
+  moveZ = 0;
   readonly seat: SeatInfo = { type: 'buggy', seat: 0, steer: 0 };
 
   reset(id: EntityId): void {
@@ -114,7 +121,9 @@ export class PlayerEntry {
     this.farCrouch = 0;
     this.rigValid = false;
     this.look.cloth.setHex(clothTintHex(id));
+    this.look.legs.copy(this.look.cloth);
     this.look.skin.setHex(skinToneHex(id));
+    this.outfitDirty = true;
   }
 
   updateLook(v: PlayerView, localTeam: number): void {
@@ -186,6 +195,7 @@ export class PlayersRenderer {
     const nextMid = mid ?? this.procMid;
     if (nextNear !== this.nearPool) {
       this.entries.forEach(this.releaseNearOf);
+      this.entries.forEach(this.markOutfitDirty);
       this.nearPool = nextNear;
       this.nearPool.setCapacity(this.nearCapacity);
     }
@@ -199,6 +209,10 @@ export class PlayersRenderer {
   get backendNames(): { near: string; mid: string } {
     return { near: this.nearPool.name, mid: this.mid.name };
   }
+
+  private readonly markOutfitDirty = (e: PlayerEntry): void => {
+    e.outfitDirty = true;
+  };
 
   private readonly releaseNearOf = (e: PlayerEntry): void => {
     this.releaseNear(e);
@@ -301,6 +315,14 @@ export class PlayersRenderer {
     e.seen = this.frameNo;
     e.view = v;
     e.updateLook(v, frame.localTeam);
+    if (e.outfitDirty) {
+      e.outfitDirty = false;
+      const tinted = this.nearPool.outfitTint ? this.nearPool.outfitTint(v.id, e.look.cloth, e.look.legs) : false;
+      if (!tinted) {
+        e.look.cloth.setHex(clothTintHex(v.id));
+        e.look.legs.copy(e.look.cloth);
+      }
+    }
 
     // --- Root transform --------------------------------------------------------------------------
     let seat: SeatInfo | null = null;
@@ -381,8 +403,10 @@ export class PlayersRenderer {
       _animIn.view = v;
       _animIn.seat = seat;
       _animIn.aimYawRel = aimYawRel;
-      _animIn.localVx = riding ? 0 : v.vel.x * c - v.vel.z * s;
-      _animIn.localVz = riding ? 0 : v.vel.x * s + v.vel.z * c;
+      e.moveX = riding ? 0 : v.vel.x * c - v.vel.z * s;
+      e.moveZ = riding ? 0 : v.vel.x * s + v.vel.z * c;
+      _animIn.localVx = e.moveX;
+      _animIn.localVz = e.moveZ;
       _animIn.time = ctx.time;
       _animIn.dt = dt;
       animate(e.anim, _animIn);
@@ -417,6 +441,9 @@ export class PlayersRenderer {
       _body.shadows = ctx.shadows;
       _body.view = v;
       _body.logical = e.logical;
+      _body.anim = e.anim;
+      _body.moveX = e.moveX;
+      _body.moveZ = e.moveZ;
       _body.aimPitch = v.pitch;
       _body.aimYawRel = aimYawRel;
       _body.dt = dt;

@@ -1,5 +1,6 @@
-// The server's view of a match runner. The real implementation is MatchRunner from src/shared/sim
-// (driven by bots from src/shared/bots); tests inject a fake through startServer({ runnerFactory }).
+// The server's view of a match runner. Production runs MatchRunner from src/shared/sim (driven by
+// bots from src/shared/bots) inside a worker thread per match (workerRunner.ts); it can also run
+// in-process; tests inject a fake through startServer({ runnerFactory }).
 
 import type { ClientMessage, ServerMessage } from '../shared/protocol';
 import type { MatchConfig, MatchResults, TeamId } from '../shared/types';
@@ -15,6 +16,11 @@ export interface RunnerOptions {
   config: MatchConfig;
   clients: RunnerClient[];
   onEnd: (results: MatchResults) => void;
+  /**
+   * Asynchronous fatal failure (e.g. a match worker crashed). The server aborts the match and
+   * returns the lobby to waiting. In-process runners report failures by throwing instead.
+   */
+  onError?: (err: Error) => void;
 }
 
 export interface RunnerStats {
@@ -26,6 +32,8 @@ export interface RunnerStats {
 
 /** Subset of the MatchRunner contract (ARCHITECTURE.md Stage B) the server relies on. */
 export interface MatchRunnerLike {
+  /** True when the runner ticks itself (worker thread); update() is then a no-op. */
+  readonly selfTicking?: boolean;
   start(nowMs: number): void;
   update(nowMs: number): void;
   handleMessage(clientId: string, msg: ClientMessage): void;
@@ -39,10 +47,11 @@ export interface MatchRunnerLike {
 export type RunnerFactory = (opts: RunnerOptions) => MatchRunnerLike;
 
 /**
- * Build the production runner factory: the real MatchRunner with the bot driver. Loaded lazily so
- * that tests using a fake runner never import the simulation.
+ * In-process runner factory: the real MatchRunner with the bot driver on the main thread (ticked
+ * by the shared MatchLoop). Used when match workers are disabled (MATCH_WORKERS=0). Loaded lazily
+ * so that tests using a fake runner never import the simulation.
  */
-export async function loadDefaultRunnerFactory(): Promise<RunnerFactory> {
+export async function loadInProcessRunnerFactory(): Promise<RunnerFactory> {
   const [{ MatchRunner }, { createBotDriver }] = await Promise.all([
     import('../shared/sim/index'),
     import('../shared/bots/index'),

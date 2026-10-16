@@ -9,7 +9,10 @@ import WebSocket from 'ws';
 import { MAX_MESSAGE_BYTES, PROTOCOL_VERSION } from '../src/shared/constants';
 import type { ClientMessage, LobbySettings, LobbyState, ServerMessage } from '../src/shared/protocol';
 import type { MatchResults, PlayerInput } from '../src/shared/types';
-import { startServer, type MatchRunnerLike, type RunnerOptions, type ServerHandle } from '../src/server';
+import type { Worker } from 'node:worker_threads';
+import {
+  createWorkerRunnerFactory, startServer, type MatchRunnerLike, type RunnerOptions, type ServerHandle,
+} from '../src/server';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -655,4 +658,66 @@ describe('servers with custom options', () => {
       rmSync(path.join(path.dirname(dir), 'dz-secret.txt'), { force: true });
     }
   });
+});
+
+describe('match worker threads (real MatchRunner)', () => {
+  it('runs the match in a worker: matchInit, snapshots, routed ping/loaded, crash aborts back to the lobby', async () => {
+    const workers = createWorkerRunnerFactory();
+    const created: MatchRunnerLike[] = [];
+    const s = await startServer({
+      port: 0,
+      log: false,
+      matchLingerMs: 200,
+      runnerFactory: (o) => {
+        const r = workers(o);
+        created.push(r);
+        return r;
+      },
+    });
+    try {
+      const a = await TestClient.hello(s.port, 'A');
+      const b = await TestClient.hello(s.port, 'B');
+      await lobbyWith(a, [b], { maxPlayers: 6, teamSize: 1, botFill: true, botDifficulty: 'easy' });
+      b.send({ t: 'ready', ready: true });
+      await a.next('lobbyState', (m) => m.lobby.members.some((x) => x.clientId === b.clientId && x.ready));
+      a.send({ t: 'startMatch' });
+      const init = (await a.next('matchInit', () => true, 20_000)).init;
+      await b.next('matchInit', () => true, 20_000);
+      expect(created).toHaveLength(1);
+      expect(created[0].selfTicking).toBe(true);
+      expect(workers.activeWorkers).toBe(1);
+      expect(init.roster).toHaveLength(6); // 2 humans + 4 bots, built inside the worker
+      a.send({ t: 'loaded' });
+      b.send({ t: 'loaded' });
+      // Snapshots stream from the worker at the snapshot rate.
+      const first = await a.next('snap', () => true, 5000);
+      await a.next('snap', (m) => m.s.time >= first.s.time + 500, 5000);
+      // ping is answered by the runner inside the worker (sim time), not by the lobby fallback.
+      a.send({ t: 'ping', c: 99 });
+      const pong = await a.next('pong', (m) => m.c === 99);
+      expect(pong.s).toBeGreaterThan(0);
+
+      // Crash the worker: the match is aborted and everyone returns to a waiting lobby.
+      await (created[0] as unknown as { worker: Worker }).worker.terminate();
+      await a.next('backToLobby', () => true, 5000);
+      await b.next('backToLobby', () => true, 5000);
+      const st = (await a.next('lobbyState', (m) => m.lobby.status === 'waiting', 5000)).lobby;
+      expect(st.members.every((m) => !m.ready)).toBe(true);
+      expect(workers.activeWorkers).toBe(0);
+
+      // The lobby can start again right away (warm spare / fresh worker).
+      b.send({ t: 'ready', ready: true });
+      await a.next('lobbyState', (m) => m.lobby.status === 'waiting' && m.lobby.members.some((x) => x.clientId === b.clientId && x.ready));
+      a.send({ t: 'startMatch' });
+      await a.next('matchInit', () => true, 20_000);
+      expect(created).toHaveLength(2);
+      a.send({ t: 'leaveMatch' });
+      b.send({ t: 'leaveMatch' });
+      await b.next('lobbyState', (m) => m.lobby.status === 'waiting', 5000);
+      expect(workers.activeWorkers).toBe(0); // abandoned match: worker terminated
+    } finally {
+      await s.close();
+      await workers.dispose();
+    }
+  }, 60_000);
 });

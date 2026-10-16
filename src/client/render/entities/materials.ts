@@ -145,31 +145,31 @@ const FRAG_FOG = /* glsl */ `
 #endif
 `;
 
-/** Create an entity material. Each call returns an independent material with its own uniforms. */
-export function createEntityMaterial(opts: EntityMaterialOptions = {}): THREE.MeshLambertMaterial & { userData: { uniforms: EntityUniforms } } {
-  const fogScale = opts.fogScale ?? 0.35;
-  const mat = new THREE.MeshLambertMaterial({
-    vertexColors: true,
-    side: opts.side ?? THREE.FrontSide,
-    fog: fogScale > 0,
-    transparent: opts.transparent ?? false,
-    opacity: opts.opacity ?? 1,
-  });
-  const uniforms: EntityUniforms = {
+/** Fresh uniform set (one per drawable that needs its own colours / fade). */
+export function createEntityUniforms(fogScale = 0.35): EntityUniforms {
+  return {
     uAccent: { value: new THREE.Color(0xffffff) },
     uSkin: { value: new THREE.Color(0xc99a74) },
     uCloth: { value: new THREE.Color(0x6b7347) },
     uFade: { value: 1 },
     uFogScale: { value: fogScale },
   };
-  const defines: Record<string, string> = {};
+}
+
+/**
+ * Patch any built-in lit material (Lambert / Standard / Physical, e.g. materials loaded from glTF)
+ * with the entity shader features. Several materials may share one `uniforms` object (one fade /
+ * accent for every mesh of a character). Existing material defines are preserved.
+ */
+export function applyEntityShader(mat: THREE.Material, opts: EntityMaterialOptions, uniforms: EntityUniforms): void {
+  const defines: Record<string, unknown> = { ...(mat.defines ?? {}) };
   if (opts.mask) defines.ENT_MASK = '';
   if (opts.instanced) defines.ENT_INSTANCED = '';
   if (opts.dither) defines.ENT_DITHER = '';
   if (opts.rim) defines.ENT_RIM = '';
   mat.defines = defines;
   mat.userData.uniforms = uniforms;
-  const key = 'dz-ent:' + Object.keys(defines).sort().join(',');
+  const key = 'dz-ent:' + mat.type + ':' + Object.keys(defines).sort().join(',');
   mat.customProgramCacheKey = () => key;
   mat.onBeforeCompile = (shader) => {
     shader.uniforms.uAccent = uniforms.uAccent;
@@ -189,6 +189,21 @@ export function createEntityMaterial(opts: EntityMaterialOptions = {}): THREE.Me
       .replace('#include <opaque_fragment>', `${FRAG_RIM}\n#include <opaque_fragment>`)
       .replace('#include <fog_fragment>', FRAG_FOG);
   };
+  mat.needsUpdate = true;
+}
+
+/** Create an entity material. Each call returns an independent material with its own uniforms. */
+export function createEntityMaterial(opts: EntityMaterialOptions = {}): THREE.MeshLambertMaterial & { userData: { uniforms: EntityUniforms } } {
+  const fogScale = opts.fogScale ?? 0.35;
+  const mat = new THREE.MeshLambertMaterial({
+    vertexColors: true,
+    side: opts.side ?? THREE.FrontSide,
+    fog: fogScale > 0,
+    transparent: opts.transparent ?? false,
+    opacity: opts.opacity ?? 1,
+  });
+  const uniforms = createEntityUniforms(fogScale);
+  applyEntityShader(mat, opts, uniforms);
   return mat as THREE.MeshLambertMaterial & { userData: { uniforms: EntityUniforms } };
 }
 

@@ -1,5 +1,6 @@
-// Anti-cheat probes against the REAL server + REAL MatchRunner/GameSim, using raw WebSocket
-// clients that behave like a modified game client.
+// Anti-cheat probes against the REAL server + REAL MatchRunner/GameSim (running in a match worker
+// thread exactly like production), using raw WebSocket clients that behave like a modified game
+// client.
 //
 // The match is started through the normal lobby flow (botFill off, two humans). The runner factory
 // runs it on the training map (mode 'training', infinite ammo) so the cheating player stands on the
@@ -18,9 +19,8 @@ import WebSocket from 'ws';
 import { INTERACT_RANGE, MAX_MESSAGE_BYTES, MOVE_SPEED, PROTOCOL_VERSION } from '../src/shared/constants';
 import { WEAPONS, fireInterval } from '../src/shared/items';
 import type { ClientMessage, MatchInit, ServerMessage, Snapshot } from '../src/shared/protocol';
-import { MatchRunner } from '../src/shared/sim';
 import { BTN, type ClientAction, type LootItem, type PlayerInput } from '../src/shared/types';
-import { startServer, type ServerHandle } from '../src/server';
+import { createWorkerRunnerFactory, startServer, type ServerHandle, type WorkerRunnerFactory } from '../src/server';
 
 type Msg<T extends ServerMessage['t']> = Extract<ServerMessage, { t: T }>;
 const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
@@ -166,19 +166,17 @@ class RawClient {
 const distXZ = (a: [number, number, number], b: [number, number, number]): number => Math.hypot(a[0] - b[0], a[2] - b[2]);
 
 let server: ServerHandle;
+let workers: WorkerRunnerFactory;
 let a: RawClient; // the cheater
 let b: RawClient; // second human (needed to start without bot fill)
 
 beforeAll(async () => {
+  // The production path: the real MatchRunner + bot driver in a match worker thread.
+  workers = createWorkerRunnerFactory();
   server = await startServer({
     port: 0,
     log: false,
-    runnerFactory: (opts) =>
-      new MatchRunner({
-        config: { ...opts.config, mode: 'training', infiniteAmmo: true },
-        clients: opts.clients,
-        onEnd: opts.onEnd,
-      }),
+    runnerFactory: (opts) => workers({ ...opts, config: { ...opts.config, mode: 'training', infiniteAmmo: true } }),
   });
   a = await RawClient.connect(server.port, 'Cheater');
   b = await RawClient.connect(server.port, 'Honest');
@@ -201,6 +199,7 @@ afterAll(async () => {
   a?.close();
   b?.close();
   await server?.close();
+  await workers?.dispose();
 });
 
 describe('anti-cheat probes (real MatchRunner)', () => {

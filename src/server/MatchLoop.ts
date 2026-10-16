@@ -1,6 +1,8 @@
-// One shared high-resolution loop ticking every running match. MatchRunner.update(now) is a
-// fixed-step accumulator, so polling it every few milliseconds yields 30 Hz ticks with at most a
-// few ms of jitter. The loop only runs while at least one match exists.
+// One shared loop over every running match. In-process runners are ticked here: MatchRunner.update
+// is a fixed-step accumulator, so polling it every few milliseconds yields 30 Hz ticks with at most
+// a few ms of jitter. Worker-backed runners tick themselves; for them the loop only drives the
+// post-match linger, end detection and periodic stats logging at a relaxed rate. The loop only
+// runs while at least one match exists.
 
 import type { MatchSession } from './Lobby';
 import type { Logger } from './log';
@@ -15,7 +17,10 @@ export interface MatchLoopHost {
 }
 
 export interface MatchLoopOptions {
+  /** Loop interval while an in-process runner needs ticking (ms). */
   intervalMs: number;
+  /** Loop interval when every runner ticks itself (worker threads): only linger / end checks (ms). */
+  idleIntervalMs: number;
   /** How long a finished match keeps running so final snapshots flow (ms). */
   lingerMs: number;
   /** Interval of per-match tick stats logging (ms). */
@@ -28,6 +33,7 @@ export interface MatchLoopOptions {
 export class MatchLoop {
   private readonly sessions = new Set<MatchSession>();
   private timer: ReturnType<typeof setInterval> | null = null;
+  private timerMs = 0;
   private statsTimer: ReturnType<typeof setInterval> | null = null;
 
   constructor(
@@ -41,15 +47,30 @@ export class MatchLoop {
 
   add(session: MatchSession): void {
     this.sessions.add(session);
-    if (this.timer === null) {
-      this.timer = setInterval(this.tick, this.opts.intervalMs);
-      this.statsTimer = setInterval(this.logStats, this.opts.statsMs);
-    }
+    if (this.statsTimer === null) this.statsTimer = setInterval(this.logStats, this.opts.statsMs);
+    this.reschedule();
   }
 
   remove(session: MatchSession): void {
     this.sessions.delete(session);
     if (this.sessions.size === 0) this.stop();
+    else this.reschedule();
+  }
+
+  /** Fast polling only while some runner is ticked by this loop; slow checks otherwise. */
+  private reschedule(): void {
+    let needsTicks = false;
+    for (const s of this.sessions) {
+      if (s.runner && !s.runner.selfTicking) {
+        needsTicks = true;
+        break;
+      }
+    }
+    const ms = needsTicks ? this.opts.intervalMs : this.opts.idleIntervalMs;
+    if (this.timer !== null && this.timerMs === ms) return;
+    if (this.timer !== null) clearInterval(this.timer);
+    this.timer = setInterval(this.tick, ms);
+    this.timerMs = ms;
   }
 
   dispose(): void {
@@ -61,6 +82,7 @@ export class MatchLoop {
     if (this.timer !== null) clearInterval(this.timer);
     if (this.statsTimer !== null) clearInterval(this.statsTimer);
     this.timer = null;
+    this.timerMs = 0;
     this.statsTimer = null;
   }
 

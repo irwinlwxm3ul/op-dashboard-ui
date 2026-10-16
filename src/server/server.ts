@@ -12,7 +12,8 @@ import { CLOSE_CODES, ClientConnection } from './Connection';
 import { DEFAULT_LIMITS, type ServerLimits } from './limits';
 import { createLogger, type Logger } from './log';
 import { LobbyManager } from './LobbyManager';
-import { loadDefaultRunnerFactory, type RunnerFactory } from './runner';
+import { loadInProcessRunnerFactory, type RunnerFactory } from './runner';
+import { createWorkerRunnerFactory, type WorkerRunnerFactory } from './workerRunner';
 import { serveStatic } from './static';
 
 export interface StartServerOptions {
@@ -26,8 +27,14 @@ export interface StartServerOptions {
   jitterMs?: number;
   /** Console logging (default true). */
   log?: boolean;
-  /** Match runner factory (default: real MatchRunner + bot driver). Tests inject fakes. */
+  /**
+   * Match runner factory. Default: the real MatchRunner + bot driver, one worker thread per match
+   * (in-process on the main thread when `matchWorkers` is false). Tests inject fakes. An injected
+   * factory is owned by the caller (e.g. dispose a createWorkerRunnerFactory() yourself).
+   */
   runnerFactory?: RunnerFactory;
+  /** Run default matches in worker threads (default true; MATCH_WORKERS=0 disables it in main). */
+  matchWorkers?: boolean;
   /**
    * Directory with the built client. Default: dist/ when NODE_ENV=production, otherwise static
    * serving is off (Vite serves the client in development). null disables it explicitly.
@@ -65,7 +72,12 @@ export async function startServer(opts: StartServerOptions = {}): Promise<Server
   const limits: ServerLimits = { ...DEFAULT_LIMITS, ...opts.limits };
   const lagMs = Math.max(0, Math.min(5000, opts.lagMs ?? 0));
   const jitterMs = Math.max(0, Math.min(5000, opts.jitterMs ?? 0));
-  const runnerFactory = opts.runnerFactory ?? (await loadDefaultRunnerFactory());
+  // A default worker factory is owned (and disposed) by this server.
+  let ownedWorkers: WorkerRunnerFactory | null = null;
+  let runnerFactory: RunnerFactory;
+  if (opts.runnerFactory) runnerFactory = opts.runnerFactory;
+  else if (opts.matchWorkers ?? true) runnerFactory = ownedWorkers = createWorkerRunnerFactory({ log });
+  else runnerFactory = await loadInProcessRunnerFactory();
   const staticDir = resolveStaticDir(opts.staticDir, log);
   const startedAt = performance.now();
 
@@ -230,6 +242,7 @@ export async function startServer(opts: StartServerOptions = {}): Promise<Server
     const onError = (err: Error): void => {
       clearInterval(heartbeat);
       manager.dispose();
+      void ownedWorkers?.dispose();
       reject(err);
     };
     httpServer.once('error', onError);
@@ -247,6 +260,7 @@ export async function startServer(opts: StartServerOptions = {}): Promise<Server
     lagMs,
     jitterMs,
     static: staticDir ?? 'off',
+    matches: opts.runnerFactory ? 'custom' : ownedWorkers ? 'worker threads' : 'in-process',
     protocol: PROTOCOL_VERSION,
   });
 
@@ -255,6 +269,7 @@ export async function startServer(opts: StartServerOptions = {}): Promise<Server
     closing ??= (async () => {
       clearInterval(heartbeat);
       manager.dispose();
+      const workersStopped = ownedWorkers?.dispose();
       // Stop accepting, then close every client with "going away" and give the close handshake a
       // moment before cutting the remaining sockets.
       const httpClosed = new Promise<void>((resolve) => httpServer.close(() => resolve()));
@@ -267,6 +282,7 @@ export async function startServer(opts: StartServerOptions = {}): Promise<Server
       await new Promise<void>((resolve) => wss.close(() => resolve()));
       httpServer.closeAllConnections();
       await httpClosed;
+      await workersStopped;
       log.info('server stopped');
     })();
     return closing;

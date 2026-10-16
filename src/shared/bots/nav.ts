@@ -299,11 +299,14 @@ export class NavGrid {
    * Geometric clearance test for a straight walk from a to b: the segment must stay at least
    * `clearance` (XZ) away from every box, trunk and rock that obstructs a standing character at
    * the floor heights of the endpoints. Boxes are expanded as squares (slightly conservative at
-   * corners, which keeps shortcuts off wall corners). Used for path smoothing only.
+   * corners, which keeps shortcuts off wall corners). Used for path smoothing only; `floorY`
+   * overrides the floor height (upper floors of buildings).
    */
-  clearSegment(ax: number, az: number, bx: number, bz: number, clearance: number): boolean {
+  clearSegment(ax: number, az: number, bx: number, bz: number, clearance: number, floorY = NaN): boolean {
     const w = this.world;
-    const ba = this.baseOr(ax, az), bb = this.baseOr(bx, bz);
+    // Ground floor by default; building upper floors pass their slab height.
+    const ba = Number.isNaN(floorY) ? this.baseOr(ax, az) : floorY;
+    const bb = Number.isNaN(floorY) ? this.baseOr(bx, bz) : floorY;
     const lo = Math.min(ba, bb) + CLEAR_LO, hi = Math.max(ba, bb) + CLEAR_HI;
     const m = clearance + 0.6;
     const minX = Math.min(ax, bx) - m, maxX = Math.max(ax, bx) + m;

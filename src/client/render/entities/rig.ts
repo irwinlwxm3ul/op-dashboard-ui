@@ -236,3 +236,8 @@ export function createBoneMatrices(): THREE.Matrix4[] {
 export function headPosition(bones: THREE.Matrix4[], out: THREE.Vector3): THREE.Vector3 {
   return out.set(0, DIM.headCenter, 0).applyMatrix4(bones[B.HEAD]);
 }
+
+/** Chest-space matrix (weapon frame) of a long gun slung across the back at chest-space depth `depth`. */
+export function slungLongGunMatrix(depth: number, out: THREE.Matrix4): THREE.Matrix4 {
+  return out.makeRotationFromEuler(BACK_LONG.rot).setPosition(BACK_LONG.pos.x, BACK_LONG.pos.y, depth);
+}
