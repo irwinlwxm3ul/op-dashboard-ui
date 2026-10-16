@@ -11,7 +11,7 @@ import type {
 import { audio } from '../audio';
 import { settings } from '../game';
 import type { ClientEvent, ClientEventBus, FrameState, LocalPlayerView } from '../game/types';
-import { fmtDuration, itemName, t, type TKey } from '../i18n';
+import { fmtDuration, itemName, t } from '../i18n';
 import type { CameraState, Feel, FeelState } from '../render/contracts';
 import { CameraFeel, createFeelState } from './camera';
 import { KillBanner, MomentBanner, Notices } from './overlay/banners';
@@ -25,15 +25,6 @@ import { Vitals } from './overlay/vitals';
 import { SoundRouter } from './sound';
 
 type EventOf<T extends GameEvent['type']> = Extract<GameEvent, { type: T }>;
-
-/** Base keys of plural families (`banner.killCount` for `banner.killCount_one` ...); distributive over TKey. */
-type PluralBase<K extends string> = K extends `${infer B}_other` ? B : never;
-type PluralKeyOf = PluralBase<TKey>;
-
-/** Plural-aware translation: t() selects `key_<category>` from params.count at runtime. */
-function tCount(key: PluralKeyOf, count: number): string {
-  return t(key as unknown as TKey, { count });
-}
 
 /** Zone phases in a match (PLAN.md: 8 phases); the last one is announced as the final circle. */
 const ZONE_PHASE_COUNT = 8;
@@ -352,7 +343,7 @@ export class FeelController implements Feel {
       this.killBanner.show(
         'knock', t('banner.youKnocked', { name: this.nameOf(ev.victim, f) }),
         ev.headshot ? t('banner.headshot') : null,
-        [count > 0 ? tCount('banner.killCount', count) : '', distanceText(ev.distance)], this.now,
+        [count > 0 ? t('banner.killCount', { count }) : '', distanceText(ev.distance)], this.now,
       );
     } else if (this.isTeammate(f, ev.victim)) {
       this.notices.push(t('hud.teammateDown', { name: this.nameOf(ev.victim, f) }), 'bad', this.now);
@@ -374,7 +365,7 @@ export class FeelController implements Feel {
       this.killBanner.show(
         'kill', t(ev.finished ? 'feel.kill.finished' : 'banner.youKilled', { name }),
         ev.headshot ? t('banner.headshot') : null,
-        [tCount('banner.killCount', count), distanceText(ev.distance)], this.now,
+        [t('banner.killCount', { count }), distanceText(ev.distance)], this.now,
       );
     } else if (this.isTeammate(f, ev.victim)) {
       this.notices.push(t('hud.teammateKilled', { name: this.nameOf(ev.victim, f) }), 'bad', this.now);
@@ -432,7 +423,7 @@ export class FeelController implements Feel {
       audio.ui('win');
       this.moment.show(
         'win', t(f.config.teamSize > 1 ? 'banner.winnerTeam' : 'banner.winner'),
-        tCount('banner.killCount', this.killCount(f)), 6.5, this.now,
+        t('banner.killCount', { count: this.killCount(f) }), 6.5, this.now,
       );
     } else {
       this.announceElimination(mine?.placement ?? 0, f);

@@ -29,3 +29,19 @@ export function setOpacity(e: HTMLElement, value: number, last: number): number 
   if (v !== last) e.style.opacity = String(v);
   return v;
 }
+
+/**
+ * Like setOpacity, but removes the element from rendering (display: none) while fully transparent,
+ * so idle full-screen layers cost nothing to composite.
+ */
+export function setFade(e: HTMLElement, value: number, last: number): number {
+  const v = Math.round(value * 100) / 100;
+  if (v === last) return v;
+  if (v <= 0) {
+    e.style.display = 'none';
+  } else {
+    if (last <= 0) e.style.display = 'block';
+    e.style.opacity = String(v);
+  }
+  return v;
+}

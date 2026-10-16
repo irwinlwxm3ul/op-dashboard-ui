@@ -7,10 +7,12 @@
 const STYLE_ID = 'dz-feel-style';
 
 const CSS = /* css */ `
-.dzf-root{position:absolute;inset:0;pointer-events:none;overflow:hidden;user-select:none;-webkit-user-select:none;contain:strict;
+/* Fixed to the viewport so the overlay does not depend on how the host feel layer is sized. */
+.dzf-root{position:fixed;inset:0;pointer-events:none;overflow:hidden;user-select:none;-webkit-user-select:none;contain:strict;
   font-family:system-ui,"Noto Sans","Noto Sans CJK SC","Noto Sans Arabic","Segoe UI",sans-serif;}
 .dzf-root *{pointer-events:none;box-sizing:border-box;}
 .dzf-full{position:absolute;inset:0;opacity:0;}
+.dzf-lowhp,.dzf-flash{display:none;}
 
 /* ---- Vitals: low health, desaturation, downed ---- */
 .dzf-lowhp{background:radial-gradient(ellipse at 50% 50%,rgba(130,0,0,0) 36%,rgba(150,0,0,.30) 66%,rgba(115,0,0,.82) 100%);will-change:opacity;}

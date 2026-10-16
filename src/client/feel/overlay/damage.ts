@@ -5,7 +5,7 @@
 import { wrapAngle, yawTo } from '../../../shared/math';
 import type { EntityId, Vec3 } from '../../../shared/types';
 import { t } from '../../i18n';
-import { div, el, PopToggle, setOpacity } from './dom';
+import { div, el, PopToggle, setFade, setOpacity } from './dom';
 import { shatterIcon } from './icons';
 
 const ARC_COUNT = 6;
@@ -94,7 +94,7 @@ export class DamageIndicators {
   /** `origin`/`viewYaw`: the local player's position and the camera yaw the arcs are relative to. */
   update(origin: Vec3 | null, viewYaw: number, now: number, dt: number): void {
     this.flash = Math.max(0, this.flash - FLASH_DECAY * dt);
-    this.flashOpacity = setOpacity(this.flashEl, this.flash * 0.9, this.flashOpacity);
+    this.flashOpacity = setFade(this.flashEl, this.flash * 0.9, this.flashOpacity);
 
     for (const a of this.arcs) {
       if (!a.active) continue;

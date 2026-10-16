@@ -4,7 +4,7 @@
 
 import type { LifeState } from '../../../shared/types';
 import { heartbeatPulse } from '../math';
-import { div, setOpacity } from './dom';
+import { div, setFade } from './dom';
 
 export class Vitals {
   private readonly vignette: HTMLDivElement;
@@ -38,7 +38,7 @@ export class Vitals {
     let vig = 0;
     if (downed) vig = 0.5 + 0.38 * pulse;
     else if (alive && low > 0) vig = low * (0.6 + 0.4 * pulse);
-    this.vignetteOpacity = setOpacity(this.vignette, vig, this.vignetteOpacity);
+    this.vignetteOpacity = setFade(this.vignette, vig, this.vignetteOpacity);
 
     if (downed !== this.downedShown) {
       this.downed.style.display = downed ? 'block' : 'none';
