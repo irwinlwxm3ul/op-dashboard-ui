@@ -16,8 +16,12 @@ import { BTN, STANCE_FROM_CODE } from '../src/shared/types';
 import { generateWorld } from '../src/shared/world';
 import { createBotDriver, botName } from '../src/shared/bots';
 import type { BotDriverEx } from '../src/shared/bots';
-import { NavGrid, NF_BLOCKED } from '../src/shared/bots/nav';
+import { NavGrid, NF_BLOCKED, NF_NEAR } from '../src/shared/bots/nav';
+import { FloorNav } from '../src/shared/bots/floors';
+import type { FloorLoc } from '../src/shared/bots/floors';
 import { PathPlanner, newPathRequest, PATH_DONE } from '../src/shared/bots/pathfind';
+import { GameSim } from '../src/shared/sim';
+import { damageInfo, damagePlayer } from '../src/shared/sim/combat';
 
 // ---------------------------------------------------------------------------
 // Mock simulation
@@ -526,6 +530,206 @@ describe('navigation', () => {
       expect(Math.abs(body.pos.y - spawn.pos.y)).toBeLessThan(1);
     }
     expect(checked).toBeGreaterThan(5);
+  });
+});
+
+describe('multi-floor navigation', () => {
+  /** Run one bot (real character physics) until it sends a pickup for `itemId`; returns where it stood. */
+  function runToPickup(sim: MockSim, bot: PlayerState, itemId: EntityId, seconds: number): { at: Vec3 | null; minVy: number } {
+    const driver = createBotDriver(sim);
+    let at: Vec3 | null = null;
+    let minVy = 0;
+    for (let tick = 0; tick < 30 * seconds && !at; tick++) {
+      driver.update(TICK_DT);
+      sim.step();
+      if (bot.vel.y < minVy) minVy = bot.vel.y;
+      if (sim.last.get(bot.id)?.actions?.some((a) => a.a === 'pickup' && a.id === itemId)) at = { ...bot.pos };
+    }
+    return { at, minVy };
+  }
+
+  /** A ground spot 7 m outside the building's west or east wall. */
+  function outside(bld: { min: Vec3; max: Vec3 }, d = 7): { x: number; z: number } | null {
+    const z = (bld.min.z + bld.max.z) / 2;
+    if (!(grid.flagsAt(bld.min.x - d, z) & NF_BLOCKED)) return { x: bld.min.x - d, z };
+    if (!(grid.flagsAt(bld.max.x + d, z) & NF_BLOCKED)) return { x: bld.max.x + d, z };
+    return null;
+  }
+
+  it('a bot outside a multi-storey building takes the stairs to loot on the top floor (real physics)', () => {
+    const floors = new FloorNav(island, grid);
+    const loc: FloorLoc = { building: -1, level: -1, cell: -1 };
+    let tested = 0;
+    for (let bi = 0; bi < island.buildings.length && tested < 3; bi++) {
+      const bld = island.buildings[bi];
+      if (bld.floors < 2) continue;
+      const nav = floors.get(bi, true);
+      if (!nav) continue;
+      // Highest loot spawn lying on an upper floor slab (not on a crate) reachable by stairs.
+      let spawn: Vec3 | null = null;
+      for (const s of island.lootSpawns) {
+        if (s.pos.x <= bld.min.x || s.pos.x >= bld.max.x || s.pos.z <= bld.min.z || s.pos.z >= bld.max.z) continue;
+        if (s.pos.y - island.heightAt(s.pos.x, s.pos.z) < 2.5) continue;
+        if (!nav.locate(s.pos.x, s.pos.y, s.pos.z, loc) || !nav.reachable(loc)) continue;
+        if (Math.abs(s.pos.y - nav.levels[loc.level].h) > 0.3) continue;
+        if (!spawn || s.pos.y > spawn.y) spawn = s.pos;
+      }
+      const start = outside(bld);
+      if (!spawn || !start) continue;
+      tested++;
+      const sim = new MockSim(island);
+      sim.physics = true;
+      const bot = sim.addPlayer(1, ground(island, start.x, start.z));
+      const item = sim.addLoot('ar', spawn, 1);
+      item.mag = 30;
+      const r = runToPickup(sim, bot, item.id, 90);
+      expect(r.at, `building ${bi} (${bld.style}, ${bld.floors} floors)`).not.toBeNull();
+      // Picked up standing on that floor (one storey is 3.2 m), and it never fell.
+      expect(Math.abs(r.at!.y - spawn.y)).toBeLessThan(1);
+      expect(r.minVy).toBeGreaterThan(-7);
+    }
+    expect(tested).toBeGreaterThanOrEqual(2);
+  });
+
+  it('a bot on a roof with a stairwell walks down the stairs instead of jumping off', () => {
+    const floors = new FloorNav(island, grid);
+    let tested = 0;
+    for (let bi = 0; bi < island.buildings.length && tested < 2; bi++) {
+      const nav = floors.get(bi, true);
+      if (!nav || nav.levels.length === 0) continue;
+      const bld = island.buildings[bi];
+      const top = nav.levels.length - 1;
+      const L = nav.levels[top];
+      // The top level must be the roof (a flat roof slab at that height).
+      const roof = bld.boxIds.some((id) => island.boxes[id].kind === 'roof' && Math.abs(island.boxes[id].max.y - L.h) < 0.15);
+      if (!roof) continue;
+      // Start on a free roof cell reachable from the stairs, far from the stairwell.
+      let best = -1, bestD = -1;
+      for (let c = 0; c < nav.cells; c++) {
+        if (!nav.free(top, c) || L.reach[L.comp[c]] !== 1 || L.flags[c] & NF_NEAR) continue;
+        const d = Math.hypot(nav.cellX(c) - nav.groundX, nav.cellZ(c) - nav.groundZ);
+        if (d > bestD) {
+          bestD = d;
+          best = c;
+        }
+      }
+      const goal = outside(bld, 8);
+      if (best < 0 || !goal) continue;
+      tested++;
+      const sim = new MockSim(island);
+      sim.physics = true;
+      const bot = sim.addPlayer(1, { x: nav.cellX(best), y: L.h, z: nav.cellZ(best) });
+      const item = sim.addLoot('ar', ground(island, goal.x, goal.z), 1);
+      item.mag = 30;
+      const r = runToPickup(sim, bot, item.id, 120);
+      expect(r.at, `building ${bi} (${bld.style}, ${bld.floors} floors)`).not.toBeNull();
+      expect(Math.abs(r.at!.y - island.heightAt(goal.x, goal.z))).toBeLessThan(1);
+      // Down the stairs: a roof edge drop would hit the ground at well over 7 m/s.
+      expect(r.minVy).toBeGreaterThan(-7);
+    }
+    expect(tested).toBeGreaterThanOrEqual(1);
+  });
+});
+
+describe('squad support (real sim)', () => {
+  /** A squad (human + bots) standing next to a vehicle; an enemy far away keeps the match going. */
+  function squadSim(seed: number, bots: number) {
+    const sim = new GameSim({
+      mode: 'br', seed, maxPlayers: 8, teamSize: 4, botFill: false, botDifficulty: 'normal', zoneSpeed: 1, infiniteAmmo: false,
+    });
+    const human = sim.addPlayer({ name: 'Human', isBot: false, team: 0 });
+    const mates: EntityId[] = [];
+    for (let i = 0; i < bots; i++) mates.push(sim.addPlayer({ name: `Bot${i}`, isBot: true, team: 0 }));
+    const enemy = sim.addPlayer({ name: 'Far', isBot: false, team: 1 });
+    sim.start();
+    sim.phase = 'playing';
+    if (sim.plane) sim.plane.active = false;
+    const car = sim.vehicleList.find((v) => v.type === 'uaz') ?? sim.vehicleList[0];
+    const place = (id: EntityId, x: number, z: number): void => {
+      const p = sim.players.get(id)!;
+      p.mode = 'ground';
+      p.pos.x = x;
+      p.pos.z = z;
+      p.pos.y = sim.world.groundAt(x, z, car.pos.y + 3);
+      p.weapons[0] = { id: 'ar', mag: 30 };
+      p.ammo.ammo_556 = 90;
+      p.activeSlot = 0;
+    };
+    place(human, car.pos.x + 2.5, car.pos.z);
+    mates.forEach((id, i) => place(id, car.pos.x + (i % 2 === 0 ? 2.5 : -2.5), car.pos.z + 1.5 + Math.floor(i / 2) * 1.5));
+    const e = sim.players.get(enemy)!;
+    e.mode = 'ground';
+    e.pos.x = -car.pos.x;
+    e.pos.z = -car.pos.z;
+    e.pos.y = sim.world.groundAt(e.pos.x, e.pos.z, 1000);
+    let seq = 0;
+    const idle = (id: EntityId, actions: PlayerInput['actions'] = []): void => {
+      const p = sim.players.get(id)!;
+      sim.queueInput(id, { seq: ++seq, mx: 0, mz: 0, yaw: p.yaw, pitch: 0, buttons: 0, stance: 0, slot: -1, rt: sim.time * 1000, actions });
+    };
+    return { sim, human, mates, enemy, car, idle };
+  }
+
+  /** Knock a player (zone damage) and run until it is revived or dies; returns seconds to revive or -1. */
+  function knockAndWait(s: ReturnType<typeof squadSim>, driver: BotDriver, seconds: number, onExit?: (id: EntityId) => void): number {
+    const { sim, human, enemy, idle } = s;
+    const h = sim.players.get(human)!;
+    damagePlayer(sim, h, 300, damageInfo(null, 'zone'));
+    expect(h.life).toBe('downed');
+    const t0 = sim.time;
+    for (let i = 0; i < 30 * seconds; i++) {
+      idle(human);
+      idle(enemy);
+      driver.update(TICK_DT);
+      sim.step();
+      for (const e of sim.drainEvents()) {
+        const ev = e.ev;
+        if (ev.type === 'vehicleExit') onExit?.(ev.player);
+        if (ev.type === 'revived' && ev.target === human) return sim.time - t0;
+      }
+      sim.drainLootDelta();
+      if (h.life === 'dead') return -1;
+    }
+    return -1;
+  }
+
+  it('bot teammates revive a knocked human who stays still', () => {
+    for (const seed of [3, 4, 5]) {
+      const s = squadSim(seed, 3);
+      const driver = createBotDriver(s.sim);
+      // Let the bots settle (spread out, pick goals) for a few seconds first.
+      for (let i = 0; i < 30 * 3; i++) {
+        s.idle(s.human);
+        s.idle(s.enemy);
+        driver.update(TICK_DT);
+        s.sim.step();
+        s.sim.drainEvents();
+        s.sim.drainLootDelta();
+      }
+      const took = knockAndWait(s, driver, 20);
+      expect(took, `seed ${seed}`).toBeGreaterThan(0);
+      expect(took).toBeLessThan(15);
+    }
+  });
+
+  it('bot passengers get out and revive a knocked human driver', () => {
+    for (const seed of [3, 6]) {
+      const s = squadSim(seed, 2);
+      const { sim, car } = s;
+      // Board directly: the human drives, the bots ride along.
+      s.idle(s.human, [{ a: 'enter', id: car.id, seat: 0 }]);
+      s.mates.forEach((id, i) => s.idle(id, [{ a: 'enter', id: car.id, seat: i + 1 }]));
+      s.idle(s.enemy);
+      sim.step();
+      expect(car.seats[0]).toBe(s.human);
+      expect(car.seats.filter((x) => x !== null).length).toBe(3);
+      const driver = createBotDriver(sim);
+      const exited = new Set<EntityId>();
+      const took = knockAndWait(s, driver, 20, (id) => exited.add(id));
+      for (const id of s.mates) expect(exited.has(id), `seed ${seed} bot ${id} got out`).toBe(true);
+      expect(took, `seed ${seed}`).toBeGreaterThan(0);
+      expect(took).toBeLessThan(15);
+    }
   });
 });
 

@@ -227,11 +227,17 @@ export class Viewmodel {
       events.on('localDryFire', () => { this.dryT = DRY_TIME; }),
       events.on('localJump', () => { this.vSpring.v -= 0.32; }),
       events.on('localLand', (ev) => { this.vSpring.v -= clamp(ev.speed * 0.055, 0.12, 0.9); }),
-      events.on('throw', (ev) => { if (this.selfId !== null && ev.player === this.selfId) this.throwT = 0; }),
+      events.on('throw', (ev) => {
+        if (this.selfId === null || ev.player !== this.selfId) return;
+        // From the armed ready pose the hand is already up: start at the wind-up.
+        this.throwT = this.armW > 0.5 ? THROW_TIME * 0.25 : 0;
+      }),
     );
   }
 
   private selfId: number | null = null;
+  /** 0..1 blend of the armed-grenade ready pose (frag key pressed, waiting for fire). */
+  private armW = 0;
   /** Casing ejections requested by events, spawned after posing. */
   private pendingEjects = 0;
 
@@ -479,9 +485,11 @@ export class Viewmodel {
     if (using) this.itemId = self.use!.item;
     const reviving = self.revive !== null;
     const throwing = this.throwT >= 0;
+    const armed = self.grenadeArmed === true && !throwing && !using;
     this.itemRise += ((using ? 1 : 0) - this.itemRise) * damp(using ? 7 : 9, dt);
     this.reviveW += ((reviving ? 1 : 0) - this.reviveW) * damp(7, dt);
-    const lowerTarget = using || reviving || throwing ? 1 : 0;
+    this.armW += ((armed ? 1 : 0) - this.armW) * damp(armed ? 9 : 12, dt);
+    const lowerTarget = using || reviving || throwing || armed ? 1 : 0;
     this.lowerUse += (lowerTarget - this.lowerUse) * damp(lowerTarget > this.lowerUse ? 10 : 6, dt);
     // Sprint pose
     const sprinting = self.sprinting && self.onGround && self.ads < 0.3 && !this.reload.active;
@@ -720,7 +728,7 @@ export class Viewmodel {
     this.holder.updateMatrix();
     if (gun) gun.root.visible = true;
     // Hide when lowered completely out of view and nothing else is shown.
-    if (low > 0.97 && this.itemRise < 0.02 && this.throwT < 0 && this.reviveW < 0.02) this.visible = false;
+    if (low > 0.97 && this.itemRise < 0.02 && this.throwT < 0 && this.reviveW < 0.02 && this.armW < 0.02) this.visible = false;
   }
 
   private reloadTilt(): number {
@@ -1026,6 +1034,25 @@ export class Viewmodel {
       const lw = window4(t, 0.1, 0.3, 0.6, 0.85);
       L.position.set(lerp(-0.2, -0.12, lw), lerp(-0.45, -0.12, lw), lerp(-0.3, -0.5, lw));
       L.rotation.set(0, -0.3, -0.6);
+      this.styleR = 'grip';
+      this.styleL = 'palm';
+      return;
+    }
+    // Armed frag: grenade held up in the right hand, ready to throw on the next fire press.
+    if (this.armW > 0.02) {
+      const obj = this.items.show('frag');
+      const rise = (1 - easeOutCubic(this.armW)) * -0.3;
+      const t = this.time;
+      const x = 0.115, y = -0.115 + rise + Math.sin(t * 1.6) * 0.003, z = -0.28;
+      R.position.set(x, y, z);
+      R.rotation.set(0.25, 0.15, -0.15);
+      if (obj) {
+        obj.position.set(x - 0.004, y + 0.012, z - 0.006);
+        obj.rotation.set(0.2, 0.6, 0.15);
+      }
+      // Support hand forward, palm out, ready to point the throw.
+      L.position.set(-0.1, -0.16 + rise, -0.36);
+      L.rotation.set(0.3, -0.2, -0.5);
       this.styleR = 'grip';
       this.styleL = 'palm';
       return;

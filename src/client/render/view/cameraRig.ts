@@ -416,6 +416,9 @@ export class CameraRig {
       yaw = lookYaw + angleDiff(aimYaw, convYaw) * tppW;
       pitch = lookPitch + (convPitch - aimPitch) * tppW;
     }
+    // The viewmodel is posed relative to the actual camera direction.
+    this.info.lookYaw = yaw;
+    this.info.lookPitch = pitch;
 
     p.pos.x = px; p.pos.y = py; p.pos.z = pz;
     p.yaw = yaw;

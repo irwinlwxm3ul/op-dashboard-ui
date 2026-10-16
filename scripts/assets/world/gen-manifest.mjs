@@ -58,7 +58,7 @@ const nature = read('nature')[0];
 
 const v3 = (a) => `[${a.map((x) => +(+x).toFixed(3)).join(', ')}]`;
 const q = (s) => `'${String(s).replace(/\\/g, '\\\\').replace(/'/g, "\\'")}'`;
-const src = (k) => `SOURCE.${k}`;
+const src = (k) => `WORLD_SOURCES.${k}`;
 
 function vehicleEntry(type, r, extra) {
   // Same order as WHEELS in src/shared/vehicles/defs.ts: front-left, front-right, rear-left, rear-right (bike: front, rear).
@@ -161,7 +161,7 @@ import type { Quat, Vec3 } from './manifest';
 
 export type WorldAssetCategory = 'vehicles' | 'props' | 'nature';
 
-export interface AssetSource {
+export interface WorldAssetSource {
   title: string;
   author: string;
   license: 'CC0-1.0' | 'CC-BY-4.0';
@@ -171,12 +171,12 @@ export interface AssetSource {
   mirror: string;
 }
 
-export const SOURCE = {
+export const WORLD_SOURCES = {
 ${credits.map((k) => `  ${k}: { title: ${q(SRC[k].title)}, author: ${q(SRC[k].author)}, license: ${q(SRC[k].license)}, url: ${q(SRC[k].url)}, mirror: ${q(SRC[k].mirror)} },`).join('\n')}
-} as const satisfies Record<string, AssetSource>;
+} as const satisfies Record<string, WorldAssetSource>;
 
 /** Every source used by the world assets (CC BY 4.0 ones must be credited in the game's credits). */
-export const WORLD_ASSET_CREDITS: readonly AssetSource[] = Object.values(SOURCE);
+export const WORLD_ASSET_CREDITS: readonly WorldAssetSource[] = Object.values(WORLD_SOURCES);
 
 // ================================================================================================
 // Vehicles
@@ -230,7 +230,7 @@ export interface VehicleModel {
    * when it is positive (bike: ~0.1 m).
    */
   seatSurfaceY: readonly (number | null)[];
-  source: AssetSource;
+  source: WorldAssetSource;
 }
 
 /**
@@ -259,7 +259,7 @@ export interface PropModel {
   boxes: readonly { kind: BoxKind; material: SurfaceMaterial }[];
   /** How to fit the model to the world geometry. */
   fit: string;
-  source: AssetSource;
+  source: WorldAssetSource;
 }
 
 export const PROP_MODELS: Record<WorldPropId, PropModel> = {
@@ -305,7 +305,7 @@ export interface TreeKindModel {
   barkMaterial: string;
   leavesMaterial: string | null;
   variants: readonly TreeVariantModel[];
-  source: AssetSource;
+  source: WorldAssetSource;
 }
 
 export interface NatureVariantModel {
@@ -327,19 +327,19 @@ ${treeEntries.join('\n')}
     variants: [
 ${nature.rocks.variants.map((v) => `      { node: ${q(v.id)}, lod1Node: ${q(`${v.id}_lod1`)}, tris: ${v.tris}, lod1Tris: ${v.lod1Tris} },`).join('\n')}
     ] satisfies NatureVariantModel[],
-    source: SOURCE.phRockMoss,
+    source: WORLD_SOURCES.phRockMoss,
   },
   bushes: {
     file: ${q(rel(nature.bushes.file))},
     variants: [
-${nature.bushes.variants.map((v, i) => `      { node: ${q(v.id)}, lod1Node: ${q(`${v.id}_lod1`)}, tris: ${v.tris}, lod1Tris: ${v.lod1Tris}, height: ${v.height}, material: ${q(v.material)}, source: SOURCE.${BUSH_SRC[i]} },`).join('\n')}
-    ] satisfies (NatureVariantModel & { height: number; material: string; source: AssetSource })[],
+${nature.bushes.variants.map((v, i) => `      { node: ${q(v.id)}, lod1Node: ${q(`${v.id}_lod1`)}, tris: ${v.tris}, lod1Tris: ${v.lod1Tris}, height: ${v.height}, material: ${q(v.material)}, source: WORLD_SOURCES.${BUSH_SRC[i]} },`).join('\n')}
+    ] satisfies (NatureVariantModel & { height: number; material: string; source: WorldAssetSource })[],
   },
   grass: {
     file: ${q(rel(nature.grass.file))},
     variants: [
-${nature.grass.variants.map((v, i) => `      { node: ${q(v.id)}, lod1Node: null, tris: ${v.tris}, lod1Tris: null, width: ${v.width}, source: SOURCE.${GRASS_SRC[i]} },`).join('\n')}
-    ] satisfies (NatureVariantModel & { width: number; source: AssetSource })[],
+${nature.grass.variants.map((v, i) => `      { node: ${q(v.id)}, lod1Node: null, tris: ${v.tris}, lod1Tris: null, width: ${v.width}, source: WORLD_SOURCES.${GRASS_SRC[i]} },`).join('\n')}
+    ] satisfies (NatureVariantModel & { width: number; source: WorldAssetSource })[],
   },
   /**
    * Far-band impostor atlas (PNG, RGBA): one cell per kind in this order, base at the bottom of

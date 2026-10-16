@@ -28,7 +28,7 @@ import type { Quat, Vec3 } from './manifest';
 
 export type WorldAssetCategory = 'vehicles' | 'props' | 'nature';
 
-export interface AssetSource {
+export interface WorldAssetSource {
   title: string;
   author: string;
   license: 'CC0-1.0' | 'CC-BY-4.0';
@@ -38,7 +38,7 @@ export interface AssetSource {
   mirror: string;
 }
 
-export const SOURCE = {
+export const WORLD_SOURCES = {
   luaz: { title: 'LUAZ', author: 'aaadragon', license: 'CC-BY-4.0', url: 'https://sketchfab.com/3d-models/luaz-172d9676de3541808f422eee16f47e72', mirror: 'https://github.com/profojak/Brumm-Brumm-Bau/tree/473da224db5e2155de9d18de29e35542215523f4/assets/models/vehicle' },
   dirtbike: { title: 'DIRT BIKE OFF ROAD BIKE LOW POLY', author: 'nabeelashrafphotography', license: 'CC-BY-4.0', url: 'https://sketchfab.com/3d-models/dirt-bike-off-road-bike-low-poly-dbcca404b21348c69938207d265b6035', mirror: 'https://github.com/warathepj/Tentspace/tree/4c755e03fd0fdfb08052662246a7324bf60e5e5a/public/models/dirt_bike_off_road_bike_low_poly' },
   sandbag: { title: 'Sandbag', author: 'Jenna (jennakay)', license: 'CC-BY-4.0', url: 'https://sketchfab.com/3d-models/sandbag-2efc2a324abc4d0087f1d7c3cbba665a', mirror: 'https://github.com/greentis/comp4451-game/tree/dfc99fec9898c06e54bb105afcd7b185f13e6b45/assets/sandbag' },
@@ -54,10 +54,10 @@ export const SOURCE = {
   phBarrier: { title: 'Concrete Road Barrier', author: 'Amal Kumar', license: 'CC0-1.0', url: 'https://polyhaven.com/a/concrete_road_barrier', mirror: 'https://github.com/EliteGamer007/6dof-drone-sim/tree/3b97077101bedb1326cf6483e04dc51ccf130fa3/assets/polyhaven/models/concrete_road_barrier' },
   phChainlink: { title: 'Modular Chainlink Fence', author: 'James Ray Cock (fence wire material: Amal Kumar)', license: 'CC0-1.0', url: 'https://polyhaven.com/a/modular_chainlink_fence', mirror: 'https://github.com/EliteGamer007/6dof-drone-sim/tree/3b97077101bedb1326cf6483e04dc51ccf130fa3/assets/polyhaven/models/modular_chainlink_fence' },
   phRockMoss: { title: 'Rock Moss Set 01', author: 'Kless Gyzen', license: 'CC0-1.0', url: 'https://polyhaven.com/a/rock_moss_set_01', mirror: 'https://github.com/ayoub5550/inside-copy-/tree/e93e405569477bd9e5e304f1a0763116888fb66f/assets/ph/models/rock_moss_set_01' },
-} as const satisfies Record<string, AssetSource>;
+} as const satisfies Record<string, WorldAssetSource>;
 
 /** Every source used by the world assets (CC BY 4.0 ones must be credited in the game's credits). */
-export const WORLD_ASSET_CREDITS: readonly AssetSource[] = Object.values(SOURCE);
+export const WORLD_ASSET_CREDITS: readonly WorldAssetSource[] = Object.values(WORLD_SOURCES);
 
 // ================================================================================================
 // Vehicles
@@ -111,7 +111,7 @@ export interface VehicleModel {
    * when it is positive (bike: ~0.1 m).
    */
   seatSurfaceY: readonly (number | null)[];
-  source: AssetSource;
+  source: WorldAssetSource;
 }
 
 /**
@@ -137,7 +137,7 @@ export const VEHICLE_MODELS: Partial<Record<VehicleType, VehicleModel>> = {
     fork: null,
     bounds: { min: [-1.007, -1.2, -2], max: [1.007, 0.909, 2] },
     seatSurfaceY: [-0.237, -0.238, -0.194, -0.628],
-    source: SOURCE.luaz,
+    source: WORLD_SOURCES.luaz,
   },
   bike: {
     type: 'bike',
@@ -155,7 +155,7 @@ export const VEHICLE_MODELS: Partial<Record<VehicleType, VehicleModel>> = {
     fork: { node: 'Fork', pivot: [-0.006, -0.401, -0.77], axis: [0.006, 0.882, 0.471], rake: 0.4908 },
     bounds: { min: [-0.447, -0.743, -1.05], max: [0.447, 0.478, 1.05] },
     seatSurfaceY: [0.226, 0.217],
-    source: SOURCE.dirtbike,
+    source: WORLD_SOURCES.dirtbike,
   },
 };
 
@@ -176,7 +176,7 @@ export interface PropModel {
   boxes: readonly { kind: BoxKind; material: SurfaceMaterial }[];
   /** How to fit the model to the world geometry. */
   fit: string;
-  source: AssetSource;
+  source: WorldAssetSource;
 }
 
 export const PROP_MODELS: Record<WorldPropId, PropModel> = {
@@ -188,7 +188,7 @@ export const PROP_MODELS: Record<WorldPropId, PropModel> = {
     meshes: ['crate_wood'],
     boxes: [{ kind: 'crate', material: 'wood' }],
     fit: 'scale to the WorldBox (cube crate, ~1 m native)',
-    source: SOURCE.medievalVillage,
+    source: WORLD_SOURCES.medievalVillage,
   },
   crate_military: {
     id: 'crate_military',
@@ -198,7 +198,7 @@ export const PROP_MODELS: Record<WorldPropId, PropModel> = {
     meshes: ['crate_military_0', 'crate_military_1'],
     boxes: [{ kind: 'crate', material: 'wood' }],
     fit: 'scale to the WorldBox; use for PropInfo.military / PAL.crateMilitary crates',
-    source: SOURCE.fantasyProps,
+    source: WORLD_SOURCES.fantasyProps,
   },
   ammo_crate: {
     id: 'ammo_crate',
@@ -208,7 +208,7 @@ export const PROP_MODELS: Record<WorldPropId, PropModel> = {
     meshes: ['ammo_crate'],
     boxes: [],
     fit: 'native size (loot / dressing prop, not a WorldBox)',
-    source: SOURCE.phOldMilitaryCrate,
+    source: WORLD_SOURCES.phOldMilitaryCrate,
   },
   barrel_oil: {
     id: 'barrel_oil',
@@ -218,7 +218,7 @@ export const PROP_MODELS: Record<WorldPropId, PropModel> = {
     meshes: ['barrel_oil'],
     boxes: [],
     fit: 'native size (dressing prop)',
-    source: SOURCE.phBarrel03,
+    source: WORLD_SOURCES.phBarrel03,
   },
   barrel_red: {
     id: 'barrel_red',
@@ -228,7 +228,7 @@ export const PROP_MODELS: Record<WorldPropId, PropModel> = {
     meshes: ['barrel_red'],
     boxes: [],
     fit: 'native size (dressing prop)',
-    source: SOURCE.phBarrel01,
+    source: WORLD_SOURCES.phBarrel01,
   },
   jerrycan: {
     id: 'jerrycan',
@@ -238,7 +238,7 @@ export const PROP_MODELS: Record<WorldPropId, PropModel> = {
     meshes: ['jerrycan'],
     boxes: [],
     fit: 'native size (fuel pickup / dressing)',
-    source: SOURCE.phJerrycan,
+    source: WORLD_SOURCES.phJerrycan,
   },
   barrier_concrete: {
     id: 'barrier_concrete',
@@ -248,7 +248,7 @@ export const PROP_MODELS: Record<WorldPropId, PropModel> = {
     meshes: ['barrier_concrete'],
     boxes: [{ kind: 'barrier', material: 'concrete' }],
     fit: 'scale to the 3 x 0.9 x 0.6 m jersey-barrier box (two 1.55 m barriers end to end)',
-    source: SOURCE.phBarrier,
+    source: WORLD_SOURCES.phBarrier,
   },
   sandbag_wall: {
     id: 'sandbag_wall',
@@ -258,7 +258,7 @@ export const PROP_MODELS: Record<WorldPropId, PropModel> = {
     meshes: ['sandbag_wall'],
     boxes: [{ kind: 'barrier', material: 'sand' }],
     fit: 'tile along the wall: one 2.0 m segment per 2 m of box length, scale Y to the box height (1.1 m native)',
-    source: SOURCE.sandbag,
+    source: WORLD_SOURCES.sandbag,
   },
   container_green: {
     id: 'container_green',
@@ -268,7 +268,7 @@ export const PROP_MODELS: Record<WorldPropId, PropModel> = {
     meshes: ['container_green'],
     boxes: [{ kind: 'container', material: 'metal' }],
     fit: 'closed containers only (native ISO 20 ft size = CONTAINER_L x CONTAINER_H x CONTAINER_W); open containers keep the box walls',
-    source: SOURCE.zombieKit,
+    source: WORLD_SOURCES.zombieKit,
   },
   container_red: {
     id: 'container_red',
@@ -278,7 +278,7 @@ export const PROP_MODELS: Record<WorldPropId, PropModel> = {
     meshes: ['container_red'],
     boxes: [{ kind: 'container', material: 'metal' }],
     fit: 'as container_green',
-    source: SOURCE.zombieKit,
+    source: WORLD_SOURCES.zombieKit,
   },
   fence_wood: {
     id: 'fence_wood',
@@ -288,7 +288,7 @@ export const PROP_MODELS: Record<WorldPropId, PropModel> = {
     meshes: ['fence_wood'],
     boxes: [{ kind: 'fence', material: 'wood' }],
     fit: 'scale X to the panel length (2.06 m native), Y to 0.75 m',
-    source: SOURCE.medievalVillage,
+    source: WORLD_SOURCES.medievalVillage,
   },
   fence_chainlink: {
     id: 'fence_chainlink',
@@ -298,7 +298,7 @@ export const PROP_MODELS: Record<WorldPropId, PropModel> = {
     meshes: ['fence_chainlink_frame', 'fence_chainlink_wire'],
     boxes: [{ kind: 'fence', material: 'metal' }],
     fit: 'scale X to the panel length (1.99 m native: 1.91 m mesh panel + post), Y to 2.4 m',
-    source: SOURCE.phChainlink,
+    source: WORLD_SOURCES.phChainlink,
   },
 };
 
@@ -341,7 +341,7 @@ export interface TreeKindModel {
   barkMaterial: string;
   leavesMaterial: string | null;
   variants: readonly TreeVariantModel[];
-  source: AssetSource;
+  source: WorldAssetSource;
 }
 
 export interface NatureVariantModel {
@@ -367,7 +367,7 @@ export const NATURE_MODELS = {
         { node: 'pine_4', lod1Node: 'pine_4_lod1', bark: 'pine_4_bark', leaves: 'pine_4_leaves', lod1Bark: 'pine_4_lod1_bark', lod1Leaves: 'pine_4_lod1_leaves', tris: 2000, lod1Tris: 748, trunkRadius: 0.038, crownWidth: 0.58, rootDepth: 0.024, sourceHeight: 10.001 },
         { node: 'pine_5', lod1Node: 'pine_5_lod1', bark: 'pine_5_bark', leaves: 'pine_5_leaves', lod1Bark: 'pine_5_lod1_bark', lod1Leaves: 'pine_5_lod1_leaves', tris: 1646, lod1Tris: 803, trunkRadius: 0.042, crownWidth: 0.756, rootDepth: 0.028, sourceHeight: 8.489 },
       ],
-      source: SOURCE.natureMegaKit,
+      source: WORLD_SOURCES.natureMegaKit,
     },
     oak: {
       kind: 'oak',
@@ -381,7 +381,7 @@ export const NATURE_MODELS = {
         { node: 'oak_4', lod1Node: 'oak_4_lod1', bark: 'oak_4_bark', leaves: 'oak_4_leaves', lod1Bark: 'oak_4_lod1_bark', lod1Leaves: 'oak_4_lod1_leaves', tris: 2000, lod1Tris: 640, trunkRadius: 0.055, crownWidth: 0.416, rootDepth: 0.026, sourceHeight: 9.196 },
         { node: 'oak_5', lod1Node: 'oak_5_lod1', bark: 'oak_5_bark', leaves: 'oak_5_leaves', lod1Bark: 'oak_5_lod1_bark', lod1Leaves: 'oak_5_lod1_leaves', tris: 2000, lod1Tris: 639, trunkRadius: 0.075, crownWidth: 0.641, rootDepth: 0.036, sourceHeight: 6.763 },
       ],
-      source: SOURCE.natureMegaKit,
+      source: WORLD_SOURCES.natureMegaKit,
     },
     birch: {
       kind: 'birch',
@@ -395,7 +395,7 @@ export const NATURE_MODELS = {
         { node: 'birch_4', lod1Node: 'birch_4_lod1', bark: 'birch_4_bark', leaves: 'birch_4_leaves', lod1Bark: 'birch_4_lod1_bark', lod1Leaves: 'birch_4_lod1_leaves', tris: 2000, lod1Tris: 639, trunkRadius: 0.029, crownWidth: 0.661, rootDepth: 0.003, sourceHeight: 4.202 },
         { node: 'birch_5', lod1Node: 'birch_5_lod1', bark: 'birch_5_bark', leaves: 'birch_5_leaves', lod1Bark: 'birch_5_lod1_bark', lod1Leaves: 'birch_5_lod1_leaves', tris: 1999, lod1Tris: 639, trunkRadius: 0.03, crownWidth: 0.664, rootDepth: 0.003, sourceHeight: 5.508 },
       ],
-      source: SOURCE.ultimateNature,
+      source: WORLD_SOURCES.ultimateNature,
     },
     dead: {
       kind: 'dead',
@@ -409,7 +409,7 @@ export const NATURE_MODELS = {
         { node: 'dead_4', lod1Node: 'dead_4_lod1', bark: 'dead_4_bark', leaves: null, lod1Bark: 'dead_4_lod1_bark', lod1Leaves: null, tris: 1997, lod1Tris: 595, trunkRadius: 0.068, crownWidth: 0.639, rootDepth: 0.027, sourceHeight: 12.435 },
         { node: 'dead_5', lod1Node: 'dead_5_lod1', bark: 'dead_5_bark', leaves: null, lod1Bark: 'dead_5_lod1_bark', lod1Leaves: null, tris: 2000, lod1Tris: 600, trunkRadius: 0.052, crownWidth: 0.522, rootDepth: 0.021, sourceHeight: 16.102 },
       ],
-      source: SOURCE.natureMegaKit,
+      source: WORLD_SOURCES.natureMegaKit,
     },
   } satisfies Record<TreeKind, TreeKindModel>,
   rocks: {
@@ -423,23 +423,23 @@ export const NATURE_MODELS = {
       { node: 'rock_5', lod1Node: 'rock_5_lod1', tris: 700, lod1Tris: 180 },
       { node: 'rock_6', lod1Node: 'rock_6_lod1', tris: 700, lod1Tris: 180 },
     ] satisfies NatureVariantModel[],
-    source: SOURCE.phRockMoss,
+    source: WORLD_SOURCES.phRockMoss,
   },
   bushes: {
     file: 'nature/bushes.glb',
     variants: [
-      { node: 'bush_1', lod1Node: 'bush_1_lod1', tris: 900, lod1Tris: 300, height: 1.097, material: 'bush_leaves_1', source: SOURCE.natureMegaKit },
-      { node: 'bush_2', lod1Node: 'bush_2_lod1', tris: 400, lod1Tris: 300, height: 0.899, material: 'bush_leaves_2', source: SOURCE.ultimateNature },
-      { node: 'bush_3', lod1Node: 'bush_3_lod1', tris: 276, lod1Tris: 276, height: 0.874, material: 'bush_leaves_2', source: SOURCE.ultimateNature },
-    ] satisfies (NatureVariantModel & { height: number; material: string; source: AssetSource })[],
+      { node: 'bush_1', lod1Node: 'bush_1_lod1', tris: 900, lod1Tris: 300, height: 1.097, material: 'bush_leaves_1', source: WORLD_SOURCES.natureMegaKit },
+      { node: 'bush_2', lod1Node: 'bush_2_lod1', tris: 400, lod1Tris: 300, height: 0.899, material: 'bush_leaves_2', source: WORLD_SOURCES.ultimateNature },
+      { node: 'bush_3', lod1Node: 'bush_3_lod1', tris: 276, lod1Tris: 276, height: 0.874, material: 'bush_leaves_2', source: WORLD_SOURCES.ultimateNature },
+    ] satisfies (NatureVariantModel & { height: number; material: string; source: WorldAssetSource })[],
   },
   grass: {
     file: 'nature/grass.glb',
     variants: [
-      { node: 'grass_1', lod1Node: null, tris: 58, lod1Tris: null, width: 1.21, source: SOURCE.ultimateNature },
-      { node: 'grass_2', lod1Node: null, tris: 108, lod1Tris: null, width: 1.469, source: SOURCE.ultimateNature },
-      { node: 'grass_3', lod1Node: null, tris: 120, lod1Tris: null, width: 0.562, source: SOURCE.natureMegaKit },
-    ] satisfies (NatureVariantModel & { width: number; source: AssetSource })[],
+      { node: 'grass_1', lod1Node: null, tris: 58, lod1Tris: null, width: 1.21, source: WORLD_SOURCES.ultimateNature },
+      { node: 'grass_2', lod1Node: null, tris: 108, lod1Tris: null, width: 1.469, source: WORLD_SOURCES.ultimateNature },
+      { node: 'grass_3', lod1Node: null, tris: 120, lod1Tris: null, width: 0.562, source: WORLD_SOURCES.natureMegaKit },
+    ] satisfies (NatureVariantModel & { width: number; source: WorldAssetSource })[],
   },
   /**
    * Far-band impostor atlas (PNG, RGBA): one cell per kind in this order, base at the bottom of

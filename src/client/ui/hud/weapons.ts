@@ -231,11 +231,12 @@ export class WeaponPanel implements Widget {
   private renderFragHint(env: HudEnv): void {
     this.fragHintDirty = false;
     this.fragHint.textContent = '';
-    const text = t('ui.hud.fragArmed', { throw: `${MARK}t${MARK}`, cancel: `${MARK}c${MARK}` });
+    // Placeholders become key caps: marker 1 = throw (fire button), marker 2 = cancel (frag key).
+    const text = t('ui.hud.fragArmed', { throw: `${MARK}1${MARK}`, cancel: `${MARK}2${MARK}` });
     text.split(MARK).forEach((part, i) => {
       if (i % 2 === 1) {
         const cap = h('span', 'dz-key dz-key-sm', this.fragHint);
-        cap.textContent = part === 't' ? t('ui.key.mouseLeftShort') : keyCapLabel(env.keys.slot4);
+        cap.textContent = part === '1' ? t('ui.key.mouseLeftShort') : keyCapLabel(env.keys.slot4);
       } else if (part.trim()) {
         h('span', '', this.fragHint).textContent = part.trim();
       }
