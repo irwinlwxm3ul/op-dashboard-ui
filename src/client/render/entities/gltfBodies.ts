@@ -25,6 +25,7 @@ import { dirFromAngles } from '../../../shared/math';
 import { hash32 } from '../../../shared/rng';
 import type { GearId, Vec3, WeaponId } from '../../../shared/types';
 import type { LogicalAnimState } from './animState';
+import type { SeatInfo } from './animator';
 import type { BodyFrame, NearBody, NearBodyProvider } from './bodies';
 import { GeoBuilder, M_ACCENT, xform } from './geometry';
 import { addItemAsset, itemAsset } from './lootModels';
@@ -391,6 +392,19 @@ class GltfNearBody implements NearBody {
   private readonly slungAnchor = new THREE.Object3D();
   private readonly spine: THREE.Bone | null;
   private readonly chest: THREE.Bone | null;
+  private readonly neck: THREE.Bone | null;
+  /** Limb chains for the seated rider IK (null when the rig lacks a bone). */
+  private readonly arms: (Limb | null)[];
+  private readonly legs: (Limb | null)[];
+  /**
+   * Bones the procedural corrections rotate / move, with their transforms as last sampled by the
+   * mixer. They are put back before every mixer update: the mixer only writes a property when its
+   * sampled value changes, and clips carry no track at all for bones that stay at rest (the asset
+   * pipeline drops those), so corrections would otherwise stick or accumulate frame over frame.
+   */
+  private readonly touched: THREE.Bone[] = [];
+  private readonly sampledQuat: THREE.Quaternion[] = [];
+  private readonly sampledPos: THREE.Vector3[] = [];
   private readonly actions = new Map<THREE.AnimationClip, THREE.AnimationAction>();
   private baseKey: CharacterAnimKey | null = null;
   private baseClip: THREE.AnimationClip | null = null;
@@ -463,6 +477,26 @@ class GltfNearBody implements NearBody {
     this.gear.bind(new THREE.Skeleton(this.proxies, inverses), new THREE.Matrix4());
     root.add(this.gear);
     this.inst.weaponSocket.add(this.holder);
+    this.neck = this.inst.bones.neck;
+    // Rider IK chains, measured in the bind pose (the instance is still at rest here).
+    root.updateMatrixWorld(true);
+    this.arms = [limbFor(root, 'UpperArmL', 'LowerArmL', 'WristL', null), limbFor(root, 'UpperArmR', 'LowerArmR', 'WristR', null)];
+    this.legs = [limbFor(root, 'UpperLegL', 'LowerLegL', null, 'FootL'), limbFor(root, 'UpperLegR', 'LowerLegR', null, 'FootR')];
+    const touch = (b: THREE.Bone | null): void => {
+      if (!b || this.touched.includes(b)) return;
+      this.touched.push(b);
+      this.sampledQuat.push(b.quaternion.clone());
+      this.sampledPos.push(b.position.clone());
+    };
+    touch(this.spine);
+    touch(this.chest);
+    touch(this.neck);
+    for (const l of [...this.arms, ...this.legs]) {
+      if (!l) continue;
+      touch(l.upper);
+      touch(l.lower);
+      touch(l.foot);
+    }
   }
 
   private action(clip: THREE.AnimationClip): THREE.AnimationAction {
@@ -633,7 +667,16 @@ class GltfNearBody implements NearBody {
     }
     root.matrixWorldNeedsUpdate = true;
 
+    const touched = this.touched;
+    for (let i = 0; i < touched.length; i++) {
+      touched[i].quaternion.copy(this.sampledQuat[i]);
+      touched[i].position.copy(this.sampledPos[i]);
+    }
     this.inst.mixer.update(Math.min(0.1, f.dt));
+    for (let i = 0; i < touched.length; i++) {
+      this.sampledQuat[i].copy(touched[i].quaternion);
+      this.sampledPos[i].copy(touched[i].position);
+    }
 
     // --- Weapon placement ------------------------------------------------------------------------
     const weapon = f.showWeapon ? look.weapon : null;
@@ -668,6 +711,67 @@ class GltfNearBody implements NearBody {
         : k === 'holdRifle' || k === 'holdPistol' ? 'pitch' : 'none';
     }
     this.correctSpine(f, mode);
+    const DBG = (globalThis as unknown as { __rideDbg?: number }).__rideDbg ?? 0;
+    if (!(DBG & 1) && f.seat && f.logical.state !== 'death' && (f.seat.hands || f.seat.feet)) this.rideIK(f, f.seat, inHands);
+  }
+
+  /**
+   * Seated rider: feet onto the footpegs (bike) and hands onto the grips / steering wheel rim /
+   * the driver's waist (unless holding the weapon) with two-bone IK; bike riders' heads are kept
+   * nearer the horizon against the speed lean.
+   */
+  private rideIK(f: BodyFrame, seat: SeatInfo, inHands: boolean): void {
+    const c = seat.contacts;
+    const bike = seat.type === 'bike';
+    _qRoot.setFromRotationMatrix(_m.extractRotation(f.root));
+    if (bike && this.neck && this.neck.parent) {
+      const lean = bikeLean(seat);
+      this.neck.parent.updateWorldMatrix(true, false);
+      _qp.setFromRotationMatrix(_m.extractRotation(this.neck.parent.matrixWorld));
+      _axis.set(1, 0, 0).applyQuaternion(_qRoot);
+      _q.setFromAxisAngle(_axis, 0.75 * lean.pitch);
+      _axis.set(0, 0, -1).applyQuaternion(_qRoot);
+      _qa.setFromAxisAngle(_axis, 0.6 * (seat.roll + lean.roll));
+      _q.premultiply(_qa);
+      applyWorldRotation(this.neck, _qp, _q);
+    }
+    if (seat.feet) {
+      for (let i = 0; i < 2; i++) {
+        const leg = this.legs[i];
+        if (!leg) continue;
+        const side = i === 0 ? -1 : 1;
+        _tgt.set(c[6 + i * 3], c[7 + i * 3] + FOOT_ABOVE_PEG, c[8 + i * 3] + FOOT_BEHIND_PEG).applyMatrix4(f.root);
+        _pole.set(side * 0.35, 0.25, -1).applyQuaternion(_qRoot);
+        solveLimb(leg, _tgt, _pole);
+        // The foot bone hangs off the root (IK rig): move it to the new ankle.
+        const foot = leg.foot;
+        if (foot && foot.parent) {
+          leg.lower.updateWorldMatrix(false, false);
+          _end.copy(leg.end).applyMatrix4(leg.lower.matrixWorld);
+          foot.parent.updateWorldMatrix(true, false);
+          foot.position.copy(_end).applyMatrix4(_m.copy(foot.parent.matrixWorld).invert());
+        }
+      }
+    }
+    if (seat.hands && !inHands) {
+      for (let i = 0; i < 2; i++) {
+        const arm = this.arms[i];
+        if (!arm) continue;
+        const side = i === 0 ? -1 : 1;
+        _tgt.set(c[i * 3], c[i * 3 + 1], c[i * 3 + 2]).applyMatrix4(f.root);
+        // Palm on the contact: the wrist stops short along the reach.
+        arm.upper.updateWorldMatrix(true, false);
+        _end.setFromMatrixPosition(arm.upper.matrixWorld);
+        _dirV.subVectors(_tgt, _end);
+        const len = _dirV.length();
+        if (len > 1e-3) _tgt.addScaledVector(_dirV, -PALM_REACH / len);
+        if (bike && seat.seat === 0) _pole.set(side, -0.45, 0.35);
+        else if (bike) _pole.set(side * 0.8, -0.7, 0.4);
+        else _pole.set(side * 0.7, -1, 0.3);
+        _pole.applyQuaternion(_qRoot);
+        solveLimb(arm, _tgt, _pole);
+      }
+    }
   }
 
   /** Rotate Abdomen + Chest so the gun follows the aim; add lean / flinch / kick. */
@@ -692,8 +796,14 @@ class GltfNearBody implements NearBody {
       _q.setFromAxisAngle(_axis, 0.55 * Math.max(-1.2, Math.min(1.2, f.aimPitch)));
     }
     // Lean (roll about the facing axis), hit flinch and fire kick (pitch about the right axis).
-    const lean = a.lean * 0.24;
-    const pitchExtra = 0.22 * a.flinchBz * a.flinchX + 0.05 * a.kickX;
+    let lean = a.lean * 0.24;
+    let pitchExtra = 0.22 * a.flinchBz * a.flinchX + 0.05 * a.kickX;
+    if (!(((globalThis as unknown as { __rideDbg?: number }).__rideDbg ?? 0) & 2) && f.seat && f.seat.type === 'bike' && f.logical.state !== 'death') {
+      // Bike riders lean forward with speed and into turns beyond the bike's roll.
+      const bl = bikeLean(f.seat);
+      pitchExtra -= bl.pitch;
+      lean += bl.roll;
+    }
     if (lean !== 0) {
       _axis.set(0, 0, -1).applyQuaternion(_qRoot);
       _qa.setFromAxisAngle(_axis, -lean);
@@ -749,6 +859,130 @@ const _qt = new THREE.Quaternion();
 function applyWorldRotation(bone: THREE.Object3D, parentWorld: THREE.Quaternion, q: THREE.Quaternion): void {
   _qt.copy(parentWorld).invert().multiply(q).multiply(parentWorld);
   bone.quaternion.premultiply(_qt);
+}
+
+// ---------------------------------------------------------------------------
+// Rider IK
+// ---------------------------------------------------------------------------
+
+/** Wrist stops this far short of a palm contact (wrist -> palm centre). */
+const PALM_REACH = 0.07;
+/** Foot bone origin (ankle) above / behind a footpeg top. */
+const FOOT_ABOVE_PEG = 0.06;
+const FOOT_BEHIND_PEG = 0.09;
+
+/** Two-bone chain: upper -> lower -> end point (lower-local), plus the leg's root-parented foot. */
+interface Limb {
+  upper: THREE.Bone;
+  lower: THREE.Bone;
+  /** End effector in the lower bone's local space (wrist joint / ankle). */
+  end: THREE.Vector3;
+  foot: THREE.Bone | null;
+}
+
+/** Build a limb from bind-pose world matrices (root.updateMatrixWorld(true) done by the caller). */
+function limbFor(root: THREE.Object3D, upperName: string, lowerName: string, endName: string | null, footName: string | null): Limb | null {
+  const upper = root.getObjectByName(upperName) as THREE.Bone | undefined;
+  const lower = root.getObjectByName(lowerName) as THREE.Bone | undefined;
+  if (!upper?.isBone || !lower?.isBone || lower.parent !== upper) return null;
+  const endObj = endName ? root.getObjectByName(endName) : undefined;
+  const footObj = footName ? (root.getObjectByName(footName) as THREE.Bone | undefined) : undefined;
+  let end: THREE.Vector3;
+  if (endObj && endObj.parent === lower) {
+    end = endObj.position; // live: follows any translation track
+  } else if (footObj) {
+    end = new THREE.Vector3().setFromMatrixPosition(footObj.matrixWorld).applyMatrix4(_m.copy(lower.matrixWorld).invert());
+  } else {
+    return null;
+  }
+  return { upper, lower, end, foot: footObj?.isBone ? footObj : null };
+}
+
+const _lean = { pitch: 0, roll: 0 };
+
+/** Bike rider lean (rad): forward pitch growing with speed, extra roll into the turn. */
+function bikeLean(seat: SeatInfo): { pitch: number; roll: number } {
+  const driver = seat.seat === 0;
+  _lean.pitch = driver ? 0.22 + 0.3 * seat.speed : 0.1 + 0.12 * seat.speed;
+  _lean.roll = 0.3 * seat.roll;
+  return _lean;
+}
+
+const _A = new THREE.Vector3();
+const _B = new THREE.Vector3();
+const _C = new THREE.Vector3();
+const _K = new THREE.Vector3();
+const _T = new THREE.Vector3();
+const _n = new THREE.Vector3();
+const _mm = new THREE.Vector3();
+const _u = new THREE.Vector3();
+const _v1 = new THREE.Vector3();
+const _v2 = new THREE.Vector3();
+const _tgt = new THREE.Vector3();
+const _pole = new THREE.Vector3();
+const _end = new THREE.Vector3();
+const _dirV = new THREE.Vector3();
+const _qs = new THREE.Quaternion();
+const _qpa = new THREE.Quaternion();
+const _qp2 = new THREE.Quaternion();
+
+/**
+ * Orientation-agnostic two-bone IK on the sampled pose: swing the upper bone so the joint lands
+ * where the target and pole put it, twist it so the lower bone bends in that plane, then bend the
+ * lower bone onto the target. Keeps the clip's twist otherwise (shortest-arc rotations).
+ */
+function solveLimb(l: Limb, target: THREE.Vector3, pole: THREE.Vector3): void {
+  const a = l.upper, b = l.lower;
+  if (!a.parent) return;
+  a.parent.updateWorldMatrix(true, false);
+  a.updateWorldMatrix(false, false);
+  b.updateWorldMatrix(false, false);
+  _A.setFromMatrixPosition(a.matrixWorld);
+  _B.setFromMatrixPosition(b.matrixWorld);
+  _C.copy(l.end).applyMatrix4(b.matrixWorld);
+  const lab = _A.distanceTo(_B), lbc = _B.distanceTo(_C);
+  _n.subVectors(target, _A);
+  let d = _n.length();
+  if (d < 1e-4 || lab < 1e-4 || lbc < 1e-4) return;
+  _n.multiplyScalar(1 / d);
+  d = Math.min(lab + lbc - 1e-3, Math.max(Math.abs(lab - lbc) + 0.01, d));
+  _T.copy(_A).addScaledVector(_n, d); // reachable target
+  const along = (lab * lab - lbc * lbc + d * d) / (2 * d);
+  const h = Math.sqrt(Math.max(0, lab * lab - along * along));
+  _mm.copy(pole).addScaledVector(_n, -pole.dot(_n));
+  if (_mm.lengthSq() < 1e-8) _mm.subVectors(_B, _A).addScaledVector(_n, -_mm.dot(_n));
+  if (_mm.lengthSq() < 1e-8) return;
+  _mm.normalize();
+  _K.copy(_A).addScaledVector(_n, along).addScaledVector(_mm, h);
+  _qpa.setFromRotationMatrix(_m.extractRotation(a.parent.matrixWorld));
+  // 1. Swing the upper bone onto the joint.
+  _v1.subVectors(_B, _A).normalize();
+  _u.subVectors(_K, _A).normalize();
+  _qs.setFromUnitVectors(_v1, _u);
+  applyWorldRotation(a, _qpa, _qs);
+  a.updateWorldMatrix(false, false);
+  b.updateWorldMatrix(false, false);
+  _C.copy(l.end).applyMatrix4(b.matrixWorld);
+  // 2. Twist about the upper bone so the lower bone's bend plane contains the target.
+  _v1.subVectors(_C, _K);
+  _v1.addScaledVector(_u, -_v1.dot(_u));
+  _v2.subVectors(_T, _K);
+  _v2.addScaledVector(_u, -_v2.dot(_u));
+  if (_v1.lengthSq() > 1e-6 && _v2.lengthSq() > 1e-6) {
+    const ang = Math.atan2(_end.crossVectors(_v1, _v2).dot(_u), _v1.dot(_v2));
+    _qs.setFromAxisAngle(_u, ang);
+    applyWorldRotation(a, _qpa, _qs);
+    a.updateWorldMatrix(false, false);
+    b.updateWorldMatrix(false, false);
+    _C.copy(l.end).applyMatrix4(b.matrixWorld);
+  }
+  // 3. Bend the lower bone onto the target.
+  _v1.subVectors(_C, _K).normalize();
+  _v2.subVectors(_T, _K).normalize();
+  _qs.setFromUnitVectors(_v1, _v2);
+  _qp2.setFromRotationMatrix(_m.extractRotation(a.matrixWorld));
+  applyWorldRotation(b, _qp2, _qs);
+  b.updateWorldMatrix(false, false);
 }
 
 // ---------------------------------------------------------------------------
