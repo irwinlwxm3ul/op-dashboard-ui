@@ -20,6 +20,8 @@ export const NAV_BUDGET_PER_TICK = 1600;
 /** Nav tiles that may be generated per tick (lazy grid). */
 export const TILE_GEN_PER_TICK = 2;
 
+const EMPTY_TEAM: readonly PlayerState[] = [];
+
 export interface TeamPlan {
   landX: number;
   landZ: number;
@@ -35,8 +37,11 @@ export class BotSystem {
   readonly skill: BotSkill;
   readonly bots = new Map<EntityId, BotState>();
   readonly teams = new Map<TeamId, TeamPlan>();
-  /** Connected human per team (alive) this tick, used for "follow the human" squads. */
+  /** Connected human per team (not dead) this tick, used for "follow the human" squads. */
   readonly teamHuman = new Map<TeamId, EntityId>();
+  /** Lowest-id standing bot per team this tick (loose squad cohesion for bot squads). */
+  readonly teamBotLeader = new Map<TeamId, EntityId>();
+  private readonly teamLists = new Map<TeamId, PlayerState[]>();
   tick = 0;
   now = 0;
   dt = TICK_DT;
@@ -70,6 +75,32 @@ export class BotSystem {
     this.losLeft--;
     this.losUsed++;
     return lineOfSight(this.world, a, b);
+  }
+
+  /** Rebuild the per-team rosters (once per tick, no allocation after warm-up). */
+  rebuildTeams(): void {
+    for (const list of this.teamLists.values()) list.length = 0;
+    this.teamHuman.clear();
+    this.teamBotLeader.clear();
+    for (const p of this.sim.players.values()) {
+      let list = this.teamLists.get(p.team);
+      if (!list) {
+        list = [];
+        this.teamLists.set(p.team, list);
+      }
+      list.push(p);
+      if (p.life === 'dead') continue;
+      if (!p.isBot && p.connected) this.teamHuman.set(p.team, p.id);
+      if (p.isBot && p.life === 'alive') {
+        const cur = this.teamBotLeader.get(p.team);
+        if (cur === undefined || p.id < cur) this.teamBotLeader.set(p.team, p.id);
+      }
+    }
+  }
+
+  /** Every player of a team (any life state) as of this tick. */
+  teamMembers(team: TeamId): readonly PlayerState[] {
+    return this.teamLists.get(team) ?? EMPTY_TEAM;
   }
 
   teamPlan(team: TeamId): TeamPlan {

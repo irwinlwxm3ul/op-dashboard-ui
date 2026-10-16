@@ -74,7 +74,7 @@ const at = (base: THREE.Matrix4, x: number, y: number, z: number, rx = 0, ry = 0
 // Gear builders (also used for loot models). Head-bone space: neck joint at origin, head centre y 0.14.
 // ---------------------------------------------------------------------------
 
-export function buildHelmet(level: number, b: GeoBuilder, base: THREE.Matrix4, bone: number): void {
+export function buildHelmet(level: number, b: GeoBuilder, base: THREE.Matrix4, bone = 0): void {
   switch (level) {
     case 0: {
       // Soft patrol cap in fatigue colour + hair at the back.
@@ -120,7 +120,7 @@ export function buildHelmet(level: number, b: GeoBuilder, base: THREE.Matrix4, b
 }
 
 /** Chest-bone space (chest joint at origin, torso centre y 0.13). */
-export function buildVest(level: number, b: GeoBuilder, base: THREE.Matrix4, bone: number): void {
+export function buildVest(level: number, b: GeoBuilder, base: THREE.Matrix4, bone = 0): void {
   if (level <= 1) {
     const c = 0x2f3439;
     b.taper(0.37, 0.255, 0.4, 0.265, 0.28, at(base, 0, 0.11, 0), solid(c, bone));
@@ -156,7 +156,7 @@ export function buildVest(level: number, b: GeoBuilder, base: THREE.Matrix4, bon
 }
 
 /** Chest-bone space. Packs sit behind the torso with a vertical team-colour stripe. */
-export function buildPack(level: number, b: GeoBuilder, base: THREE.Matrix4, bone: number): void {
+export function buildPack(level: number, b: GeoBuilder, base: THREE.Matrix4, bone = 0): void {
   const strapZ = -0.135;
   const straps = (y: number, h: number): void => {
     b.box(0.045, h, 0.02, at(base, -0.1, y, strapZ, -0.08), solid(COL.strap, bone));

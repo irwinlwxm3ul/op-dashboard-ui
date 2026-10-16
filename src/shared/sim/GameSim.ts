@@ -8,7 +8,7 @@
 // start of the tick), so results never depend on the order in which players are processed.
 
 import { MAX_PLAYERS, PLANE_ALTITUDE, TICK_DT } from '../constants';
-import { eyePosition } from '../physics';
+import { eyePosition, prepareRaycastWorld } from '../physics';
 import { Rng, hash32 } from '../rng';
 import type {
   EntityId, GameEvent, ItemId, LootItem, MatchConfig, MatchPhase, MatchResults, PlaneState, PlayerInput,
@@ -95,6 +95,7 @@ export class GameSim implements SimView {
     this.config.maxPlayers = Math.max(1, Math.min(MAX_PLAYERS, Math.floor(this.config.maxPlayers) || 1));
     const kind = this.config.mode === 'training' ? 'training' : 'island';
     this.world = generateWorld(this.config.seed, kind);
+    prepareRaycastWorld(this.world);
     const seed = this.config.seed >>> 0;
     this.rngPlane = new Rng(hash32(seed, 0x504c));
     this.rngNames = new Rng(hash32(seed, 0x4e4d));

@@ -1,6 +1,8 @@
 // Loot evaluation: how much a bot wants a given ground item, based only on its own inventory.
 
-import { GEAR, WEAPONS, isAmmoId, isConsumableId, isGearId, isThrowableId, isWeaponId, roomFor } from '../items';
+import {
+  GEAR, WEAPONS, capacity, isAmmoId, isConsumableId, isGearId, isThrowableId, isWeaponId, itemWeight, roomFor, usedCapacity,
+} from '../items';
 import type { ItemId, LootItem, PlayerState, WeaponId } from '../types';
 import { WEAPON_TIER, wantedReserve } from './aim';
 
@@ -19,8 +21,13 @@ function holdsWeaponForAmmo(p: PlayerState, ammo: ItemId): WeaponId | null {
   return null;
 }
 
-/** Desirability of an item in [0, 1] (0 = ignore). */
-export function lootUtility(p: PlayerState, it: LootItem): number {
+/** Free inventory capacity (compute once per scan and pass to lootUtility). */
+export function freeCapacity(p: PlayerState): number {
+  return capacity(p) - usedCapacity(p);
+}
+
+/** Desirability of an item in [0, 1] (0 = ignore). `free` = freeCapacity(p). */
+export function lootUtility(p: PlayerState, it: LootItem, free: number): number {
   const id = it.item;
   if (isWeaponId(id)) {
     const def = WEAPONS[id];
@@ -45,7 +52,8 @@ export function lootUtility(p: PlayerState, it: LootItem): number {
     if (g.kind === 'pack') return 0.4 + 0.12 * (g.level - cur);
     return 0.62 + 0.13 * (g.level - cur);
   }
-  if (roomFor(p, id) <= 0) return 0;
+  const wt = itemWeight(id);
+  if (wt > 0 && free < wt - 1e-6) return 0;
   if (isAmmoId(id)) {
     const w = holdsWeaponForAmmo(p, id);
     if (!w) return 0.03;

@@ -7,7 +7,7 @@
 // immediately; remote entities are drawn at `renderTime` = estimated server time - interpolation
 // delay, which is also the `rt` sent with each input for lag compensation.
 
-import { MAX_HEALTH, REVIVE_TIME, TICK_DT } from '../../shared/constants';
+import { MAX_EXTRAPOLATE_MS, MAX_HEALTH, REVIVE_TIME, TICK_DT } from '../../shared/constants';
 import { clamp, damp, lerp, lerpAngle } from '../../shared/math';
 import type { MatchInit, NetPlayer, NetProjectile, NetVehicle, RosterEntry, SelfState, ServerMessage, Snapshot } from '../../shared/protocol';
 import { LIFE_CODES, MODE_CODES, PF } from '../../shared/protocol';
@@ -89,6 +89,7 @@ interface RemotePlayer {
   interp: PlayerInterp;
   offset: SmoothOffset;
   lastNewest: NetPlayer | undefined;
+  lastNewestTime: number;
   wasExtrapolating: boolean;
   lastSeen: number;
   deadSince: number;
@@ -100,6 +101,7 @@ interface RemoteVehicle {
   interp: VehicleInterp;
   offset: SmoothOffset;
   lastNewest: NetVehicle | undefined;
+  lastNewestTime: number;
   wasExtrapolating: boolean;
   lastSeen: number;
   /** Render pose as a VehicleState (seat positions). */
@@ -180,6 +182,7 @@ export class ClientGame implements ClientGameApi {
   private baselineSeq = -1;
   private readonly baselineRt: PredictRt = createPredictRt();
   private baselineButtons = 0;
+  private baselineSlot: -1 | 0 | 1 | 2 = -1;
   private prevButtons = 0;
   private seq = 0;
   private tickAcc = 0;
@@ -302,6 +305,16 @@ export class ClientGame implements ClientGameApi {
 
   get cameraPitch(): number {
     return this.camera.pitch;
+  }
+
+  /** Magnitude (m) of the prediction correction currently being smoothed out (diagnostics). */
+  get correction(): number {
+    return this.errOffset.length;
+  }
+
+  /** Predicted local player state (read only; diagnostics / tests). */
+  get predictedState(): Readonly<PlayerState> | null {
+    return this.predicted;
   }
 
   /** Number of inputs not yet acknowledged by the server. */
@@ -578,6 +591,7 @@ export class ClientGame implements ClientGameApi {
         this.baselineSeq = ack;
         copyPredictRt(this.baselineRt, e.rt);
         this.baselineButtons = e.input.buttons;
+        this.baselineSlot = e.input.slot;
       }
       this.spareRt.push(e.rt);
     }
@@ -618,8 +632,12 @@ export class ClientGame implements ClientGameApi {
       }
     }
 
-    // Slot sync: adopt the authoritative slot once our last request has been processed.
-    if (ack >= this.input.slotRequestSeq && self.activeSlot !== this.input.requestedSlot) {
+    // Slot sync: when the server's slot is not the one our acknowledged input asked for (it was
+    // changed by something else: drop, death, refused switch) and no newer request is in flight,
+    // follow the server instead of fighting it.
+    const ackedSlot = this.baselineSeq === ack ? this.baselineSlot : null;
+    if (ack >= this.input.slotRequestSeq && self.activeSlot !== this.input.requestedSlot
+      && (ackedSlot === null || self.activeSlot !== ackedSlot)) {
       this.input.adoptSlot(self.activeSlot);
     }
 
@@ -810,6 +828,7 @@ export class ClientGame implements ClientGameApi {
       interp: { pos: view.pos, vel: view.vel, yaw: 0, pitch: 0, extrapolating: false },
       offset: new SmoothOffset(),
       lastNewest: undefined,
+      lastNewestTime: 0,
       wasExtrapolating: false,
       lastSeen: 0,
       deadSince: -1,
@@ -828,6 +847,7 @@ export class ClientGame implements ClientGameApi {
       interp: { pos: v3(), vel: v3(), yaw: 0, pitch: 0, roll: 0, steer: 0, rpm: 0, extrapolating: false },
       offset: new SmoothOffset(),
       lastNewest: undefined,
+      lastNewestTime: 0,
       wasExtrapolating: false,
       lastSeen: 0,
       state,
@@ -846,15 +866,21 @@ export class ClientGame implements ClientGameApi {
       if (!r.ring.bracket(t, br)) continue;
       const v = r.view;
       // interpolatePlayer writes pos/vel straight into the view (shared objects).
-      const px = v.pos.x, py = v.pos.y, pz = v.pos.z;
       interpolatePlayer(br, r.interp);
       const newest = r.ring.newest();
       if (newest !== r.lastNewest) {
-        // Real data replaced an extrapolated guess: keep the rendered position, decay the gap.
-        if (r.wasExtrapolating && r.lastNewest !== undefined) {
-          r.offset.absorb(px - v.pos.x - r.offset.x, py - v.pos.y - r.offset.y, pz - v.pos.z - r.offset.z, REMOTE_SMOOTH_MAX);
+        // Real data replaced an extrapolated guess: the jump is (old guess at this render time) -
+        // (new interpolation); absorb it into an offset that decays instead of popping.
+        const old = r.lastNewest;
+        if (r.wasExtrapolating && old !== undefined) {
+          const ex = old.l === 2 ? 0 : Math.min(Math.max(0, t - r.lastNewestTime), MAX_EXTRAPOLATE_MS) / 1000;
+          r.offset.absorb(
+            old.p[0] + old.v[0] * ex - v.pos.x, old.p[1] + old.v[1] * ex - v.pos.y, old.p[2] + old.v[2] * ex - v.pos.z,
+            REMOTE_SMOOTH_MAX,
+          );
         }
         r.lastNewest = newest;
+        r.lastNewestTime = r.ring.newestTime();
       }
       r.wasExtrapolating = r.interp.extrapolating;
       r.offset.decay(dt, REMOTE_SMOOTH_DECAY);
@@ -929,13 +955,19 @@ export class ClientGame implements ClientGameApi {
         const it = interpolateVehicle(br, r.interp);
         const newest = r.ring.newest();
         if (newest !== r.lastNewest) {
-          if (r.wasExtrapolating && r.lastNewest !== undefined) {
-            r.offset.absorb(v.pos.x - it.pos.x - r.offset.x, v.pos.y - it.pos.y - r.offset.y, v.pos.z - it.pos.z - r.offset.z, REMOTE_SMOOTH_MAX);
+          const old = r.lastNewest;
+          if (r.wasExtrapolating && old !== undefined && !v.predicted) {
+            const ex = old.destroyed ? 0 : Math.min(Math.max(0, t - r.lastNewestTime), MAX_EXTRAPOLATE_MS) / 1000;
+            r.offset.absorb(
+              old.p[0] + old.v[0] * ex - it.pos.x, old.p[1] + old.v[1] * ex - it.pos.y, old.p[2] + old.v[2] * ex - it.pos.z,
+              REMOTE_SMOOTH_MAX,
+            );
           } else if (v.predicted) {
             // Hand-over from local prediction to interpolation: blend instead of popping back in time.
             r.offset.absorb(v.pos.x - it.pos.x - r.offset.x, v.pos.y - it.pos.y - r.offset.y, v.pos.z - it.pos.z - r.offset.z, 30);
           }
           r.lastNewest = newest;
+          r.lastNewestTime = r.ring.newestTime();
         }
         r.wasExtrapolating = it.extrapolating;
         r.offset.decay(dt, v.predicted ? 4 : REMOTE_SMOOTH_DECAY);

@@ -77,7 +77,7 @@ export function placeVegetation(world: GeneratedWorld, mask: OccupancyMask, rng:
     const rh = large ? rng.range(1.6, 3.4) : r * rng.range(0.55, 1.0);
     if (mask.anyCircle(x, z, r + 0.8, ROCK_BLOCK)) continue;
     const range = hf.rangeIn(x - r, z - r, x + r, z + r);
-    world.rocks.push({ x, y: r3(range.min - rh * 0.12), z, r: r3(r), h: r3(rh), rot: r3(rng.range(0, Math.PI * 2)), seed: rng.int(1, 0x7ffffffe) });
+    world.rocks.push({ x, y: r3(range.min - 0.05), z, r: r3(r), h: r3(rh), rot: r3(rng.range(0, Math.PI * 2)), seed: rng.int(1, 0x7ffffffe) });
     mask.markCircle(x, z, r + 0.5, M_ROCK);
   }
 

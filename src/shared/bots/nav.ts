@@ -39,7 +39,7 @@ export const DIR_DX: readonly number[] = [1, 1, 0, -1, -1, -1, 0, 1];
 export const DIR_DZ: readonly number[] = [0, 1, 1, 1, 0, -1, -1, -1];
 export const DIR_E = 0, DIR_S = 2, DIR_W = 4, DIR_N = 6;
 
-const BLOCK_INFLATE = 0.15;
+const BLOCK_INFLATE = 0.05;
 const NEAR_INFLATE = 0.5;
 /** Vertical span (above the floor) that must be free for a standing character to pass. */
 const CLEAR_LO = STEP_HEIGHT;

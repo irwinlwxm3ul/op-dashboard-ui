@@ -88,6 +88,8 @@ const ENGINE_OFF_BRAKE = 2.5;
 const AIR_YAW_DAMP = 0.4;
 /** Orientation smoothing rates (1/s) on the ground / in the air. */
 const ORIENT_RATE = 10;
+/** Ground attitude rate per (speed / wheelBase): pitch changes as fast as the axles roll over. */
+const ORIENT_FOLLOW = 1.5;
 const AIR_PITCH_RATE = 1.2;
 const AIR_ROLL_RATE = 1.0;
 /** Fraction of the flight path angle the nose follows in the air. */
@@ -573,7 +575,7 @@ function substep(
     const bicycle = (absF / def.wheelBase) * Math.tan(steerAngle);
     const gripYaw = absF > 0.5 ? (def.grip * G * CORNER_GRIP_USE) / absF : Infinity;
     let yawMax = bicycle < gripYaw ? bicycle : gripYaw;
-    let track = hd.yawRate;
+    let track = hd.yawResponse;
     if (handbrake && absF > 2) {
       // Locked rear wheels stop resisting rotation: the front tyres swing the tail out quickly,
       // well beyond what grip alone would allow.
@@ -653,7 +655,9 @@ function substep(
 
   // ---- Orientation (visual weight transfer + ground following) ----
   if (grounded) {
-    const k = 1 - Math.exp(-ORIENT_RATE * h);
+    // The body follows the wheels at least as fast as the axles pass over a slope change.
+    const followRate = (Math.abs(vf) / def.wheelBase) * ORIENT_FOLLOW;
+    const k = 1 - Math.exp(-(followRate > ORIENT_RATE ? followRate : ORIENT_RATE) * h);
     const tp = gp + wPitch;
     let tr: number;
     if (def.isBike) tr = clamp(BIKE_LEAN_MUL * Math.atan(aLat / G), -hd.maxLean, hd.maxLean);
@@ -730,6 +734,11 @@ function yawInertia(def: VehicleDef): number {
   return ((L * L + W * W) / 12) * INERTIA_SCALE;
 }
 
+/** Probe distance in front of a touched box face when testing for a climbable step (m). */
+const STEP_PROBE = 0.08;
+/** Staircase ramps can be climbed up to this many step heights above the current support. */
+const STEP_CHAIN = 2;
+
 /** Tree trunks collide up to this fraction of the tree height (matches the physics module). */
 const TREE_TRUNK_FRAC = 0.6;
 
@@ -754,15 +763,22 @@ function collideWorld(v: VehicleState, def: VehicleDef, hd: VehicleHandling, wor
       const bottom = v.pos.y + yMid - upY * (he.y + cl);
       const top = v.pos.y + yMid + upY * he.y;
       // Ledges are climbable relative to the surface already under this circle (the body lags
-      // behind on the suspension when taking a stepped ramp at speed). A box can only get under
-      // the circle centre by passing this same ledge test first, so walls stay solid.
-      const under = groundHeight(world, v.pos.x + ox, v.pos.z + oz, v.pos.y + yMid);
-      const low = (under > bottom ? under : bottom) + hd.stepUp;
+      // behind on the suspension when taking a stepped ramp at speed). Same reach as the wheel
+      // ground samples (chassis bottom + stepUp); a box can only get under the circle centre by
+      // passing this ledge test first, so walls stay solid.
+      const under = groundHeight(world, v.pos.x + ox, v.pos.z + oz, bottom + upY * cl + hd.stepUp);
+      const base = under > bottom ? under : bottom;
+      const low = base + hd.stepUp;
+      const chainTop = base + hd.stepUp * STEP_CHAIN;
       for (let i = 0; i < boxes.length; i++) {
         const b = boxes[i];
         if (b.max.y <= low || b.min.y >= top) continue;
-        const d = penetrateBox(b, v.pos.x + ox, v.pos.z + oz, r);
-        if (d > 0) { resolveStatic(v, ox, oz, r, d, I, bottom + he.y); any = true; }
+        const cx = v.pos.x + ox, cz = v.pos.z + oz;
+        const d = penetrateBox(b, cx, cz, r);
+        if (d <= 0) continue;
+        if (b.max.y <= chainTop && isStepEdge(world, b, cx, cz, r - d, hd.stepUp)) continue;
+        resolveStatic(v, ox, oz, r, d, I, bottom + he.y);
+        any = true;
       }
       for (let i = 0; i < trees.length; i++) {
         const t = trees[i];
@@ -779,6 +795,22 @@ function collideWorld(v: VehicleState, def: VehicleDef, hd: VehicleHandling, wor
     }
     if (!any) break;
   }
+}
+
+/**
+ * Whether the face of box `b` touched by the circle is a climbable step: the surface just in front
+ * of the touched face (on the vehicle's side) is at most `stepUp` below the box top. This lets
+ * vehicles take staircase-built ramps whose treads are shorter than the collision circles, while
+ * a box standing on the ground (wall, crate, fence) stays solid. Uses the normal in pnx/pnz;
+ * `dist` is the signed distance from the circle centre to the face (negative when inside).
+ */
+function isStepEdge(world: World, b: WorldBox, cx: number, cz: number, dist: number, stepUp: number): boolean {
+  const px = cx - pnx * (dist - STEP_PROBE);
+  const pz = cz - pnz * (dist - STEP_PROBE);
+  const nx = pnx, nz = pnz; // groundHeight does not touch them, but keep the contact normal explicit
+  const front = groundHeight(world, px, pz, b.max.y - 1e-3);
+  pnx = nx; pnz = nz;
+  return b.max.y - front <= stepUp;
 }
 
 /** Uses the normal in pnx/pnz. (ox, oz) = circle centre offset from pos. */

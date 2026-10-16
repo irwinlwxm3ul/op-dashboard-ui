@@ -5,7 +5,7 @@ import {
   AUTO_CHUTE_HEIGHT, DOWNED_BLEED_PER_SEC, FALL_DAMAGE_PER_MS, FALL_DAMAGE_SPEED, REVIVE_RANGE, REVIVE_TIME,
 } from '../constants';
 import { CONSUMABLES, boostSpeedMul, tickBoost } from '../items';
-import { stepCharacter, stepDrop } from '../physics';
+import { eyePosition, lineOfSight, stepCharacter, stepDrop } from '../physics';
 import type { MoveEvents } from '../physics';
 import type { PlayerState } from '../types';
 import { BTN, STANCE_FROM_CODE } from '../types';
@@ -22,6 +22,8 @@ import {
 import { activeDef, cancelUse, updateWeapons } from './weapons';
 
 const fallInfo = damageInfo(null, 'fall');
+const eyeA = { x: 0, y: 0, z: 0 };
+const eyeB = { x: 0, y: 0, z: 0 };
 
 /** Life may change inside calls TypeScript cannot see through (damage, actions). */
 function isDead(p: PlayerState): boolean {
@@ -81,6 +83,12 @@ export function updatePlayer(sim: GameSim, rt: PlayerRt, dt: number): void {
   // Lean only on foot, standing or crouched.
   const leanR = (held & BTN.LEAN_R) !== 0, leanL = (held & BTN.LEAN_L) !== 0;
   p.lean = p.life === 'alive' && p.mode === 'ground' && p.stance !== 'prone' && leanR !== leanL ? (leanR ? 1 : -1) : 0;
+  // No leaning through walls: the leaned eye must be visible from the upright eye.
+  if (p.lean !== 0) {
+    eyePosition(p, 0, p.yaw, eyeA);
+    eyePosition(p, p.lean, p.yaw, eyeB);
+    if (!lineOfSight(sim.world, eyeA, eyeB)) p.lean = 0;
+  }
 
   const w = activeDef(p);
   rt.sprinting = false;

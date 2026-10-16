@@ -9,7 +9,7 @@ import { angleDiff, clamp, wrapAngle } from '../math';
 import type { PlayerState, RockDef, TreeDef, WeaponDef, WorldBox } from '../types';
 import { BTN } from '../types';
 import {
-  WEAPON_RANGE, bestSlotForRange, bestSlotOverall, holdOver, rangeSuitability, slotRounds, timeOfFlight,
+  WEAPON_RANGE, bestSlotForRange, bestSlotOverall, holdOver, rangeSuitability, slotRounds, timeOfFlight, weaponAt,
 } from './aim';
 import { clearDest, setDest } from './movement';
 import { NF_BLOCKED } from './nav';
@@ -34,8 +34,7 @@ const treeScratch: TreeDef[] = [];
 const rockScratch: RockDef[] = [];
 
 export function activeWeapon(p: PlayerState): WeaponDef | null {
-  if (p.activeSlot < 0) return null;
-  const wi = p.weapons[p.activeSlot];
+  const wi = weaponAt(p, p.activeSlot);
   return wi ? WEAPONS[wi.id] : null;
 }
 
@@ -118,13 +117,13 @@ export function manageWeapon(sys: BotSystem, b: BotState, p: PlayerState, inComb
   const t = sys.now;
   const cur = p.activeSlot;
   let want = b.wantSlot;
-  if (want >= 0 && !p.weapons[want]) want = -1;
+  if (want >= 0 && !weaponAt(p, want)) want = -1;
   if (inCombat) {
     const best = bestSlotForRange(p, dist);
     if (best >= 0 && best !== cur && t - b.lastSwitch > 2.5) {
-      const cw = cur >= 0 ? p.weapons[cur] : null;
+      const cw = weaponAt(p, cur);
       const curOk = cw && slotRounds(p, cur) > 0;
-      const bw = p.weapons[best];
+      const bw = weaponAt(p, best);
       if (!curOk || (bw && cw && rangeSuitability(bw.id, dist) > rangeSuitability(cw.id, dist) * 1.35)) want = best;
     } else if (want < 0) {
       want = best;
@@ -141,8 +140,8 @@ export function manageWeapon(sys: BotSystem, b: BotState, p: PlayerState, inComb
 
 /** Should the bot press reload now? */
 export function wantReload(sys: BotSystem, b: BotState, p: PlayerState, quiet: boolean): boolean {
-  if (p.activeSlot < 0 || p.reloadTimer > 0 || p.drawTimer > 0 || p.use) return false;
-  const wi = p.weapons[p.activeSlot];
+  if (p.reloadTimer > 0 || p.drawTimer > 0 || p.use) return false;
+  const wi = weaponAt(p, p.activeSlot);
   if (!wi) return false;
   const w = WEAPONS[wi.id];
   if (wi.mag >= w.magSize) return false;
@@ -351,7 +350,7 @@ export function combatAct(sys: BotSystem, b: BotState, p: PlayerState): number {
   }
 
   // Fire discipline.
-  const wi = p.weapons[p.activeSlot]!;
+  const wi = weaponAt(p, p.activeSlot)!;
   const ready = c.visible && t >= c.ready && p.drawTimer <= 0 && p.reloadTimer <= 0 && !p.use && wi.mag > 0;
   const tol = Math.max(w.fireMode === 'bolt' ? 0.45 * DEG : 0.9 * DEG, Math.atan2(0.42, dist)) * (w.fireMode === 'auto' && dist < 18 ? 1.8 : 1);
   const onTarget = Math.abs(angleDiff(b.aimYaw, wantYaw)) < tol && Math.abs(b.aimPitch - wantPitch) < tol * 1.3;

@@ -48,6 +48,8 @@ export interface GunModel {
   flashScale: number;
   /** Magnified optic: the scope overlay replaces the viewmodel at full ADS. */
   scoped: boolean;
+  /** Left hand shape at rest: wrapped around a grip, or palm-up under a handguard. */
+  supportStyle: 'grip' | 'palm';
 }
 
 function base(id: WeaponId, root: THREE.Group): GunModel {
@@ -72,6 +74,7 @@ function base(id: WeaponId, root: THREE.Group): GunModel {
     casing: 'rifle',
     flashScale: 1,
     scoped: false,
+    supportStyle: 'palm',
   };
 }
 
@@ -131,6 +134,7 @@ function pistol(mats: Record<MatKey, THREE.Material>): GunModel {
   m.hipRot.set(0.02, 0.06, 0);
   m.casing = 'pistol';
   m.flashScale = 0.7;
+  m.supportStyle = 'grip';
   return m;
 }
 
@@ -171,7 +175,7 @@ function smg(mats: Record<MatKey, THREE.Material>): GunModel {
   m.muzzle.set(0, 0.04, -0.36);
   m.eject.set(0.024, 0.048, -0.05);
   m.support.set(0, -0.045, -0.205);
-  m.supportRot.set(0.1, 0, 0);
+  m.supportRot.set(-0.08, 0, 0);
   m.chargeAnchor.set(-0.035, 0.055, -0.19);
   m.magBottom.set(0, -0.14, -0.078);
   m.magDrop.set(0, -0.998, -0.06).normalize();
@@ -182,6 +186,7 @@ function smg(mats: Record<MatKey, THREE.Material>): GunModel {
   m.hip.set(0.115, -0.135, -0.27);
   m.casing = 'pistol';
   m.flashScale = 0.8;
+  m.supportStyle = 'grip';
   return m;
 }
 
@@ -234,7 +239,7 @@ function ar(mats: Record<MatKey, THREE.Material>): GunModel {
   const mag = new PartBuilder(mats);
   mag.box('darkMetal', 0.024, 0.075, 0.05, 0, -0.06, -0.072);
   mag.box('darkMetal', 0.024, 0.075, 0.048, 0, -0.125, -0.082, 0.28);
-  mag.box('polymer', 0.028, 0.012, 0.054, 0, -0.162, -0.094, 0.28);
+  mag.box('polymer', 0.028, 0.012, 0.054, 0, -0.172, -0.095, 0.28);
   m.mag = addGroup(root, mag, 'ar-mag');
 
   m.muzzle.set(0, 0.045, -0.6);
@@ -242,7 +247,7 @@ function ar(mats: Record<MatKey, THREE.Material>): GunModel {
   m.support.set(0, 0.0, -0.3);
   m.supportRot.set(0, 0, 0);
   m.chargeAnchor.set(-0.012, 0.072, 0.07);
-  m.magBottom.set(0, -0.165, -0.094);
+  m.magBottom.set(0, -0.176, -0.096);
   m.magDrop.set(0, -1, 0.04).normalize();
   m.gripRot.set(-0.3, 0, 0);
   m.sightY = 0.1;

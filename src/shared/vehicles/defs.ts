@@ -158,10 +158,10 @@ export interface VehicleHandling {
   /** Rate (1/s) at which lateral velocity is removed by the tyres (capped by grip * g). */
   lateralRate: number;
   /** Rate (1/s) at which the yaw rate follows the steering target while gripping. */
-  yawRate: number;
+  yawResponse: number;
   /** Fraction of grip left while the handbrake locks the rear wheels. */
   handbrakeGrip: number;
-  /** Yaw target multiplier with the handbrake (rear steps out). */
+  /** Handbrake: multiplier on the grip-limited yaw rate (the rear steps out). */
   handbrakeYaw: number;
   /** Longitudinal deceleration from the locked rear wheels (m/s^2). */
   handbrakeDecel: number;
@@ -187,7 +187,7 @@ export const HANDLING: Record<VehicleType, VehicleHandling> = {
     drag: 0.0021,
     engineBrake: 1.6,
     lateralRate: 11,
-    yawRate: 10,
+    yawResponse: 10,
     handbrakeGrip: 0.3,
     handbrakeYaw: 2.1,
     handbrakeDecel: 5,
@@ -207,7 +207,7 @@ export const HANDLING: Record<VehicleType, VehicleHandling> = {
     drag: 0.003,
     engineBrake: 1.8,
     lateralRate: 9,
-    yawRate: 8,
+    yawResponse: 8,
     handbrakeGrip: 0.38,
     handbrakeYaw: 1.9,
     handbrakeDecel: 5,
@@ -227,7 +227,7 @@ export const HANDLING: Record<VehicleType, VehicleHandling> = {
     drag: 0.0016,
     engineBrake: 1.4,
     lateralRate: 12,
-    yawRate: 12,
+    yawResponse: 12,
     handbrakeGrip: 0.42,
     handbrakeYaw: 1.8,
     handbrakeDecel: 4.5,

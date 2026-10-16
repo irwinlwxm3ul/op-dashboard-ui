@@ -3,7 +3,7 @@
 // preferred engagement ranges and a simple weapon rating.
 
 import { WEAPONS, WEAPON_IDS, simulateTrajectory, sightDrop } from '../items';
-import type { PlayerState, WeaponDef, WeaponId } from '../types';
+import type { PlayerState, WeaponDef, WeaponId, WeaponInstance } from '../types';
 
 const TABLE_STEP = 10;
 const TABLE_MAX = 1200;
@@ -83,9 +83,14 @@ export function wantedReserve(w: WeaponDef): number {
   return w.fireMode === 'bolt' ? 20 : w.fireMode === 'pump' ? 20 : Math.max(30, w.magSize * 3);
 }
 
+/** Weapon in a slot (-1 / out of range = none). */
+export function weaponAt(p: PlayerState, slot: number): WeaponInstance | null {
+  return slot === 0 || slot === 1 || slot === 2 ? p.weapons[slot] : null;
+}
+
 /** Total rounds available for the weapon in a slot (magazine + reserve). */
 export function slotRounds(p: PlayerState, slot: number): number {
-  const wi = p.weapons[slot];
+  const wi = weaponAt(p, slot);
   if (!wi) return 0;
   return wi.mag + (p.ammo[WEAPONS[wi.id].ammo] || 0);
 }
@@ -110,7 +115,7 @@ export function bestSlotForRange(p: PlayerState, d: number): -1 | 0 | 1 | 2 {
   let best: -1 | 0 | 1 | 2 = -1;
   let bestS = -1;
   for (let s = 0; s < 3; s++) {
-    const wi = p.weapons[s];
+    const wi = weaponAt(p, s);
     if (!wi || slotRounds(p, s) <= 0) continue;
     const sc = rangeSuitability(wi.id, d) * (wi.mag > 0 ? 1 : 0.7);
     if (sc > bestS) {
@@ -126,7 +131,7 @@ export function bestSlotOverall(p: PlayerState): -1 | 0 | 1 | 2 {
   let best: -1 | 0 | 1 | 2 = -1;
   let bestS = -1;
   for (let s = 0; s < 3; s++) {
-    const wi = p.weapons[s];
+    const wi = weaponAt(p, s);
     if (!wi || slotRounds(p, s) <= 0) continue;
     const sc = WEAPON_TIER[wi.id];
     if (sc > bestS) {

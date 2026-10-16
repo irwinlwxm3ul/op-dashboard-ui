@@ -444,6 +444,9 @@ export function generateBuilding(plan: BuildingPlan, id: number, hf: Heightfield
 
   // ---- Interior partitions (BSP per floor) ------------------------------------------------------
   const rooms: RoomInfo[] = [];
+  /** Ground-floor partition walls and doorway clearances (local), kept free of interior clutter. */
+  const groundWalls: Rect[] = [];
+  const groundDoorways: Rect[] = [];
   const exteriorLines = (f: number): OpeningLine[] => {
     const lines: OpeningLine[] = [];
     const cs = [-hd + T / 2, hd - T / 2, -hw + T / 2, hw - T / 2];
@@ -493,6 +496,12 @@ export function generateBuilding(plan: BuildingPlan, id: number, hf: Heightfield
           }
           if (Number.isNaN(door)) continue;
           const y0 = floorTop(f), y1 = y0 + storey;
+          if (f === 0) {
+            groundWalls.push(wall);
+            groundDoorways.push(ax === 'x'
+              ? { x0: c - 1.4, z0: door - 0.3, x1: c + 1.4, z1: door + INNER_DOOR_W + 0.3 }
+              : { x0: door - 0.3, z0: c - 1.4, x1: door + INNER_DOOR_W + 0.3, z1: c + 1.4 });
+          }
           if (ax === 'x') {
             box(c - PART_T / 2, y0, r.z0, c + PART_T / 2, y1, door, 'wall', pal.wallMat, partitionColor);
             box(c - PART_T / 2, y0, door + INNER_DOOR_W, c + PART_T / 2, y1, r.z1, 'wall', pal.wallMat, partitionColor);
@@ -622,7 +631,7 @@ export function generateBuilding(plan: BuildingPlan, id: number, hf: Heightfield
   // ---- Interior clutter (crates / hay) for open-plan buildings -----------------------------------
   if (plan.style === 'warehouse' || plan.style === 'barn') {
     const placed: Rect[] = [];
-    const keepOut: Rect[] = [];
+    const keepOut: Rect[] = groundDoorways.slice();
     for (const door of plan.doors) {
       const l = doorLocal(plan, door);
       const hwid = door.width / 2 + 1.0;
@@ -640,6 +649,7 @@ export function generateBuilding(plan: BuildingPlan, id: number, hf: Heightfield
       // Keep crates off walls slightly or flush against them, never leaving a sub-body-width gap.
       const gx = Math.min(rr.x0 - ix0, ix1 - rr.x1), gz = Math.min(rr.z0 - iz0, iz1 - rr.z1);
       if ((gx > 0.15 && gx < 0.9) || (gz > 0.15 && gz < 0.9)) continue;
+      if (groundWalls.some((wr) => intersects(wr, rr, 0.9))) continue;
       placed.push(rr);
       c++;
       const y0 = baseY;
