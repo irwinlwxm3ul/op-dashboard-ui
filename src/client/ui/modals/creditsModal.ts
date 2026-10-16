@@ -61,7 +61,7 @@ function link(parent: HTMLElement, cls: string, text: string, url: string): HTML
 
 export class CreditsModal extends Modal {
   constructor(mgr: ModalManager) {
-    super(mgr, 'menu.credits', 'dz-credits-modal');
+    super(mgr, 'ui.credits.title', 'dz-credits-modal');
     tx(h('p', 'dz-lead', this.body), 'ui.credits.intro');
     this.section('ui.credits.models', modelCredits(), 'ui.credits.modifiedNote');
     this.section('ui.credits.sounds', SOUND_CREDITS);

@@ -151,6 +151,8 @@ export interface PlayersUpdateContext {
   time: number;
   /** Camera view frustum for this frame (body culling). */
   frustum: THREE.Frustum;
+  /** Extra rider lift (m, vehicle up axis) for seats of real vehicle models. */
+  seatLift: (vehicleId: EntityId, seat: number) => number;
 }
 
 export class PlayersRenderer {
@@ -344,6 +346,8 @@ export class PlayersRenderer {
       e.rootPos.set(_seat.x, _seat.y, _seat.z);
       _e.set(veh.pitch, veh.yaw, veh.roll, 'YXZ');
       e.rootQuat.setFromEuler(_e);
+      const lift = ctx.seatLift(veh.id, v.seat);
+      if (lift > 0) e.rootPos.addScaledVector(_v.set(0, 1, 0).applyQuaternion(e.rootQuat), lift);
       e.yaw = veh.yaw;
       aimYawRel = wrapAngle(v.yaw - veh.yaw);
       seat = e.seat;

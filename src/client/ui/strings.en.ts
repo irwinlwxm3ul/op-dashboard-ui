@@ -63,6 +63,7 @@ export const uiStrings = {
   'ui.key.mouseLeftShort': 'LMB',
 
   // Credits
+  'ui.credits.title': 'Credits',
   'ui.credits.intro': 'DROPZONE is built with these free assets. Thank you to their creators!',
   'ui.credits.models': '3D models',
   'ui.credits.sounds': 'Sounds',

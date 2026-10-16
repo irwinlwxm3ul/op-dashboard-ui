@@ -1,12 +1,13 @@
 // Bridge to the curated model library (src/client/assets): loads the real weapon and item meshes
 // and registers them with the procedural model builders, so every geometry built afterwards (near
-// soldiers' guns, character gear, ground loot) uses them. Never throws; missing files keep the
+// soldiers' guns, character gear, ground loot) uses them; loads the real vehicle templates. Never throws; missing files keep the
 // procedural guns.
 
 import * as THREE from 'three';
-import { ITEM_MODELS, WEAPON_MODELS, loadMeshParts } from '../../assets';
-import type { WeaponId } from '../../../shared/types';
+import { ITEM_MODELS, VEHICLE_MODELS, WEAPON_MODELS, loadMeshParts, loadModel } from '../../assets';
+import type { VehicleType, WeaponId } from '../../../shared/types';
 import { type ItemAssetId, setItemAsset } from './lootModels';
+import type { VehicleTemplates } from './vehicles';
 import { WEAPON_IDS, setWeaponAsset } from './weaponModels';
 
 function tintOf(material: THREE.Material): number {
@@ -46,4 +47,17 @@ export async function loadItemAssets(): Promise<ItemAssetId[]> {
     loaded.push(id);
   });
   return loaded;
+}
+
+/** Load the real vehicle models (types without a model, e.g. the buggy, stay procedural). */
+export async function loadVehicleTemplates(): Promise<VehicleTemplates> {
+  const types = Object.keys(VEHICLE_MODELS) as VehicleType[];
+  const gltfs = await Promise.all(types.map((t) => loadModel(VEHICLE_MODELS[t]!.file).catch(() => null)));
+  const out: VehicleTemplates = { models: {} };
+  types.forEach((t, i) => {
+    const g = gltfs[i];
+    const model = VEHICLE_MODELS[t];
+    if (g && model) out.models[t] = { model, template: g.scene };
+  });
+  return out;
 }

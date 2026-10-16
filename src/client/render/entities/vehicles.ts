@@ -1,8 +1,11 @@
 // Vehicles: procedural buggy (open frame, roll cage, big wheels), UAZ-like 4x4 (boxy body, dark
 // glass) and motorbike, all drawn by ONE BatchedMesh (paint shells tinted per vehicle, unpainted
 // chassis, wheels, bike fork). Dimensions come from the shared vehicle definitions so the visuals
-// match the physics. Wheels spin with speed, front wheels / fork steer, wrecks turn dark, and damaged
-// vehicles smoke (< 40 % hp) or burn.
+// match the physics. Once the curated real models (src/client/assets VEHICLE_MODELS: UAZ, bike) are
+// loaded, vehicles of those types within ~300 m use pooled per-vehicle clones instead (wheel nodes
+// spin / steer, the bike's fork steers about its raked axis, wrecks switch to charred materials);
+// farther ones and the buggy stay batched. Wheels spin with speed, front wheels / fork steer, wrecks
+// turn dark, and damaged vehicles smoke (< 40 % hp) or burn.
 
 import * as THREE from 'three';
 import { HANDLING, SEAT_HIP_HEIGHT, VEHICLES, WHEELS } from '../../../shared/vehicles';

@@ -1287,6 +1287,40 @@ describe('netcode hardening', () => {
     expect(h.p(b).life).toBe('alive');
   });
 
+  it('a ballistic bullet or a frag scoring the match-winning kill ends the match cleanly', () => {
+    for (const how of ['sniper', 'frag'] as const) {
+      const h = new Harness({ maxPlayers: 2, teamSize: 1 });
+      const a = h.add('Killer');
+      const b = h.add('Last');
+      const o = findOpen(h.world, 26, 4, 4);
+      startOnGround(h, { [a]: [o.x, o.z, Math.PI], [b]: [o.x, o.z - (how === 'frag' ? 6 : 20), 0] });
+      h.p(b).health = 1;
+      if (how === 'sniper') {
+        h.arm(a, 'sniper');
+        const aim = h.aimAt(a, h.torso(b));
+        h.setIdle(a, { ...aim, buttons: BTN.ADS });
+        h.step(15);
+        // At 20 m the bullet hits during the tick it was fired: the kill ends the match (and clears
+        // the projectile list) while updateProjectiles is iterating it.
+        h.step(1, () => ({ [a]: { ...aim, buttons: BTN.ADS | BTN.FIRE } }));
+        expect(h.of('shot')[0]?.projectiles?.length).toBe(1);
+      } else {
+        h.p(a).items.frag = 2;
+        h.step(1, () => ({ [a]: { pitch: 0.2, actions: [{ a: 'throw' }] } }));
+        h.step(35);
+        h.step(1, () => ({ [a]: { pitch: 0.5, yaw: 1, actions: [{ a: 'throw' }] } }));
+        expect(h.sim.projectiles.size).toBe(2);
+      }
+      h.stepUntil(() => h.sim.isOver(), 300);
+      expect(h.sim.isOver()).toBe(true);
+      expect(h.p(b).life).toBe('dead');
+      expect(h.sim.projectiles.size).toBe(0);
+      expect(h.sim.projList.length).toBe(0);
+      h.step(30);
+      expect(h.sim.results().winnerTeam).toBe(h.p(a).team);
+    }
+  });
+
   it('after the match ended nothing changes life state and controls freeze', () => {
     const h = new Harness({ maxPlayers: 4, teamSize: 2 });
     const a0 = h.add('A0', 0), a1 = h.add('A1', 0);

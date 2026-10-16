@@ -41,6 +41,7 @@ function addProjectile(sim: GameSim, pr: Projectile): boolean {
 
 function removeProjectileAt(sim: GameSim, idx: number): void {
   const pr = sim.projList[idx];
+  if (!pr) return;
   sim.projList.splice(idx, 1);
   sim.projectiles.delete(pr.id);
 }
@@ -224,7 +225,9 @@ export function updateProjectiles(sim: GameSim, dt: number = TICK_DT): void {
   for (let i = 0; i < list.length;) {
     const pr = list[i];
     const alive = pr.kind === 'bullet' ? updateBullet(sim, pr, dt) : updateFrag(sim, pr, dt);
-    // Updates never add or remove other projectiles (explosions do not spawn any).
+    // A hit can end the match, which clears every projectile (GameSim.endMatch): stop then.
+    // Otherwise updates never add or remove other projectiles (explosions spawn none).
+    if (sim.phase === 'ended' || list[i] !== pr) break;
     if (alive) i++;
     else removeProjectileAt(sim, i);
   }

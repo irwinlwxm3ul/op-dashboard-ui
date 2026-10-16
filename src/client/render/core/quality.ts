@@ -13,6 +13,12 @@ export interface VegetationProfile {
   far: number;
   /** 0..1 fraction of small far-band objects (bushes, small rocks) that are kept. */
   density: number;
+  /** Model variants used per tree kind / for rocks / for bushes (each costs draw calls per band). */
+  treeVariants: number;
+  rockVariants: number;
+  bushVariants: number;
+  /** Bushes cast sun shadows (near band). */
+  bushShadows: boolean;
 }
 
 export interface GrassProfile {
@@ -44,6 +50,8 @@ export interface QualityProfile {
   readonly grass: Readonly<GrassProfile>;
   /** Buildings closer than this use the full merged mesh, beyond it the exterior shell. */
   readonly buildingDetailDistance: number;
+  /** Props (crates, barriers, fences, containers) closer than this use their 3D models, beyond it boxes. */
+  readonly propModelDistance: number;
 }
 
 export const QUALITY_PROFILES: Readonly<Record<Quality, QualityProfile>> = {
@@ -58,9 +66,10 @@ export const QUALITY_PROFILES: Readonly<Record<Quality, QualityProfile>> = {
     shadowExtent: 0,
     anisotropy: 1,
     terrainLod: [150, 330],
-    vegetation: { near: 95, mid: 320, far: 700, density: 0.45 },
+    vegetation: { near: 95, mid: 320, far: 700, density: 0.45, treeVariants: 1, rockVariants: 2, bushVariants: 1, bushShadows: false },
     grass: { enabled: false, radius: 0, density: 0 },
     buildingDetailDistance: 150,
+    propModelDistance: 90,
   },
   medium: {
     name: 'medium',
@@ -73,9 +82,10 @@ export const QUALITY_PROFILES: Readonly<Record<Quality, QualityProfile>> = {
     shadowExtent: 100,
     anisotropy: 4,
     terrainLod: [200, 430],
-    vegetation: { near: 150, mid: 450, far: 900, density: 0.8 },
+    vegetation: { near: 150, mid: 450, far: 900, density: 0.8, treeVariants: 2, rockVariants: 2, bushVariants: 2, bushShadows: false },
     grass: { enabled: false, radius: 0, density: 0 },
     buildingDetailDistance: 220,
+    propModelDistance: 140,
   },
   high: {
     name: 'high',
@@ -88,9 +98,10 @@ export const QUALITY_PROFILES: Readonly<Record<Quality, QualityProfile>> = {
     shadowExtent: 140,
     anisotropy: 8,
     terrainLod: [260, 540],
-    vegetation: { near: 175, mid: 500, far: 950, density: 1 },
+    vegetation: { near: 175, mid: 500, far: 950, density: 1, treeVariants: 3, rockVariants: 4, bushVariants: 3, bushShadows: true },
     grass: { enabled: true, radius: 45, density: 1.8 },
     buildingDetailDistance: 270,
+    propModelDistance: 190,
   },
   ultra: {
     name: 'ultra',
@@ -103,9 +114,10 @@ export const QUALITY_PROFILES: Readonly<Record<Quality, QualityProfile>> = {
     shadowExtent: 190,
     anisotropy: 16,
     terrainLod: [340, 680],
-    vegetation: { near: 210, mid: 580, far: 1000, density: 1 },
+    vegetation: { near: 210, mid: 580, far: 1000, density: 1, treeVariants: 5, rockVariants: 6, bushVariants: 3, bushShadows: true },
     grass: { enabled: true, radius: 55, density: 2.6 },
     buildingDetailDistance: 340,
+    propModelDistance: 250,
   },
 };
 

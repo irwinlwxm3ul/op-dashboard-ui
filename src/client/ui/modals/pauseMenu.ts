@@ -18,7 +18,7 @@ export class PauseMenu extends Modal {
     resume.dataset.autofocus = '';
     button({ cls: 'dz-btn-xl', label: 'menu.settings', icon: ICONS.gear, parent: list, onClick: () => ctx.openSettings() });
     button({ cls: 'dz-btn-xl', label: 'menu.controls', icon: ICONS.keyboard, parent: list, onClick: () => ctx.openControls() });
-    button({ cls: 'dz-btn-xl', label: 'menu.credits', icon: ICONS.info, parent: list, onClick: () => ctx.openCredits() });
+    button({ cls: 'dz-btn-xl', label: 'ui.credits.title', icon: ICONS.info, parent: list, onClick: () => ctx.openCredits() });
     this.leaveBtn = button({ cls: 'dz-btn-xl dz-btn-danger', icon: ICONS.close, parent: list, onClick: () => this.leave() });
     this.leaveBtn.dataset.testid = 'pause-leave';
     this.leaveLabel = h('span', 'dz-btn-label', this.leaveBtn);

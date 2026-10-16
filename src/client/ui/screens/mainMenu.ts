@@ -72,7 +72,7 @@ export class MainMenu implements ScreenView {
     const row = h('div', 'dz-main-nav-row', this.nav);
     button({ label: 'menu.settings', icon: ICONS.gear, parent: row, onClick: () => ctx.openSettings() }).dataset.testid = 'main-settings';
     button({ label: 'menu.controls', icon: ICONS.keyboard, parent: row, onClick: () => ctx.openControls() }).dataset.testid = 'main-controls';
-    button({ label: 'menu.credits', icon: ICONS.info, parent: row, onClick: () => ctx.openCredits() }).dataset.testid = 'main-credits';
+    button({ label: 'ui.credits.title', icon: ICONS.info, parent: row, onClick: () => ctx.openCredits() }).dataset.testid = 'main-credits';
     this.nav.addEventListener('keydown', (ev) => this.onNavKey(ev));
 
     const side = h('aside', 'dz-main-side dz-panel', layout);

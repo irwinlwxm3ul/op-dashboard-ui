@@ -20,7 +20,7 @@ import { PlayersRenderer, type PlayersUpdateContext } from './players';
 import { VehicleRenderer } from './vehicles';
 import type { MidBodyRenderer, NearBodyProvider } from './bodies';
 import { CHARACTER_VARIANT_IDS, loadCharacter } from '../../assets';
-import { loadItemAssets, loadWeaponAssets } from './assetBridge';
+import { loadItemAssets, loadVehicleTemplates, loadWeaponAssets } from './assetBridge';
 import { CharacterLibrary, GltfNearProvider } from './gltfBodies';
 
 export type { BodyFrame, MidBodyRenderer, NearBody, NearBodyProvider } from './bodies';
@@ -89,6 +89,7 @@ class EntityRendererImpl implements EntityRendererInternals {
       shadows: this.quality !== 'low',
       time: 0,
       frustum: new THREE.Frustum(),
+      seatLift: (id, seat) => this.vehicles.riderLift(id, seat),
     };
     this.unsubscribe.push(
       events.on('hit', (ev) => {
@@ -108,16 +109,18 @@ class EntityRendererImpl implements EntityRendererInternals {
   }
 
   /**
-   * Asynchronously swap in the curated models: real weapon and item meshes (third-person guns,
-   * ground loot, worn gear), then the skinned glTF characters for the near LOD. The procedural soldier and guns stay
+   * Asynchronously swap in the curated models: real weapon, item and vehicle models (third-person
+   * guns, ground loot, worn gear, UAZ / bike near the camera), then the skinned glTF characters for
+   * the near LOD. The procedural soldier and guns stay
    * in use until then, and permanently if loading fails.
    */
   private async loadAssets(): Promise<void> {
     try {
       // Start the character downloads right away; they resolve from the loader cache later.
       for (const id of CHARACTER_VARIANT_IDS) void loadCharacter(id);
-      const [weapons, items] = await Promise.all([loadWeaponAssets(), loadItemAssets()]);
+      const [weapons, items, vehicles] = await Promise.all([loadWeaponAssets(), loadItemAssets(), loadVehicleTemplates()]);
       if (this.disposed) return;
+      this.vehicles.setModels(vehicles);
       if (weapons.length) this.players.refreshWeaponModels();
       if (weapons.length || items.length) this.loot.refreshItems([...weapons, ...items]);
       // Gear meshes of the characters are built after the weapons registered (real guns in hand).
