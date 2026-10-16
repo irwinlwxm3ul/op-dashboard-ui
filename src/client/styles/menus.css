@@ -402,7 +402,7 @@
 }
 
 .dz-lobby-table {
-  --cols: minmax(0, 2fr) minmax(0, 1.3fr) 6em 6.2em 7em 5.6em;
+  --cols: minmax(0, 2fr) minmax(0, 1.3fr) 6rem 6.2rem 7rem 5.6rem;
 }
 
 .dz-lobby-table .dz-tbody {
@@ -854,7 +854,7 @@
 }
 
 .dz-results-table {
-  --cols: 5.4em minmax(0, 2.2fr) 4.6em 4.6em 6.4em 6.6em;
+  --cols: 5.4rem minmax(0, 2.2fr) 4.6rem 4.6rem 6.4rem 6.6rem;
   max-height: 50vh;
   overflow-y: auto;
 }
@@ -881,7 +881,7 @@
   }
 
   .dz-lobby-table {
-    --cols: minmax(0, 2fr) minmax(0, 1.2fr) 4.6em 5.4em 6em 5em;
+    --cols: minmax(0, 2fr) minmax(0, 1.2fr) 4.6rem 5.4rem 6rem 5rem;
   }
 }
 
@@ -929,4 +929,10 @@
   .dz-results-place-big {
     font-size: clamp(48px, 8vw, 84px);
   }
+}
+
+/* Results fit a 720 px tall viewport without scrolling. */
+.dz-results .dz-screen-wrap {
+  gap: 12px;
+  padding-block: clamp(10px, 2.5vh, 28px);
 }

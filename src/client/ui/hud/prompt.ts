@@ -3,19 +3,19 @@
 
 import { fmtNumber, itemName, t, vehicleName } from '../../i18n';
 import { REVIVE_TIME } from '../../../shared/constants';
-import type { EntityId, ItemId, VehicleType } from '../../../shared/types';
+import type { ConsumableId, EntityId, ItemId, VehicleType } from '../../../shared/types';
 import type { FrameState, Interaction, InteractionKind } from '../../game/types';
 import { BarFill, h, StyleSlot, TextSlot, tx, Vis } from '../dom';
 import { keyCapLabel } from '../keys';
 import type { HudEnv, Widget } from './shared';
 
 const MARK = '\u0001';
+const CONSUMABLE_ORDER: readonly ConsumableId[] = ['bandage', 'firstaid', 'medkit', 'energy', 'fuel'];
 
 export class Prompt implements Widget {
   readonly el: HTMLDivElement;
   private readonly vis: Vis;
   private readonly line: HTMLDivElement;
-  private cap: HTMLElement | null = null;
   private readonly holdProgress: StyleSlot;
   // Last rendered signature.
   private kind: InteractionKind | null = null;
@@ -69,7 +69,6 @@ export class Prompt implements Widget {
     this.name = it.name;
     this.keyCode = keyCode;
     this.line.textContent = '';
-    this.cap = null;
     this.el.classList.toggle('dz-prompt-hold', it.hold);
 
     const item = it.item ? itemName(it.item) : '';
@@ -110,7 +109,6 @@ export class Prompt implements Widget {
     const cap = h('span', 'dz-key dz-key-prompt', this.line);
     h('span', 'dz-key-ring', cap);
     h('span', 'dz-key-label', cap).textContent = keyCapLabel(keyCode);
-    this.cap = cap;
   }
 
   relabel(): void {
@@ -132,7 +130,7 @@ export class ActionProgress implements Widget {
   private readonly time: TextSlot;
   private readonly fill: BarFill;
   private readonly hint: Vis;
-  private sig = '';
+  private sig = 0;
   private lastTenth = -1;
   private revivedSince = 0;
   private revivedBy: EntityId | null = null;
@@ -154,46 +152,45 @@ export class ActionProgress implements Widget {
     if (!self || self.life === 'dead') {
       this.vis.set(false);
       this.revivedBy = null;
+      this.sig = 0;
       return;
     }
-    let sig = '';
+    // Signature: kind * 2^24 + subject (item index / player id); 0 = nothing to show.
+    let sig = 0;
     let progress = 0;
     let remaining = 0;
-    let labelText: (() => string) | null = null;
     if (self.use && self.useProgress >= 0) {
-      const use = self.use;
-      sig = `u:${use.item}`;
+      sig = 1 * 16777216 + CONSUMABLE_ORDER.indexOf(self.use.item);
       progress = self.useProgress;
-      remaining = Math.max(0, use.total - use.elapsed);
-      labelText = () => t('hud.using', { item: itemName(use.item) });
+      remaining = Math.max(0, self.use.total - self.use.elapsed);
     } else if (self.revive && self.reviveProgress >= 0) {
-      const target = self.revive.target;
-      sig = `r:${target}`;
+      sig = 2 * 16777216 + self.revive.target;
       progress = self.reviveProgress;
       remaining = REVIVE_TIME * (1 - progress);
-      labelText = () => t('hud.reviving', { name: frame.roster.get(target)?.name ?? '' });
     } else if (self.revivedBy !== null && self.life === 'downed') {
       const by = self.revivedBy;
       if (this.revivedBy !== by) {
         this.revivedBy = by;
         this.revivedSince = performance.now();
       }
-      sig = `b:${by}`;
+      sig = 3 * 16777216 + by;
       const el = (performance.now() - this.revivedSince) / 1000;
       progress = Math.min(1, el / REVIVE_TIME);
       remaining = Math.max(0, REVIVE_TIME - el);
-      labelText = () => t('hud.beingRevived', { name: frame.roster.get(by)?.name ?? '' });
     }
     if (self.revivedBy === null) this.revivedBy = null;
-    this.vis.set(!!labelText);
-    if (!labelText) {
-      this.sig = '';
+    this.vis.set(sig !== 0);
+    if (sig === 0) {
+      this.sig = 0;
       return;
     }
     if (sig !== this.sig) {
       this.sig = sig;
-      this.label.set(labelText());
-      this.hint.set(sig.startsWith('u:'));
+      const kind = Math.floor(sig / 16777216);
+      if (kind === 1 && self.use) this.label.set(t('hud.using', { item: itemName(self.use.item) }));
+      else if (kind === 2 && self.revive) this.label.set(t('hud.reviving', { name: frame.roster.get(self.revive.target)?.name ?? '' }));
+      else if (kind === 3 && self.revivedBy !== null) this.label.set(t('hud.beingRevived', { name: frame.roster.get(self.revivedBy)?.name ?? '' }));
+      this.hint.set(kind === 1);
       this.lastTenth = -1;
     }
     this.fill.set(progress);
@@ -205,11 +202,11 @@ export class ActionProgress implements Widget {
   }
 
   relabel(): void {
-    this.sig = '-';
+    this.sig = -1;
   }
 
   reset(): void {
-    this.sig = '';
+    this.sig = 0;
     this.revivedBy = null;
     this.vis.invalidate();
   }

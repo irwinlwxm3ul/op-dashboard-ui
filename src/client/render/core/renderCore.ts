@@ -10,6 +10,7 @@ import * as THREE from 'three';
 import type { CreateRenderCore, RenderCore, RenderStats } from '../contracts';
 import type { Quality } from '../../game/types';
 import { ENV, computeSunDirection } from './environment';
+import { installAltitudeFog } from './fogPatch';
 import { FrameTimer } from './frameTimer';
 import { OutputPass } from './post';
 import { computePixelRatio, qualityProfile, type QualityProfile } from './quality';
@@ -60,6 +61,7 @@ class RenderCoreImpl implements RenderCore {
   constructor(container: HTMLElement) {
     this.container = container;
     installShadowEdgeFade();
+    installAltitudeFog();
 
     this.renderer = new THREE.WebGLRenderer({
       antialias: false,
@@ -117,8 +119,11 @@ class RenderCoreImpl implements RenderCore {
     this.sky = createSkyDome(this.sunDir);
     this.scene.add(this.sky.mesh);
 
+    // Half-float HDR target when float colour buffers are renderable (virtually all WebGL2
+    // devices); otherwise an 8-bit target (tone mapping still happens in the output pass).
+    const hdr = r.extensions.has('EXT_color_buffer_float') || r.extensions.has('EXT_color_buffer_half_float');
     this.target = new THREE.WebGLRenderTarget(1, 1, {
-      type: THREE.HalfFloatType,
+      type: hdr ? THREE.HalfFloatType : THREE.UnsignedByteType,
       format: THREE.RGBAFormat,
       depthBuffer: true,
       stencilBuffer: false,

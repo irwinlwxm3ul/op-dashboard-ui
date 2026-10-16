@@ -2,7 +2,7 @@
 // (Chromium) when available so AZERTY / QWERTZ users see the key printed on their keyboard; named
 // keys (Space, Shift, …) are translated through i18n.
 
-import { t, type TKey } from '../i18n';
+import { onLanguageChange, t, type TKey } from '../i18n';
 
 type LayoutMap = { get(code: string): string | undefined };
 interface KeyboardApi {
@@ -13,6 +13,14 @@ interface KeyboardApi {
 let layout: LayoutMap | null = null;
 let layoutRequested = false;
 const layoutListeners = new Set<() => void>();
+/** Label caches (HUD key caps are queried every frame); cleared when layout or language change. */
+const labelCache = new Map<string, string>();
+const capCache = new Map<string, string>();
+const clearCaches = (): void => {
+  labelCache.clear();
+  capCache.clear();
+};
+onLanguageChange(clearCaches);
 
 /** Ask the browser for the keyboard layout once; listeners fire when it becomes known / changes. */
 export function initKeyboardLayout(): void {
@@ -24,6 +32,7 @@ export function initKeyboardLayout(): void {
     kb.getLayoutMap().then(
       (m) => {
         layout = m;
+        clearCaches();
         for (const cb of layoutListeners) cb();
       },
       () => { /* permission / unsupported: keep code-based labels */ },
@@ -65,13 +74,16 @@ const MODIFIERS: Record<string, [TKey, TKey]> = {
   AltRight: ['key.rightMod', 'key.alt'],
 };
 
-/** Short cap label for modifier keys on HUD key caps (no side prefix). */
+/** Short cap label for modifier keys on HUD key caps (no side prefix). Cached. */
 export function keyCapLabel(code: string | undefined | null): string {
-  if (code) {
+  if (!code) return keyLabel(code);
+  let s = capCache.get(code);
+  if (s === undefined) {
     const mod = MODIFIERS[code];
-    if (mod) return t(mod[1]);
+    s = mod ? t(mod[1]) : keyLabel(code);
+    capCache.set(code, s);
   }
-  return keyLabel(code);
+  return s;
 }
 
 const SYMBOLS: Record<string, string> = {
@@ -98,9 +110,18 @@ const SYMBOLS: Record<string, string> = {
   NumpadDecimal: '.',
 };
 
-/** Label for a KeyboardEvent.code. Empty / unknown codes give the "unbound" label. */
+/** Label for a KeyboardEvent.code. Empty / unknown codes give the "unbound" label. Cached. */
 export function keyLabel(code: string | undefined | null): string {
   if (!code) return t('controls.unbound');
+  let s = labelCache.get(code);
+  if (s === undefined) {
+    s = computeKeyLabel(code);
+    labelCache.set(code, s);
+  }
+  return s;
+}
+
+function computeKeyLabel(code: string): string {
   const named = NAMED[code];
   if (named) return t(named);
   const mod = MODIFIERS[code];

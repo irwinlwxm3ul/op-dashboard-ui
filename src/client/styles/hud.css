@@ -1233,7 +1233,7 @@
   inset-inline-start: -5px;
 }
 
-.dz-quick-slot.dz-empty {
+.dz-quick-slot.dz-is-empty {
   opacity: 0.38;
 }
 
@@ -1353,7 +1353,7 @@
   border-inline-end-color: var(--dz-accent);
 }
 
-.dz-wslot.dz-empty {
+.dz-wslot.dz-is-empty {
   opacity: 0.34;
 }
 
@@ -1621,7 +1621,7 @@
 }
 
 .dz-scoreboard-table {
-  --cols: 6.5em minmax(0, 2fr) 4em 7.5em;
+  --cols: 6.5rem minmax(0, 2fr) 4rem 7.5rem;
 }
 
 .dz-tgroup-out {
@@ -1870,7 +1870,7 @@
   background: rgba(255, 255, 255, 0.05);
 }
 
-.dz-inv-gear-slot.dz-empty {
+.dz-inv-gear-slot.dz-is-empty {
   opacity: 0.5;
 }
 
@@ -1943,7 +1943,7 @@
   border-inline-start-color: var(--dz-accent);
 }
 
-.dz-inv-weapon.dz-empty {
+.dz-inv-weapon.dz-is-empty {
   opacity: 0.5;
 }
 

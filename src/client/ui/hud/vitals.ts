@@ -9,7 +9,7 @@ import type { FrameState } from '../../game/types';
 import { BarFill, ClassFlag, h, StyleSlot, svgIcon, TextSlot, tx, Vis } from '../dom';
 import { approach, boostSegmentFill, BOOST_SEGMENTS, healthRgb } from '../format';
 import { ICONS } from '../icons';
-import type { HudEnv, Widget } from './shared';
+import type { Widget } from './shared';
 
 const RING_R = 15;
 const RING_C = 2 * Math.PI * RING_R;

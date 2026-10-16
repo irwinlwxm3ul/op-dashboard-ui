@@ -65,10 +65,16 @@ export class App implements AppActions {
       audio.setSettings({ master: s.masterVolume, sfx: s.sfxVolume, ui: s.uiVolume });
     };
     applyAudio();
+    let lastQuality = settings.get().quality;
+    let lastScale = settings.get().renderScale;
     settings.subscribe(() => {
       applyAudio();
       const s = settings.get();
-      if (this.core && (this.core.quality !== s.quality)) this.core.setQuality(s.quality, s.renderScale);
+      if (this.core && (s.quality !== lastQuality || s.renderScale !== lastScale)) {
+        this.core.setQuality(s.quality, s.renderScale);
+      }
+      lastQuality = s.quality;
+      lastScale = s.renderScale;
     });
   }
 

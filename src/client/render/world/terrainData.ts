@@ -404,3 +404,30 @@ export function chunkCellRange(res: number, chunks: number, c: number): [number,
   const b = Math.min(cells, (c + 1) * per);
   return [a, b];
 }
+
+/** Concatenates chunk arrays into one mesh (used for 2x2 far super-chunks). */
+export function mergeChunkArrays(parts: readonly ChunkArrays[]): ChunkArrays {
+  let verts = 0, idx = 0;
+  for (const p of parts) {
+    verts += p.positions.length / 3;
+    idx += p.indices.length;
+  }
+  const positions = new Float32Array(verts * 3);
+  const normals = new Float32Array(verts * 3);
+  const colors = new Float32Array(verts * 3);
+  const surf = new Float32Array(verts * 2);
+  const indices = verts > 65535 ? new Uint32Array(idx) : new Uint16Array(idx);
+  let vo = 0, io = 0, minY = Infinity, maxY = -Infinity;
+  for (const p of parts) {
+    positions.set(p.positions, vo * 3);
+    normals.set(p.normals, vo * 3);
+    colors.set(p.colors, vo * 3);
+    surf.set(p.surf, vo * 2);
+    for (let i = 0; i < p.indices.length; i++) indices[io + i] = p.indices[i] + vo;
+    vo += p.positions.length / 3;
+    io += p.indices.length;
+    minY = Math.min(minY, p.minY);
+    maxY = Math.max(maxY, p.maxY);
+  }
+  return { positions, normals, colors, surf, indices, minY, maxY };
+}

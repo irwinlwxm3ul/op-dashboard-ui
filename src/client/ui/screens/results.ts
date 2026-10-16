@@ -128,7 +128,7 @@ export class ResultsScreen implements ScreenView {
       stat('results.revives', fmtNumber(me.revives));
       stat('results.longestKill', t('unit.meters', { n: fmtNumber(Math.round(me.longestKill)) }));
       stat('results.survivalTime', fmtDuration(me.survivalTime));
-      stat('results.accuracy', t('unit.percent', { n: fmtNumber(Math.round(me.accuracy * (me.accuracy <= 1 ? 100 : 1))) }));
+      stat('results.accuracy', t('unit.percent', { n: Math.round(me.accuracy * 100) })); // accuracy is a 0..1 fraction
     } else {
       tx(h('p', 'dz-empty', this.stats), 'ui.results.spectator');
     }

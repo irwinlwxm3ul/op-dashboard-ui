@@ -233,9 +233,8 @@ class Ui implements UiApi, UiCtx {
     }
     const inGame = screen === 'game';
     this.hud.setVisible(inGame);
-    this.screensEl.classList.toggle('dz-screens-idle', inGame);
     this.nameplateLayer.classList.toggle('dz-hidden', !inGame);
-    this.feelLayer.classList.toggle('dz-hidden', !inGame && screen !== 'loading');
+    this.feelLayer.classList.toggle('dz-hidden', !inGame);
     if (!inGame) {
       this.hud.closeOverlays(false);
       this.pauseMenu.close();

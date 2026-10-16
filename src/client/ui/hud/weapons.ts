@@ -44,7 +44,7 @@ class WeaponSlotView {
     this.name = new TextSlot(h('span', 'dz-wslot-name', this.el));
     this.mag = new NumSlot(h('span', 'dz-wslot-mag', this.el), (n) => (n < 0 ? '' : fmtNumber(n)));
     this.active = new ClassFlag(this.el, 'dz-active');
-    this.empty = new ClassFlag(this.el, 'dz-empty');
+    this.empty = new ClassFlag(this.el, 'dz-is-empty');
   }
 
   set(w: WeaponInstance | null, active: boolean, keyCode: string): void {
@@ -81,7 +81,7 @@ class QuickSlot {
     this.el.appendChild(svgIcon(item === 'frag' ? ICONS.frag : ICONS[item as 'bandage' | 'firstaid' | 'medkit' | 'energy'], 'dz-quick-icon'));
     this.count = new NumSlot(h('span', 'dz-quick-count', this.el), (n) => fmtNumber(n));
     this.key = new TextSlot(h('span', 'dz-key dz-key-xs', this.el));
-    this.none = new ClassFlag(this.el, 'dz-empty');
+    this.none = new ClassFlag(this.el, 'dz-is-empty');
     this.using = new ClassFlag(this.el, 'dz-using');
   }
 

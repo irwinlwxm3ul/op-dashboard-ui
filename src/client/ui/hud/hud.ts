@@ -100,7 +100,8 @@ export class Hud {
   private readonly fullMap: FullMap;
   private unbind: Array<() => void> = [];
   private lastFrame: FrameState | null = null;
-  private lastOwnToggle = 0;
+  /** When the HUD itself last toggled each overlay from a key press (input-event debounce). */
+  private readonly lastOwnToggle = { inventory: 0, map: 0 };
 
   constructor(ctx: UiCtx) {
     this.el = h('div', 'dz-hud dz-hidden');
@@ -155,8 +156,8 @@ export class Hud {
     this.unbind.push(this.feed.bind(env));
     this.unbind.push(this.scoreboard.bind(env));
     const on = (ev: InputUiEvent, cb: () => void) => this.unbind.push(game.input.on(ev, cb));
-    on('toggleInventory', () => this.fromInput(() => this.setInventory(!this.inventory.isOpen)));
-    on('toggleMap', () => this.fromInput(() => this.setMap(!this.fullMap.isOpen)));
+    on('toggleInventory', () => this.fromInput('inventory', () => this.setInventory(!this.inventory.isOpen)));
+    on('toggleMap', () => this.fromInput('map', () => this.setMap(!this.fullMap.isOpen)));
     on('toggleStats', () => this.stats.toggle());
     on('toggleScoreboard', () => this.scoreboard.toggle());
   }
@@ -213,13 +214,13 @@ export class Hud {
     if (this.inventory.isOpen) {
       if (code === 'Escape' || code === keys.inventory) {
         if (!ev.repeat) {
-          this.lastOwnToggle = performance.now();
+          this.lastOwnToggle.inventory = performance.now();
           this.setInventory(false);
         }
         return true;
       }
       if (code === keys.map && !ev.repeat) {
-        this.lastOwnToggle = performance.now();
+        this.lastOwnToggle.map = performance.now();
         this.setMap(true);
         return true;
       }
@@ -229,13 +230,13 @@ export class Hud {
     if (this.fullMap.isOpen) {
       if (code === 'Escape' || code === keys.map) {
         if (!ev.repeat) {
-          this.lastOwnToggle = performance.now();
+          this.lastOwnToggle.map = performance.now();
           this.setMap(false);
         }
         return true;
       }
       if (code === keys.inventory && !ev.repeat) {
-        this.lastOwnToggle = performance.now();
+        this.lastOwnToggle.inventory = performance.now();
         this.setInventory(true);
         return true;
       }
@@ -274,8 +275,8 @@ export class Hud {
 
   // ---------------------------------------------------------------------------
 
-  private fromInput(fn: () => void): void {
-    if (performance.now() - this.lastOwnToggle < TOGGLE_DEBOUNCE_MS) return;
+  private fromInput(kind: 'inventory' | 'map', fn: () => void): void {
+    if (performance.now() - this.lastOwnToggle[kind] < TOGGLE_DEBOUNCE_MS) return;
     fn();
   }
 

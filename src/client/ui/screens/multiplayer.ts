@@ -1,6 +1,6 @@
 // Lobby browser: connect with a player name, list / refresh / join lobbies, create a lobby.
 
-import { fmtNumber, t } from '../../i18n';
+import { t } from '../../i18n';
 import { settings } from '../../game';
 import { MAX_LOBBY_NAME_LEN, MAX_NAME_LEN } from '../../../shared/constants';
 import { DEFAULT_LOBBY_SETTINGS, type LobbySummary } from '../../../shared/protocol';

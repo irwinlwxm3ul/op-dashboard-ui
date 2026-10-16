@@ -66,6 +66,7 @@ export class DropMeter implements Widget {
   private readonly controls: TextSlot;
   private readonly chute: ClassFlag;
   private controlsDirty = true;
+  private lastF = -1;
 
   constructor() {
     this.el = h('div', 'dz-drop');
@@ -101,7 +102,10 @@ export class DropMeter implements Widget {
     this.speed.set(kmh(Math.hypot(self.vel.x, self.vel.y, self.vel.z)));
     const f = clamp01(self.altitude / PLANE_ALTITUDE);
     this.fill.set(f);
-    this.marker.set(`${(f * 100).toFixed(1)}%`);
+    if (Math.abs(f - this.lastF) > 0.002) {
+      this.lastF = f;
+      this.marker.set(`${(f * 100).toFixed(1)}%`);
+    }
     const chute = self.mode === 'parachute';
     this.chute.set(chute);
     this.hintAuto.set(!chute);
@@ -113,6 +117,7 @@ export class DropMeter implements Widget {
 
   relabel(): void {
     this.controlsDirty = true;
+    this.lastF = -1;
     this.alt.invalidate();
     this.speed.invalidate();
     this.hintAuto.el.textContent = t('hud.freefall.autoOpen', { n: AUTO_CHUTE_HEIGHT });

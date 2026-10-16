@@ -18,6 +18,8 @@ import { distanceToAabb, selectBand } from './lod';
 import { NOISE_GLSL, patchShader } from './shaders';
 
 const PROP_CHUNK = 128;
+/** Prop chunks farther than this (zoom-scaled) are not drawn: crates/fences are sub-pixel in the haze. */
+const PROP_DRAW_EDGES = [650];
 const LOD_HYSTERESIS = 15;
 const SHELL_TEX_WIDTH = 256;
 const INTERIOR_CORE = linearRgb(0x1f1d1b);
@@ -144,9 +146,10 @@ export class BuildingRenderer {
   private readonly shellData: Uint8Array;
   private readonly shellTex: THREE.DataTexture;
   private readonly geometries: THREE.BufferGeometry[] = [];
-  private readonly shadowCasters: THREE.Mesh[] = [];
   private readonly edges = [220];
   private shellDirty = true;
+  /** Prop chunk meshes with bounds for distance culling (props are tiny beyond ~650 m in haze). */
+  private readonly propChunks: { mesh: THREE.Mesh; minX: number; minY: number; minZ: number; maxX: number; maxY: number; maxZ: number; band: number }[] = [];
 
   constructor(world: World) {
     this.group.name = 'buildings';
@@ -214,7 +217,6 @@ export class BuildingRenderer {
         mesh.matrixAutoUpdate = false;
         mesh.visible = false;
         this.group.add(mesh);
-        this.shadowCasters.push(mesh);
       }
       this.entries.push({
         index,
@@ -345,6 +347,10 @@ export class BuildingRenderer {
       mesh.receiveShadow = true;
       mesh.matrixAutoUpdate = false;
       this.group.add(mesh);
+      const bb = geo.boundingBox!;
+      this.propChunks.push({
+        mesh, minX: bb.min.x, minY: bb.min.y, minZ: bb.min.z, maxX: bb.max.x, maxY: bb.max.y, maxZ: bb.max.z, band: 0,
+      });
     }
     if (targets.length && this.targetMaterial) this.buildTargets(world, targets);
   }
@@ -444,6 +450,11 @@ export class BuildingRenderer {
       this.shellTex.needsUpdate = true;
     }
     if (this.shell) this.shell.visible = shells > 0;
+    for (const pc of this.propChunks) {
+      const d = distanceToAabb(cx, cy, cz, pc.minX, pc.minY, pc.minZ, pc.maxX, pc.maxY, pc.maxZ) * lodScale;
+      pc.band = selectBand(d, pc.band, PROP_DRAW_EDGES, LOD_HYSTERESIS);
+      pc.mesh.visible = pc.band === 0;
+    }
   }
 
   dispose(): void {

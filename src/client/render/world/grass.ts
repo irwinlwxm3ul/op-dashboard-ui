@@ -212,7 +212,7 @@ export class GrassRenderer {
         continue;
       }
       const y = w.heightAt(x, z) - 0.03;
-      const s = 0.38 + hashFloat(px, pz, t, 3) * 0.38;
+      const s = 0.3 + hashFloat(px, pz, t, 3) * 0.32;
       const rot = hashFloat(px, pz, t, 4) * Math.PI * 2;
       const c = Math.cos(rot) * s * 0.95, sn = Math.sin(rot) * s * 0.95;
       mats[o] = c; mats[o + 1] = 0; mats[o + 2] = -sn; mats[o + 3] = 0;

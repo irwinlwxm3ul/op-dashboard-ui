@@ -237,7 +237,7 @@ export class Inventory {
   }
 
   private gearSlot(label: TKey, id: GearId | null, hp: number): void {
-    const slot = h('div', `dz-inv-gear-slot${id ? '' : ' dz-empty'}`, this.gear);
+    const slot = h('div', `dz-inv-gear-slot${id ? '' : ' dz-is-empty'}`, this.gear);
     slot.appendChild(svgIcon(id ? gearIcon(id) : label === 'inv.slot.helmet' ? ICONS.helmet : label === 'inv.slot.vest' ? ICONS.vest : ICONS.pack, 'dz-inv-gear-icon'));
     const text = h('div', 'dz-inv-gear-text', slot);
     tx(h('div', 'dz-inv-gear-label', text), label);
@@ -263,7 +263,7 @@ export class Inventory {
   }
 
   private weaponSlot(i: 0 | 1 | 2, w: WeaponInstance | null, self: LocalPlayerView): void {
-    const slot = h('div', `dz-inv-weapon${w ? '' : ' dz-empty'}${self.activeSlot === i ? ' dz-active' : ''}`, this.weapons);
+    const slot = h('div', `dz-inv-weapon${w ? '' : ' dz-is-empty'}${self.activeSlot === i ? ' dz-active' : ''}`, this.weapons);
     const label = h('div', 'dz-inv-weapon-label', slot);
     label.textContent = i < 2 ? t('inv.slot.primary', { n: i + 1 }) : t('inv.slot.pistol');
     if (!w) {
