@@ -8,7 +8,7 @@ import {
 import { en } from '../src/client/i18n/locales/en';
 import { enCore } from '../src/client/i18n/locales/en.core';
 import {
-  compareKeys, comparePlaceholders, emptyValues, extractPlaceholders, incompletePluralFamilies, scanSource,
+  compareKeys, comparePlaceholders, emptyValues, extractPlaceholders, fragmentIssues, incompletePluralFamilies, scanSource,
 } from '../scripts/check-i18n';
 
 const OTHER_LANGS = LANGUAGES.map((l) => l.code).filter((c): c is Exclude<Lang, 'en'> => c !== 'en');
@@ -317,6 +317,16 @@ describe('check-i18n key helpers', () => {
       { key: 'c_other', expected: ['count'], actual: [] },
     ]);
     expect(incompletePluralFamilies(ref)).toEqual([{ stem: 'c', missing: ['zero', 'two', 'few', 'many'] }]);
+  });
+
+  it('reports fragment keys outside their namespace or defined twice', () => {
+    expect(
+      fragmentIssues([
+        { name: 'core', prefix: null, strings: { 'hud.a': 'A' } },
+        { name: 'ui', prefix: 'ui.', strings: { 'ui.b': 'B', 'hud.a': 'A2' } },
+        { name: 'feel', prefix: 'feel.', strings: { 'feel.c': 'C' } },
+      ]),
+    ).toEqual(['ui: "hud.a" must start with "ui."', 'ui: "hud.a" is already defined in core']);
   });
 });
 

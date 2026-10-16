@@ -4,6 +4,7 @@
 //
 // 1. Every locale has exactly the key set of the merged English dictionary (core + ui/feel/flow
 //    fragments), no empty values, and every English plural family provides all CLDR categories.
+//    Fragment keys must stay in their namespace and never be defined twice.
 // 2. Every translation uses the same {placeholder} set as English (plural _zero/_one/_two
 //    variants may spell the number out and omit {count}).
 // 3. Scans src/client/**/*.ts (except the locale files) for hardcoded user-facing strings:
@@ -19,6 +20,10 @@ import { join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { DICTIONARIES, LANGUAGES } from '../src/client/i18n/index';
 import { en } from '../src/client/i18n/locales/en';
+import { enCore } from '../src/client/i18n/locales/en.core';
+import { uiStrings } from '../src/client/ui/strings.en';
+import { feelStrings } from '../src/client/feel/strings.en';
+import { appStrings } from '../src/client/app/strings.en';
 
 // ============================================================================
 // Key and placeholder checks
@@ -73,6 +78,32 @@ export function comparePlaceholders(reference: StringDict, locale: StringDict): 
     const want = countOptional(key) && !actual.includes('count') ? expected.filter((p) => p !== 'count') : expected;
     if (want.length !== actual.length || want.some((p, i) => p !== actual[i])) {
       out.push({ key, expected, actual });
+    }
+  }
+  return out;
+}
+
+/** One source file contributing English strings to the merged dictionary. */
+export interface Fragment {
+  name: string;
+  /** Required key prefix (`ui.`, `feel.`, `flow.`), or null for the core dictionary. */
+  prefix: string | null;
+  strings: StringDict;
+}
+
+/**
+ * Fragment keys outside their namespace, or defined by more than one fragment (the object spread
+ * in en.ts would silently let the later fragment win).
+ */
+export function fragmentIssues(fragments: readonly Fragment[]): string[] {
+  const owners = new Map<string, string>();
+  const out: string[] = [];
+  for (const f of fragments) {
+    for (const key of Object.keys(f.strings)) {
+      if (f.prefix !== null && !key.startsWith(f.prefix)) out.push(`${f.name}: "${key}" must start with "${f.prefix}"`);
+      const owner = owners.get(key);
+      if (owner !== undefined) out.push(`${f.name}: "${key}" is already defined in ${owner}`);
+      else owners.set(key, f.name);
     }
   }
   return out;
@@ -513,6 +544,16 @@ function listPreview(items: readonly string[], verbose: boolean, limit = 12): st
 function runKeyChecks(verbose: boolean): number {
   const reference: StringDict = en;
   let problems = 0;
+  const fragments: Fragment[] = [
+    { name: 'src/client/i18n/locales/en.core.ts', prefix: null, strings: enCore },
+    { name: 'src/client/ui/strings.en.ts', prefix: 'ui.', strings: uiStrings },
+    { name: 'src/client/feel/strings.en.ts', prefix: 'feel.', strings: feelStrings },
+    { name: 'src/client/app/strings.en.ts', prefix: 'flow.', strings: appStrings },
+  ];
+  for (const issue of fragmentIssues(fragments)) {
+    console.log(`[fragment] ${issue}`);
+    problems++;
+  }
   for (const { stem, missing } of incompletePluralFamilies(reference)) {
     console.log(`[plural] en: "${stem}" lacks variants ${missing.map((c) => `_${c}`).join(', ')}`);
     problems++;
