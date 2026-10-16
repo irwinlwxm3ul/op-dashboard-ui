@@ -27,6 +27,10 @@ export const CM_COVER = 4;
 /** Upward bias the simulation adds to throws (sim tuning THROW_UP_BIAS). */
 const FRAG_UP_BIAS = 0.17;
 const FRAG_MAX_RANGE = 30;
+/** Bots only strafe while shooting inside this distance. */
+const STRAFE_MAX_DIST = 35;
+/** Beyond this distance automatic weapons are tapped instead of burst-fired. */
+const TAP_DIST = 45;
 const DEG = Math.PI / 180;
 
 const aimOut = { yaw: 0, pitch: 0, dist: 0 };
@@ -260,8 +264,8 @@ export function combatThink(sys: BotSystem, b: BotState, p: PlayerState): void {
     b.strafeDir = b.rng.chance(sk.strafe) ? (b.rng.chance(0.5) ? 1 : -1) : 0;
     b.strafeUntil = t + 0.4 + b.rng.next() * (1.4 - sk.strafe * 0.6);
   }
-  if (mode === CM_HOLD && c.visible && d > 30 && t >= b.crouchUntil && b.rng.chance(sk.strafe * 0.35)) {
-    b.crouchUntil = t + 1.2 + b.rng.next() * 2;
+  if (mode === CM_HOLD && c.visible && d > 30 && t >= b.crouchUntil && b.rng.chance(0.2 + sk.strafe * 0.5)) {
+    b.crouchUntil = t + 1.5 + b.rng.next() * 2.5;
   }
 
   switch (mode) {
@@ -323,8 +327,9 @@ export function combatAct(sys: BotSystem, b: BotState, p: PlayerState): number {
   const wantYaw = bearing + b.errYaw, wantPitch = aimOut.pitch + b.errPitch;
   steerAim(sys, b, wantYaw, wantPitch, 1);
 
-  // Strafe while shooting (lateral to the target bearing), crouch-peek at range.
-  if (c.visible && b.combatMode !== CM_COVER && b.strafeDir !== 0 && t >= b.crouchUntil) {
+  // Strafe while shooting at close / mid range (lateral to the target bearing); at range bots
+  // stand (or crouch) still because moving blooms the spread.
+  if (c.visible && b.combatMode !== CM_COVER && b.strafeDir !== 0 && t >= b.crouchUntil && dist < STRAFE_MAX_DIST) {
     const rx = Math.cos(bearing) * b.strafeDir, rz = -Math.sin(bearing) * b.strafeDir;
     let mx = rx, mz = rz;
     if (b.moveScale > 0) {
@@ -348,13 +353,15 @@ export function combatAct(sys: BotSystem, b: BotState, p: PlayerState): number {
   }
   // ADS beyond close range (scoped weapons a bit earlier).
   const scoped = w.scope === 'x4' || w.scope === 'x8';
-  if ((c.visible || t - c.lastSeen < 1.5) && p.reloadTimer <= 0 && ((dist > 25 && w.id !== 'shotgun') || (scoped && dist > 12))) {
-    buttons |= BTN.ADS;
-  }
+  const wantAds = (dist > 25 && w.id !== 'shotgun') || (scoped && dist > 12);
+  if (wantAds && (c.visible || t - c.lastSeen < 1.5) && p.reloadTimer <= 0) buttons |= BTN.ADS;
 
-  // Fire discipline.
+  // Fire discipline: full auto up close, bursts at mid range, single taps (waiting for the
+  // bloom to settle) at long range, nothing beyond the weapon's effective range.
   const wi = weaponAt(p, p.activeSlot)!;
-  const ready = c.visible && t >= c.ready && p.drawTimer <= 0 && p.reloadTimer <= 0 && !p.use && wi.mag > 0;
+  const inRange = dist <= WEAPON_RANGE[w.id].max;
+  const ready = c.visible && inRange && t >= c.ready && p.drawTimer <= 0 && p.reloadTimer <= 0 && !p.use && wi.mag > 0 &&
+    (!wantAds || p.ads > 0.8);
   const tol = Math.max(w.fireMode === 'bolt' ? 0.45 * DEG : 0.9 * DEG, Math.atan2(0.42, dist)) * (w.fireMode === 'auto' && dist < 18 ? 1.8 : 1);
   const onTarget = Math.abs(angleDiff(b.aimYaw, wantYaw)) < tol && Math.abs(b.aimPitch - wantPitch) < tol * 1.3;
   const shots = p.shotCounter - b.lastShotCounter;
@@ -364,25 +371,26 @@ export function combatAct(sys: BotSystem, b: BotState, p: PlayerState): number {
     if (shots > 0 && b.burstLeft > 0) b.burstLeft = Math.max(0, b.burstLeft - shots);
     return buttons;
   }
-  if (w.fireMode === 'auto') {
+  const settled = p.bloom <= w.bloomPerShot * 0.6;
+  if (w.fireMode === 'auto' && dist < TAP_DIST) {
     if (dist < 18) {
       b.triggerHeld = true;
     } else {
       if (b.burstLeft > 0) b.burstLeft -= shots;
       if (b.triggerHeld && b.burstLeft <= 0) {
-        // Burst done: pause (longer at range).
+        // Burst done: pause before the next one.
         b.triggerHeld = false;
-        b.burstPauseUntil = t + sk.burstPause * (dist > 70 ? 1.6 : 1) * (0.7 + 0.6 * b.rng.next());
+        b.burstPauseUntil = t + sk.burstPause * (0.7 + 0.6 * b.rng.next());
       } else if (!b.triggerHeld && t >= b.burstPauseUntil) {
-        b.burstLeft = dist > 70 ? b.rng.int(1, 2) : b.rng.int(sk.burstMin, sk.burstMax);
+        b.burstLeft = b.rng.int(sk.burstMin, sk.burstMax);
         b.triggerHeld = true;
       }
     }
   } else if (b.triggerHeld) {
-    b.triggerHeld = false; // release for the next trigger edge
+    b.triggerHeld = false; // one tick held = one round; release for the next tap / trigger edge
   } else if (p.fireCooldown <= 0) {
     const gap = dist < 20 ? 0 : sk.tapInterval * clamp(dist / 60, 0.5, 2.2);
-    if (t - b.lastTapTime >= gap) {
+    if (t - b.lastTapTime >= gap && (dist < TAP_DIST || settled)) {
       b.triggerHeld = true;
       b.lastTapTime = t;
     }

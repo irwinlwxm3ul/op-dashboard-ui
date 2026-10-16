@@ -57,8 +57,8 @@ export interface BotSkill {
 export const BOT_SKILLS: Record<BotDifficulty, BotSkill> = {
   easy: {
     reaction: 0.8,
-    aimErrorStart: 6.5 * DEG,
-    aimErrorMin: 1.6 * DEG,
+    aimErrorStart: 5.5 * DEG,
+    aimErrorMin: 0.9 * DEG,
     aimConverge: 0.9,
     trackingLag: 0.25,
     turnRate: 3.2,
@@ -82,8 +82,8 @@ export const BOT_SKILLS: Record<BotDifficulty, BotSkill> = {
   },
   normal: {
     reaction: 0.45,
-    aimErrorStart: 4.2 * DEG,
-    aimErrorMin: 0.9 * DEG,
+    aimErrorStart: 3.6 * DEG,
+    aimErrorMin: 0.45 * DEG,
     aimConverge: 1.5,
     trackingLag: 0.12,
     turnRate: 5.5,
@@ -107,8 +107,8 @@ export const BOT_SKILLS: Record<BotDifficulty, BotSkill> = {
   },
   hard: {
     reaction: 0.25,
-    aimErrorStart: 2.8 * DEG,
-    aimErrorMin: 0.45 * DEG,
+    aimErrorStart: 2.4 * DEG,
+    aimErrorMin: 0.25 * DEG,
     aimConverge: 2.3,
     trackingLag: 0.06,
     turnRate: 8,
