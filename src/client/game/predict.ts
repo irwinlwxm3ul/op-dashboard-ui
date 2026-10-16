@@ -67,6 +67,8 @@ export function copyPredictRt(dst: PredictRt, src: PredictRt): PredictRt {
 export interface PredictEnv {
   world: World;
   config: MatchConfig;
+  /** Match over: the server still consumes inputs but only applies the aim. */
+  ended?: boolean;
   /** Sim time (s) at the start of this tick. */
   time: number;
   /** Plane state (with `traveled` valid at `planeTime`) or null. */
@@ -256,6 +258,7 @@ export function predictTick(
   p.yaw = input.yaw;
   p.pitch = input.pitch > PITCH_LIMIT ? PITCH_LIMIT : input.pitch < -PITCH_LIMIT ? -PITCH_LIMIT : input.pitch;
   p.lastSeq = input.seq;
+  if (env.ended) return; // after the match only the aim follows the input (no movement, weapons, ...)
   if (p.life === 'dead') {
     p.lastButtons = held;
     return;

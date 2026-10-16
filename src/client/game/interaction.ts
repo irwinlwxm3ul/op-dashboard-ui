@@ -4,6 +4,7 @@
 
 import { INTERACT_RANGE, MIN_CHUTE_DROP, REVIVE_RANGE, VEHICLE_ENTER_RANGE } from '../../shared/constants';
 import { DEG } from '../../shared/math';
+import { PF } from '../../shared/protocol';
 import type {
   ClientAction, ConsumableId, EntityId, ItemId, LifeState, LootItem, MovementMode, Stance, ThrowableId, TrainingLayout,
   Vec3, World,
@@ -31,6 +32,8 @@ export interface InteractionSelf {
   parachuteOpen: boolean;
   jumpY: number;
   items: Record<ConsumableId | ThrowableId, number>;
+  /** Revive in progress (its target stays offered even though it is flagged as being revived). */
+  revive?: { target: EntityId } | null;
 }
 
 export interface InteractionEnv {
@@ -51,6 +54,11 @@ export interface InteractionEnv {
   lineOfSight?: (a: Vec3, b: Vec3) => boolean;
   /** Precise "close enough to enter" test (vehicle OBB); defaults to a centre distance check. */
   vehicleNear?: (v: VehicleView, center: Vec3) => boolean;
+  /**
+   * Server line-of-sight rule for entering (body centre or eye -> vehicle centre or the seat);
+   * defaults to `lineOfSight` toward the vehicle centre.
+   */
+  vehicleVisible?: (v: VehicleView, seat: number, center: Vec3, eye: Vec3) => boolean;
 }
 
 /**
@@ -104,6 +112,23 @@ function dist3(a: Vec3, b: Vec3): number {
   return Math.hypot(a.x - b.x, a.y - b.y, a.z - b.z);
 }
 
+const scratchCenter: Vec3 = { x: 0, y: 0, z: 0 };
+
+/** Server rule for reviving: the downed body centre (+0.1 m) is visible from our centre or eye. */
+function reviveVisible(env: InteractionEnv, t: PlayerView): boolean {
+  if (!env.lineOfSight) return true;
+  bodyCenterOf(t, scratchCenter);
+  scratchCenter.y += 0.1;
+  return env.lineOfSight(center, scratchCenter) || env.lineOfSight(env.eye, scratchCenter);
+}
+
+/** Server rule for entering: our centre or eye sees the vehicle (precise check via the callback). */
+function vehicleVisible(env: InteractionEnv, v: VehicleView, seat: number): boolean {
+  if (env.vehicleVisible) return env.vehicleVisible(v, seat, center, env.eye);
+  if (!env.lineOfSight) return true;
+  return env.lineOfSight(center, v.pos) || env.lineOfSight(env.eye, v.pos);
+}
+
 /** Server rule: the item (+0.15 m) must be visible from the eye or from the body centre. */
 function visible(env: InteractionEnv, p: Vec3): boolean {
   if (!env.lineOfSight) return true;
@@ -151,16 +176,19 @@ export function resolveInteraction(env: InteractionEnv, out: Interaction): Inter
   if (s.mode === 'parachute') return null;
   bodyCenterOf(s, center);
 
-  // Revive the nearest downed teammate in range.
+  // Revive the nearest downed teammate the server would accept: in range, in line of sight and
+  // not already being revived by somebody else.
   let reviveBest: PlayerView | null = null;
   let reviveDist = PROMPT_RANGE.revive;
   for (const p of env.players.values()) {
     if (p.isSelf || !p.isTeammate || p.life !== 'downed') continue;
     const d = dist3(p.pos, s.pos);
-    if (d <= reviveDist) {
-      reviveDist = d;
-      reviveBest = p;
-    }
+    if (d > reviveDist) continue;
+    const mine = s.revive != null && s.revive.target === p.id;
+    if (!mine && (p.flags & PF.BEING_REVIVED) !== 0) continue;
+    if (!reviveVisible(env, p)) continue;
+    reviveDist = d;
+    reviveBest = p;
   }
   if (reviveBest) {
     const r = reset(out, 'revive', true);
@@ -192,33 +220,33 @@ export function resolveInteraction(env: InteractionEnv, out: Interaction): Inter
   }
   if (aimed && visible(env, aimed.pos)) return lootInteraction(out, aimed);
 
-  // Vehicles: nearest usable one in range.
+  // Vehicles: the nearest one in range that can be refuelled (empty tank, jerry can at hand) or
+  // entered (free seat, line of sight like the server checks).
   let veh: VehicleView | null = null;
   let vehDist = Infinity;
+  let vehRefuel = false;
+  let vehSeat = -1;
+  const hasCan = (s.items.fuel ?? 0) > 0;
   for (const v of env.vehicles.values()) {
-    if (v.destroyed) continue;
+    if (v.destroyed || v.hp <= 0) continue;
     const d = dist3(v.pos, center);
-    if (d < vehDist && (d <= PROMPT_RANGE.vehicle || (env.vehicleNear !== undefined && env.vehicleNear(v, center)))) {
-      vehDist = d;
-      veh = v;
+    if (d >= vehDist) continue;
+    if (d > PROMPT_RANGE.vehicle && !(env.vehicleNear !== undefined && env.vehicleNear(v, center))) continue;
+    if (v.fuel < EMPTY_FUEL && hasCan) {
+      veh = v; vehDist = d; vehRefuel = true;
+      continue;
     }
+    const seat = firstFreeSeat(v);
+    if (seat < 0 || !vehicleVisible(env, v, seat)) continue;
+    veh = v; vehDist = d; vehRefuel = false; vehSeat = seat;
   }
   if (veh) {
-    if (veh.fuel < EMPTY_FUEL && (s.items.fuel ?? 0) > 0) {
-      const r = reset(out, 'refuel', false);
-      r.targetId = veh.id;
-      r.vehicleType = veh.type;
-      r.item = 'fuel';
-      return r;
-    }
-    const seat = firstFreeSeat(veh);
-    if (seat >= 0) {
-      const r = reset(out, 'enter', false);
-      r.targetId = veh.id;
-      r.vehicleType = veh.type;
-      r.seat = seat;
-      return r;
-    }
+    const r = reset(out, vehRefuel ? 'refuel' : 'enter', false);
+    r.targetId = veh.id;
+    r.vehicleType = veh.type;
+    if (vehRefuel) r.item = 'fuel';
+    else r.seat = vehSeat;
+    return r;
   }
 
   // Training ground weapon racks.

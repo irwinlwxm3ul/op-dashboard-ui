@@ -6,7 +6,7 @@ import { describe, expect, it } from 'vitest';
 import { MAX_EXTRAPOLATE_MS, MIN_CHUTE_DROP, TICK_DT, TICK_MS } from '../src/shared/constants';
 import { WEAPONS, fireInterval, recoilForShot, shotDirections, spreadCone } from '../src/shared/items';
 import type { ClientMessage, MatchInit, NetPlayer, SelfState, ServerMessage, Snapshot } from '../src/shared/protocol';
-import { LIFE_CODES, MODE_CODES } from '../src/shared/protocol';
+import { LIFE_CODES, MODE_CODES, PF } from '../src/shared/protocol';
 import { hash32 } from '../src/shared/rng';
 import type {
   GameEvent, LootItem, MatchConfig, PlayerInput, PlayerState, RockDef, TreeDef, Vec3, World, WorldBox, ZoneState,
@@ -639,6 +639,28 @@ describe('prediction and reconciliation', () => {
     expect(left.lean).toBe(-1);
   });
 
+  it('after the match ended only the aim is predicted', () => {
+    const world = makeWorld();
+    const env: PredictEnv = {
+      world, config: CONFIG, time: 0, plane: null, planeTime: 0, seatVehicle: null, vehicle: null, others: [], ended: true,
+    };
+    const p = armedPlayer();
+    p.use = { item: 'bandage', elapsed: 0, total: 4 };
+    const ev = createTickEvents();
+    for (let i = 1; i <= 10; i++) {
+      predictTick(p, createPredictRt(), {
+        seq: i, mx: 0, mz: 1, yaw: 0.5, pitch: 0.1, buttons: 1 | (1 << 3), stance: 0, slot: 0, rt: 0,
+      }, 0, env, ev);
+    }
+    expect(p.pos.x).toBe(0);
+    expect(p.pos.z).toBe(0);
+    expect(p.yaw).toBe(0.5);
+    expect(p.pitch).toBe(0.1);
+    expect(p.shotCounter).toBe(0);
+    expect(p.weapons[0]!.mag).toBe(30);
+    expect(p.use!.elapsed).toBe(0);
+  });
+
   it('predicts the plane jump and the chute with the server rules', () => {
     const world = makeWorld();
     const p = basePlayer();
@@ -829,6 +851,30 @@ describe('interaction prompt', () => {
     // Dead / downed players get no prompt.
     empty.self.life = 'downed';
     expect(resolveInteraction(empty, out())).toBeNull();
+  });
+
+  it('mirrors the server line-of-sight rules for revive and vehicle entry', () => {
+    const wallBetween = (a: Vec3, b: Vec3) => !((a.x < 0.6 && b.x > 0.6) || (a.x > 0.6 && b.x < 0.6)); // wall at x = 0.6
+    const mate = view(MATE, { x: 1.2, y: 0, z: 0 }, { life: 'downed' });
+    const e = baseEnv({ players: new Map([[MATE, mate]]), lineOfSight: wallBetween });
+    expect(resolveInteraction(e, out())).toBeNull(); // downed teammate behind the wall
+    const mate2 = view(MATE, { x: 0.3, y: 0, z: 1.2 }, { life: 'downed', flags: PF.BEING_REVIVED });
+    e.players = new Map([[MATE, mate2]]);
+    e.lineOfSight = () => true;
+    expect(resolveInteraction(e, out())).toBeNull(); // somebody else is already reviving
+    e.self.revive = { target: MATE };
+    expect(resolveInteraction(e, out())?.kind).toBe('revive'); // ...unless that is us
+    e.self.revive = null;
+    e.players = new Map();
+    // Vehicle entry needs line of sight (precise rule supplied by the game) and a live vehicle.
+    const car = vehicleView(50, { x: 2.5, y: 1, z: 0 });
+    e.vehicles = new Map([[50, car]]);
+    e.vehicleVisible = () => false;
+    expect(resolveInteraction(e, out())).toBeNull();
+    e.vehicleVisible = () => true;
+    expect(resolveInteraction(e, out())?.kind).toBe('enter');
+    car.hp = 0; // burning wreck: cannot be entered
+    expect(resolveInteraction(e, out())).toBeNull();
   });
 
   it('performInteraction queues the action into the next input', () => {

@@ -261,6 +261,17 @@ export class ClientGame implements ClientGameApi {
     const r = this.remoteVehicles.get(v.id);
     return r !== undefined && vehicleHitsPoint(r.state, center, 1.25);
   };
+  /** Server rule for entering: body centre or eye sees the vehicle centre or the seat (+0.7 m). */
+  private readonly vehicleVisibleFn = (v: VehicleView, seat: number, center: Vec3, eye: Vec3): boolean => {
+    const r = this.remoteVehicles.get(v.id);
+    if (!r) return false;
+    const seatPos = seatWorldPosition(r.state, seat, this.seatScratch);
+    seatPos.y += 0.7;
+    const w = this.world;
+    return lineOfSight(w, center, v.pos) || lineOfSight(w, center, seatPos)
+      || lineOfSight(w, eye, v.pos) || lineOfSight(w, eye, seatPos);
+  };
+  private readonly seatScratch = v3();
 
   constructor(transport: Transport, init: MatchInit, settings: SettingsStore, opts: ClientGameOptions = {}) {
     this.transport = transport;
@@ -306,6 +317,7 @@ export class ClientGame implements ClientGameApi {
       training: init.config.mode === 'training' ? this.world.training : null,
       lineOfSight: this.losFn,
       vehicleNear: this.vehicleNearFn,
+      vehicleVisible: this.vehicleVisibleFn,
     };
 
     const localName = init.you !== null ? this.roster.get(init.you)?.name ?? '' : '';
@@ -647,6 +659,7 @@ export class ClientGame implements ClientGameApi {
     const env = this.env;
     env.time = time;
     const s = this.latest;
+    env.ended = s !== null && s.phase === 'ended';
     env.plane = s?.plane ?? null;
     env.planeTime = s ? s.time / 1000 : 0;
     env.seatVehicle = null;
@@ -918,6 +931,7 @@ export class ClientGame implements ClientGameApi {
   // ---------------------------------------------------------------------------
 
   private computeInteraction(p: PlayerState): Interaction | null {
+    if (this.latest?.phase === 'ended') return null; // the server ignores actions after the match
     const eye = eyePosition(p, p.lean, p.yaw, this.eyeScratch);
     const cy = this.input.yaw + p.recoilYaw, cp = this.input.pitch + p.recoilPitch;
     const ccp = Math.cos(cp);
@@ -1400,7 +1414,8 @@ export class ClientGame implements ClientGameApi {
 function createPredictedPlayerStub(): InteractionEnv['self'] {
   return {
     id: -1, team: -1, pos: v3(), stance: 'stand', mode: 'ground', life: 'dead', vehicleId: null, seat: -1,
-    parachuteOpen: false, jumpY: 0, items: { bandage: 0, firstaid: 0, medkit: 0, energy: 0, fuel: 0, frag: 0 },
+    parachuteOpen: false, jumpY: 0, revive: null,
+    items: { bandage: 0, firstaid: 0, medkit: 0, energy: 0, fuel: 0, frag: 0 },
   };
 }
 
