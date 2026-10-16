@@ -13,6 +13,9 @@ import { FIRING_FLAG_TIME } from './tuning';
 export const q2 = (x: number): number => Math.round(x * 100) / 100;
 /** Round angles to 1e-3 rad. */
 export const q3 = (x: number): number => Math.round(x * 1000) / 1000;
+/** Fine rounding for the private self state (reconciliation needs sub-millimetre precision). */
+const q4 = (x: number): number => Math.round(x * 1e4) / 1e4;
+const q5 = (x: number): number => Math.round(x * 1e5) / 1e5;
 
 const MODE_INDEX: Record<string, number> = {};
 MODE_CODES.forEach((m, i) => { MODE_INDEX[m] = i; });
@@ -114,19 +117,22 @@ export function selfState(p: PlayerState): SelfState {
   return {
     id: p.id,
     ack: p.lastSeq,
-    pos: [p.pos.x, p.pos.y, p.pos.z],
-    vel: [p.vel.x, p.vel.y, p.vel.z],
+    pos: [q4(p.pos.x), q4(p.pos.y), q4(p.pos.z)],
+    vel: [q4(p.vel.x), q4(p.vel.y), q4(p.vel.z)],
     onGround: p.onGround,
-    airTime: p.airTime,
-    jumpBuffer: p.jumpBuffer,
-    fallSpeed: p.fallSpeed,
+    airTime: q4(p.airTime),
+    jumpBuffer: q4(p.jumpBuffer),
+    fallSpeed: q4(p.fallSpeed),
     stance: STANCE_CODE[p.stance],
     mode: modeCode(p),
     life: lifeCode(p),
     health: Math.round(p.health * 100) / 100,
     boost: Math.round(p.boost * 100) / 100,
     downedHp: Math.round(p.downedHp * 100) / 100,
-    armor: { ...p.armor },
+    armor: {
+      vest: p.armor.vest, vestHp: q2(p.armor.vestHp), helmet: p.armor.helmet, helmetHp: q2(p.armor.helmetHp),
+      pack: p.armor.pack,
+    },
     weapons: [
       p.weapons[0] ? { ...p.weapons[0] } : null,
       p.weapons[1] ? { ...p.weapons[1] } : null,
@@ -136,25 +142,27 @@ export function selfState(p: PlayerState): SelfState {
     ammo: { ...p.ammo },
     items: { ...p.items },
     capacity: [Math.round(usedCapacity(p) * 100) / 100, capacity(p)],
-    fireCooldown: p.fireCooldown,
-    reloadTimer: p.reloadTimer,
-    reloadTotal: p.reloadTotal,
-    drawTimer: p.drawTimer,
-    ads: p.ads,
+    fireCooldown: q4(p.fireCooldown),
+    reloadTimer: q4(p.reloadTimer),
+    reloadTotal: q4(p.reloadTotal),
+    drawTimer: q4(p.drawTimer),
+    ads: q4(p.ads),
     sprayCount: p.sprayCount,
-    bloom: p.bloom,
+    bloom: q5(p.bloom),
     shotCounter: p.shotCounter,
-    recoilPitch: p.recoilPitch,
-    recoilYaw: p.recoilYaw,
-    use: p.use ? { ...p.use } : null,
-    revive: p.revive ? { ...p.revive } : null,
+    recoilPitch: q5(p.recoilPitch),
+    recoilYaw: q5(p.recoilYaw),
+    use: p.use ? { ...p.use, elapsed: q4(p.use.elapsed) } : null,
+    revive: p.revive ? { ...p.revive, elapsed: q4(p.revive.elapsed) } : null,
     revivedBy: p.revivedBy,
     vehicleId: p.vehicleId,
     seat: p.seat,
     parachuteOpen: p.parachuteOpen,
-    jumpY: p.jumpY,
+    jumpY: q2(p.jumpY),
     throwCooldown: p.throwCooldown,
-    stats: { ...p.stats },
+    stats: {
+      ...p.stats, damage: Math.round(p.stats.damage * 10) / 10, spawnTime: q2(p.stats.spawnTime), deathTime: q2(p.stats.deathTime),
+    },
     placement: p.placement,
     spectating: p.spectating,
     killerId: p.killerId,

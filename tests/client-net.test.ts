@@ -1026,7 +1026,6 @@ describe('parity with the real GameSim', () => {
       corrections.push(game.correction);
     });
     const maxCorrection = Math.max(...corrections);
-    if (process.env.DZ_DEBUG) console.log('PARITY', { maxCorrection, shots, pending: game.pendingInputs, pos: game.predictedState!.pos, mag: game.predictedState!.weapons[0], nonzero: corrections.filter((c) => c > 1e-9).length, spawn: lb.runner.sim.world.training!.spawn });
     expect(shots).toBeGreaterThan(10);
     // Prediction runs the same rules as the server: corrections stay at numerical noise.
     expect(maxCorrection).toBeLessThan(0.02);
@@ -1038,5 +1037,196 @@ describe('parity with the real GameSim', () => {
     expect(pred.shotCounter).toBe(me.shotCounter);
     expect(pred.recoilPitch).toBeCloseTo(me.recoilPitch, 6);
     expect(pred.weapons[0]?.mag).toBe(me.weapons[0]?.mag);
+  });
+
+  it('predicts the plane jump, freefall, chute and landing on the island (BR, 60 ms latency)', () => {
+    const lb = new Loopback({ ...CONFIG, mode: 'br', maxPlayers: 2, teamSize: 1, seed: 11 }, 60);
+    lb.run(30);
+    const game = lb.game!;
+    const sim = lb.runner.sim;
+    expect(game.getFrame().self?.mode).toBe('plane');
+    // Wait until the plane is over the island, then jump.
+    let guard = 0;
+    while (game.getFrame().interaction?.kind !== 'jump' && guard++ < 2000) lb.frame();
+    expect(game.getFrame().interaction?.kind).toBe('jump');
+    const planeAtJump = { ...game.getFrame().planePos! };
+    game.performInteraction();
+    const modes = new Set<string>();
+    const corrections: number[] = [];
+    let chuteAsked = false;
+    let landed = false;
+    game.events.on('localLand', () => { landed = true; });
+    for (let i = 0; i < 3000 && !(landed && i > 200); i++) {
+      const self = game.getFrame().self!;
+      if (i === 5) {
+        // The predicted jump starts next to where the plane was drawn.
+        expect(Math.hypot(self.pos.x - planeAtJump.x, self.pos.z - planeAtJump.z)).toBeLessThan(15);
+      }
+      if (self.mode === 'freefall' && i > 60 && !chuteAsked && game.getFrame().interaction?.kind === 'chute') {
+        game.performInteraction();
+        chuteAsked = true;
+      }
+      game.input.keyDown('KeyW');
+      if (i % 120 === 0) game.input.mouseMove(40, 0);
+      modes.add(self.mode);
+      if (i > 3) corrections.push(game.correction);
+      lb.frame();
+    }
+    game.input.keyUp('KeyW');
+    lb.run(60);
+    expect(modes.has('freefall')).toBe(true);
+    expect(modes.has('parachute')).toBe(true);
+    expect(landed).toBe(true);
+    const me = [...sim.players.values()].find((p) => !p.isBot)!;
+    expect(me.mode === 'ground' || me.mode === 'swim').toBe(true);
+    expect(Math.max(...corrections)).toBeLessThan(0.05);
+    expect(game.predictedState!.pos.x).toBeCloseTo(me.pos.x, 3);
+    expect(game.predictedState!.pos.z).toBeCloseTo(me.pos.z, 3);
+  });
+
+  it('predicts the driven vehicle with stepVehicle (driver seat, 60 ms latency)', () => {
+    const lb = new Loopback({ ...CONFIG, mode: 'training', maxPlayers: 4, teamSize: 1, infiniteAmmo: true }, 60);
+    lb.run(30);
+    const game = lb.game!;
+    const sim = lb.runner.sim;
+    const me = [...sim.players.values()].find((p) => !p.isBot)!;
+    const car = [...sim.vehicles.values()].find((v) => v.type === 'buggy')!;
+    // Server-side "teleport" next to the car (the client snaps to the authoritative position).
+    me.pos.x = car.pos.x + 3;
+    me.pos.z = car.pos.z;
+    me.pos.y = sim.world.groundAt(me.pos.x, me.pos.z, car.pos.y + 2);
+    me.vel.x = me.vel.y = me.vel.z = 0;
+    lb.run(30);
+    expect(game.getFrame().interaction?.kind).toBe('enter');
+    game.performInteraction();
+    lb.run(30);
+    expect(game.getFrame().self!.vehicleId).toBe(car.id);
+    expect(game.getFrame().self!.seat).toBe(0);
+    expect(game.getFrame().vehicles.get(car.id)!.predicted).toBe(true);
+    const input = game.input;
+    input.setAim(car.yaw, 0);
+    const vCorr: number[] = [];
+    let maxSpeed = 0;
+    lb.run(420, (i) => {
+      if (i === 0) input.keyDown('KeyW');
+      if (i === 150) input.keyDown('KeyD');
+      if (i === 220) { input.keyUp('KeyD'); input.keyDown('KeyA'); }
+      if (i === 300) { input.keyUp('KeyA'); input.keyUp('KeyW'); input.keyDown('KeyS'); }
+      if (i > 5) vCorr.push(game.vehicleCorrection);
+      maxSpeed = Math.max(maxSpeed, Math.abs(game.getFrame().vehicles.get(car.id)!.speed));
+    });
+    input.keyUp('KeyS');
+    expect(maxSpeed).toBeGreaterThan(10);
+    // The vehicle state on the wire is quantised (cm / mrad): corrections stay tiny and smooth.
+    expect(Math.max(...vCorr)).toBeLessThan(0.1);
+    const pv = game.predictedVehicle!;
+    expect(Math.hypot(pv.pos.x - car.pos.x, pv.pos.z - car.pos.z)).toBeLessThan(car.vel.x ** 2 + car.vel.z ** 2 > 1 ? 3 : 0.1);
+    // The rider is drawn at the driver seat of the predicted vehicle.
+    const f = game.getFrame();
+    expect(Math.hypot(f.self!.pos.x - f.vehicles.get(car.id)!.pos.x, f.self!.pos.z - f.vehicles.get(car.id)!.pos.z)).toBeLessThan(2);
+  });
+});
+
+
+// ---------------------------------------------------------------------------
+// Transports
+// ---------------------------------------------------------------------------
+
+import { WebSocketServer } from 'ws';
+import type { AddressInfo } from 'node:net';
+import { LocalMatchHost } from '../src/client/net/localHost';
+import { WsTransport } from '../src/client/net';
+
+describe('single-player host (worker logic) end to end', () => {
+  it('runs a local training match through the full protocol path', () => {
+    let now = 0;
+    const transport = new StubTransport('local');
+    let game: ClientGame | null = null;
+    const posted: string[] = [];
+    const host = new LocalMatchHost({
+      now: () => now,
+      autoLoop: false,
+      post: (m) => {
+        posted.push(m.t);
+        const msg = structuredClone(m);
+        if (msg.t === 'matchInit') game = new ClientGame(transport, msg.init, memorySettings(), { now: () => now });
+        else transport.deliver(msg);
+      },
+    });
+    // Garbage is ignored exactly like on the server.
+    host.receive({ t: 'input', inputs: [{ seq: Number.NaN }] });
+    host.receive('{"t":"ping"');
+    expect(host.running).toBe(false);
+    host.receive({
+      t: 'startLocal', name: 'Solo',
+      config: { ...CONFIG, mode: 'training', maxPlayers: 4, teamSize: 1, botFill: true, infiniteAmmo: true },
+    });
+    expect(posted[0]).toBe('matchInit');
+    const g = game as unknown as ClientGame;
+    expect(g.world.kind).toBe('training');
+    const step = (frames: number, each?: (i: number) => void) => {
+      for (let i = 0; i < frames; i++) {
+        each?.(i);
+        now += 1000 / 60;
+        host.tick();
+        g.update(1 / 60);
+        for (const m of transport.sent.splice(0)) host.receive(structuredClone(m));
+      }
+    };
+    step(30);
+    const start = { ...g.getFrame().self!.pos };
+    expect(g.getFrame().phase).toBe('playing');
+    g.input.keyDown('KeyW');
+    let maxCorrection = 0;
+    step(90, () => { maxCorrection = Math.max(maxCorrection, g.correction); });
+    g.input.keyUp('KeyW');
+    step(20);
+    const f = g.getFrame();
+    expect(Math.hypot(f.self!.pos.x - start.x, f.self!.pos.z - start.z)).toBeGreaterThan(3);
+    expect(maxCorrection).toBeLessThan(0.01);
+    expect(f.ping).toBe(0);
+    expect(f.trainingTargets.length).toBeGreaterThan(0);
+    expect(posted.filter((t) => t === 'pong').length).toBeGreaterThan(0);
+    host.receive({ t: 'leaveMatch' });
+    expect(posted[posted.length - 1]).toBe('backToLobby');
+    expect(host.running).toBe(false);
+    g.dispose();
+  });
+});
+
+describe('WsTransport', () => {
+  it('connects, exchanges JSON messages and reports close', async () => {
+    const wss = new WebSocketServer({ port: 0, path: '/ws' });
+    await new Promise<void>((r) => wss.once('listening', () => r()));
+    const port = (wss.address() as AddressInfo).port;
+    wss.on('connection', (sock) => {
+      sock.on('message', (data) => {
+        const msg = JSON.parse(String(data)) as ClientMessage;
+        if (msg.t === 'ping') {
+          sock.send(JSON.stringify({ t: 'pong', c: msg.c, s: 42 }));
+          sock.send('not json');
+          sock.send(JSON.stringify({ t: 'backToLobby' }));
+        }
+      });
+    });
+    try {
+      const t = await WsTransport.connect(`ws://127.0.0.1:${port}/ws`);
+      expect(t.kind).toBe('ws');
+      const got: ServerMessage[] = [];
+      t.onMessage((m) => got.push(m));
+      const closed = new Promise<void>((r) => t.onClose(() => r()));
+      t.send({ t: 'ping', c: 7 });
+      await new Promise<void>((r) => {
+        const iv = setInterval(() => { if (got.length >= 2) { clearInterval(iv); r(); } }, 5);
+      });
+      expect(got[0]).toEqual({ t: 'pong', c: 7, s: 42 });
+      expect(got[1]).toEqual({ t: 'backToLobby' });
+      for (const c of wss.clients) c.close();
+      await closed;
+      t.send({ t: 'ping', c: 8 }); // no-op once closed
+      await expect(WsTransport.connect('ws://127.0.0.1:1/ws', 2000)).rejects.toThrow();
+    } finally {
+      await new Promise<void>((r) => wss.close(() => r()));
+    }
   });
 });

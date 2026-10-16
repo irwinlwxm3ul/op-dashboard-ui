@@ -35,16 +35,17 @@ export function updateZoneTarget(sys: BotSystem, b: BotState, p: PlayerState): v
   const rad = safe * (0.2 + 0.55 * b.rng.next());
   ax = Math.cos(ang);
   az = Math.sin(ang);
+  // Pull toward the centre until the point is on land (circle centres always are).
+  let f = 1;
   let x = z.nx + ax * rad, zz = z.nz + az * rad;
-  if (!sys.grid.nearestFree(x, zz, 10, sys.xz)) {
-    // In water or blocked: fall back toward the centre.
-    x = z.nx;
-    zz = z.nz;
-    if (sys.grid.nearestFree(x, zz, 20, sys.xz)) {
-      x = sys.xz.x;
-      zz = sys.xz.z;
-    }
-  } else {
+  const w = sys.world;
+  while (f > 0 && w.heightAt(x, zz) < w.waterLevel + 0.5) {
+    f -= 0.2;
+    x = z.nx + ax * rad * Math.max(0, f);
+    zz = z.nz + az * rad * Math.max(0, f);
+  }
+  // Snap to a free cell when the area is mapped already (the planner snaps blocked goals too).
+  if (sys.grid.nearestFree(x, zz, 8, sys.xz, false)) {
     x = sys.xz.x;
     zz = sys.xz.z;
   }

@@ -31,6 +31,8 @@ const HEURISTIC_W = 1.15;
 const NEAR_PENALTY = 0.45;
 const SQRT2 = Math.SQRT2;
 const STEP_COST: readonly number[] = [1, SQRT2, 1, SQRT2, 1, SQRT2, 1, SQRT2];
+/** Clearance (m) a smoothed shortcut keeps from walls / trunks (character radius + margin). */
+const SMOOTH_CLEARANCE = 0.42;
 /** Max straight segment length produced by smoothing (bounds smoothing cost). */
 const MAX_SEGMENT = 40;
 const CACHE_SIZE = 128;
@@ -132,8 +134,15 @@ export class PathPlanner {
     let guard = 64;
     while (budget > 0 && guard-- > 0) {
       if (!this.active) {
-        const next = this.queue.shift();
+        const next = this.queue[0];
         if (!next) return;
+        // Start / goal tiles must exist; generate them within the tick budget or wait.
+        if (!this.grid.ready(next.sx, next.sz, 5) || !this.grid.ready(next.gx, next.gz, 9)) {
+          if (Math.hypot(next.gx - next.sx, next.gz - next.sz) <= MAX_PLAN_DIST) return;
+          // Long trips are clamped in begin(); only the start must be ready.
+          if (!this.grid.ready(next.sx, next.sz, 5)) return;
+        }
+        this.queue.shift();
         budget -= 20;
         if (!this.begin(next)) continue;
       }
@@ -347,7 +356,7 @@ export class PathPlanner {
       const px = last ? endX : this.cx(this.cellBuf[k]);
       const pz = last ? endZ : this.cz(this.cellBuf[k]);
       const seg = Math.hypot(px - ax, pz - az);
-      if (seg <= MAX_SEGMENT && grid.lineOfWalk(ax, az, px, pz, true, true)) continue;
+      if (seg <= MAX_SEGMENT && grid.lineOfWalk(ax, az, px, pz, false, true) && grid.clearSegment(ax, az, px, pz, SMOOTH_CLEARANCE)) continue;
       // Emit the previous cell as a waypoint. If that is the anchor itself (the anchor sits off the
       // cell centre after relaxing), emit this cell instead: the A* step between them is valid.
       let wc = this.cellBuf[k - 1];

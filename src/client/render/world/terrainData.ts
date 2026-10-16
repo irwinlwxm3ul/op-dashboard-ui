@@ -74,6 +74,15 @@ const C = {
   snow: lin(PALETTE.snow),
 };
 
+/** Scratch colour for the per-vertex palette blend (module level: no per-vertex closures). */
+const col = new Float64Array(3);
+function setC(c: Rgb): void {
+  col[0] = c[0]; col[1] = c[1]; col[2] = c[2];
+}
+function mixC(c: Rgb, t: number): void {
+  col[0] += (c[0] - col[0]) * t; col[1] += (c[1] - col[1]) * t; col[2] += (c[2] - col[2]) * t;
+}
+
 const smooth = (e0: number, e1: number, x: number): number => {
   const t = Math.min(1, Math.max(0, (x - e0) / (e1 - e0)));
   return t * t * (3 - 2 * t);
@@ -127,56 +136,49 @@ export function computeTerrainShading(
       const h = heights[k];
       const ny = normals[k * 3 + 1];
       const mat = surfaceOf(k);
-      let r = 0, g = 0, b = 0;
       let grassW = 0, rockW = 0;
-      const set = (c: Rgb): void => { r = c[0]; g = c[1]; b = c[2]; };
-      const mixIn = (c: Rgb, t: number): void => {
-        r += (c[0] - r) * t; g += (c[1] - g) * t; b += (c[2] - b) * t;
-      };
-
       switch (mat) {
         case 'grass': {
           // Large meadows drift between lush and dry; mid-scale patches add darker clumps.
           const macro = fbm2(ns, x / 230, z / 230, 3) * 0.5 + 0.5;
           const patch = valueNoise2(ns + 7, x / 38, z / 38) * 0.5 + 0.5;
-          set(C.grassLush);
-          mixIn(C.grassDry, smooth(0.45, 0.85, macro) * 0.85);
-          mixIn(C.grassDark, smooth(0.55, 0.9, patch) * 0.45);
+          setC(C.grassLush);
+          mixC(C.grassDry, smooth(0.45, 0.85, macro) * 0.85);
+          mixC(C.grassDark, smooth(0.55, 0.9, patch) * 0.45);
           grassW = 1;
           break;
         }
-        case 'dirt': {
-          set(C.dirt);
-          mixIn(C.grassDry, (valueNoise2(ns + 3, x / 14, z / 14) * 0.5 + 0.5) * 0.25);
+        case 'dirt':
+          setC(C.dirt);
+          mixC(C.grassDry, (valueNoise2(ns + 3, x / 14, z / 14) * 0.5 + 0.5) * 0.25);
           break;
-        }
         case 'rock':
-          set(C.rock);
-          mixIn(C.rockDark, valueNoise2(ns + 11, x / 22, z / 22) * 0.5 + 0.5);
+          setC(C.rock);
+          mixC(C.rockDark, valueNoise2(ns + 11, x / 22, z / 22) * 0.5 + 0.5);
           rockW = 1;
           break;
         case 'sand':
-          set(C.sand);
-          mixIn(C.wetSand, smooth(waterLevel + 1.4, waterLevel + 0.2, h));
+          setC(C.sand);
+          mixC(C.wetSand, smooth(waterLevel + 1.4, waterLevel + 0.2, h));
           break;
         case 'road':
-          set(C.road);
+          setC(C.road);
           break;
         case 'concrete':
-          set(C.concrete);
+          setC(C.concrete);
           break;
         case 'wood':
-          set(C.wood);
+          setC(C.wood);
           break;
         case 'metal':
-          set(C.metal);
+          setC(C.metal);
           break;
         case 'snow':
-          set(C.snow);
+          setC(C.snow);
           break;
         case 'water':
         default:
-          set(C.seabed);
+          setC(C.seabed);
           break;
       }
 
@@ -184,7 +186,7 @@ export function computeTerrainShading(
       if (mat === 'grass' || mat === 'dirt' || mat === 'sand' || mat === 'snow') {
         const steep = smooth(0.84, 0.66, ny);
         if (steep > 0) {
-          mixIn(C.rock, steep);
+          mixC(C.rock, steep);
           rockW = Math.max(rockW, steep);
           grassW *= 1 - steep;
         }
@@ -203,7 +205,7 @@ export function computeTerrainShading(
       }
       const cav = h - sum / cnt;
       const ao = Math.min(1.05, Math.max(0.78, 1 + cav * 0.05));
-      r *= ao; g *= ao; b *= ao;
+      let r = col[0] * ao, g = col[1] * ao, b = col[2] * ao;
 
       // Underwater: darker and greener with depth (the water shader adds the rest).
       if (h < waterLevel) {

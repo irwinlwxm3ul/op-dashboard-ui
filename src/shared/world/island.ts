@@ -15,7 +15,7 @@ import { MILITARY_NAMES, TOWN_NAMES } from './names';
 import { Noise2 } from './noise';
 import { type PropCtx, type PropInfo, placeBarrier, placeContainer, placeCrates, placeFence, placeSandbags } from './props';
 import {
-  type Road, chaikin, distToSegment, flattenRoads, rasterizeRoads, resample, roadProfile, roadSegments, routeRoad,
+  type Road, RouteGrid, chaikin, distToSegment, flattenRoads, rasterizeRoads, resample, roadProfile, roadSegments,
 } from './roads';
 import { placeLoot, placeVehicles } from './spawns';
 import { SURF } from './surfaces';
@@ -116,6 +116,8 @@ function makeShape(seed: number): IslandShape {
     return f * f * f * along;
   };
   const height = (x: number, z: number): number => {
+    // |coast noise| <= 44 m, so beyond r = 530 the sea floor is at its -12 m clamp.
+    if (x * x + z * z >= 530 * 530) return -12;
     const d = coastDist(x, z);
     const shore = d >= 0 ? -0.8 + (3.3 * d) / (d + 14) : Math.max(-12, -0.8 + 0.236 * d);
     if (d <= 8) return shore;
@@ -124,8 +126,7 @@ function makeShape(seed: number): IslandShape {
     const t = Math.min(1, Math.max(0, (h01 - 0.22) / 0.62));
     const hills = 40 * t * t;
     const m = mountain(x, z);
-    const ridged = 1 - Math.abs(nMount.fbm(x / 60, z / 60, 3));
-    const mount = m * (72 + 14 * ridged);
+    const mount = m > 0 ? m * (66 + 12 * (1 - Math.abs(nMount.fbm(x / 60, z / 60, 3)))) : 0;
     const detail = 2.2 * nDetail.fbm(x / 40, z / 40, 3);
     const land = hills * (1 - 0.6 * Math.min(1, m * 1.5)) + mount + detail;
     return shore + inland * Math.max(0, land);
@@ -241,19 +242,17 @@ function buildRoads(seed: number, hf: Heightfield, towns: TownPlan[]): { roads: 
   }
 
   const trunk: Road[] = [];
+  // Water is impassable, high ground costly, and town centres mildly avoided by through roads.
+  const grid = new RouteGrid(hf, 16, (x, z, h) => (h < 1.8 ? Infinity : h > 30 ? (h - 30) * 0.08 : 0), (x, z) => {
+    for (const t of towns) {
+      const dx = t.def.x - x, dz = t.def.z - z, rr = t.def.r * 0.6;
+      if (dx * dx + dz * dz < rr * rr) return t.def.id;
+    }
+    return -1;
+  });
   for (const [i, j] of edges) {
     const A = towns[i].def, B = towns[j].def;
-    const path = routeRoad(hf, A.x, A.z, B.x, B.z, 16, (x, z, h) => {
-      if (h < 1.8) return Infinity;
-      let p = h > 30 ? (h - 30) * 0.08 : 0;
-      // Mild preference to skirt other towns rather than cut through their centres.
-      for (const t of towns) {
-        if (t.def.id === A.id || t.def.id === B.id) continue;
-        const d = Math.hypot(t.def.x - x, t.def.z - z);
-        if (d < t.def.r * 0.6) p += 0.6;
-      }
-      return p;
-    });
+    const path = grid.route(A.x, A.z, B.x, B.z, A.id, B.id, 0.6);
     if (!path) continue;
     const pts = resample(chaikin(path, 3), 10);
     trunk.push({ pts, h: roadProfile(hf, pts, 1.6), width: ROAD_W });
@@ -525,6 +524,17 @@ function placeYardFences(ctx: PropCtx, plans: BuildingPlan[]): void {
 function computeSurfaces(world: GeneratedWorld, onRoad: Uint8Array, towns: TownPlan[], seed: number): void {
   const hf = world.hf, res = hf.res, h = hf.h, cell = hf.cell;
   const nDirt = new Noise2(hash32(seed, S_SURF)), nRock = new Noise2(hash32(seed, S_SURF + 1));
+  // Vertices inside town cores (packed dirt).
+  const core = new Uint8Array(res * res);
+  for (const t of towns) {
+    const rr = t.def.r * 0.9;
+    const i0 = Math.max(0, Math.floor((t.def.x - rr + hf.half) / cell)), i1 = Math.min(res - 1, Math.ceil((t.def.x + rr + hf.half) / cell));
+    const j0 = Math.max(0, Math.floor((t.def.z - rr + hf.half) / cell)), j1 = Math.min(res - 1, Math.ceil((t.def.z + rr + hf.half) / cell));
+    for (let j = j0; j <= j1; j++) for (let i = i0; i <= i1; i++) {
+      const dx = hf.coord(i) - t.def.x, dz = hf.coord(j) - t.def.z;
+      if (dx * dx + dz * dz < rr * rr) core[j * res + i] = 1;
+    }
+  }
   for (let j = 0; j < res; j++) {
     const z = hf.coord(j);
     for (let i = 0; i < res; i++) {
@@ -539,14 +549,7 @@ function computeSurfaces(world: GeneratedWorld, onRoad: Uint8Array, towns: TownP
         const dirt = nDirt.fbm(x / 55, z / 55, 3);
         if (ny < 0.8 || hv > 64 + 10 * nRock.fbm(x / 40, z / 40, 2)) s = SURF.rock;
         else if (hv < 2.4) s = dirt > 0.1 ? SURF.sand : SURF.grass;
-        else {
-          let townDirt = false;
-          for (const t of towns) {
-            const d = Math.hypot(t.def.x - x, t.def.z - z);
-            if (d < t.def.r * 0.9 && dirt > -0.1) { townDirt = true; break; }
-          }
-          s = townDirt || dirt > 0.36 ? SURF.dirt : SURF.grass;
-        }
+        else s = (core[v] && dirt > -0.1) || dirt > 0.36 ? SURF.dirt : SURF.grass;
       }
       world.surface[v] = s;
     }
@@ -597,6 +600,13 @@ export function generateIsland(seed: number): GeneratedWorld {
   for (let i = 0; i < pctx.plans.length; i++) {
     const built = generateBuilding(pctx.plans[i], i, hf, world.boxes);
     world.buildings.push(built.def);
+    // Entrance steps can reach past the door apron on slopes: keep props and plants off them.
+    for (const id of built.def.boxIds) {
+      const bx = world.boxes[id];
+      if (bx.kind === 'stairs' && (bx.min.x < built.def.min.x || bx.max.x > built.def.max.x || bx.min.z < built.def.min.z || bx.max.z > built.def.max.z)) {
+        mask.markRect(bx.min.x - 0.5, bx.min.z - 0.5, bx.max.x + 0.5, bx.max.z + 0.5, M_APRON | M_NOVEG);
+      }
+    }
     for (const r of built.rooms) rooms.push(r);
     if (built.stairZone) stairZones.set(i, built.stairZone);
     tierOf.push(pctx.tiers[i]);
@@ -611,7 +621,7 @@ export function generateIsland(seed: number): GeneratedWorld {
 
   // Vegetation.
   placeVegetation(world, mask, new Rng(hash32(seed, S_VEG)), {
-    trees: TARGET_TREES, rocks: TARGET_ROCKS, bushes: TARGET_BUSHES, noiseSeed: hash32(seed, S_VEG + 1), minLandH: 2.2,
+    trees: TARGET_TREES, rocks: TARGET_ROCKS, bushes: TARGET_BUSHES, noiseSeed: hash32(seed, S_VEG + 1), minLandH: 2.2, extent: 490,
   });
 
   // Loot.

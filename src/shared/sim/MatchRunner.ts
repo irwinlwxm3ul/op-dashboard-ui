@@ -46,9 +46,13 @@ interface ClientEntry {
   gone: Set<EntityId>;
   view: Vec3;
   hasView: boolean;
+  /** Snapshots sent to this client (the first one carries every entity). */
+  sent: number;
 }
 
 const SNAP_INTERVAL_MS = 1000 / SNAPSHOT_RATE;
+/** Parked (sleeping) vehicles never change: refresh them every 2 s only (clients keep them 10 s). */
+const SLEEPING_VEHICLE_EVERY = 40;
 const TIMING_WINDOW = 300;
 
 function now(): number {
@@ -89,7 +93,7 @@ export class MatchRunner {
       if (this.entries.has(c.id)) continue;
       const e: ClientEntry = {
         c, playerId: null, tokens: INPUT_BURST, lastSeq: -1, outbox: [], combat: new Map(), gone: new Set(),
-        view: { x: 0, y: 0, z: 0 }, hasView: false,
+        view: { x: 0, y: 0, z: 0 }, hasView: false, sent: 0,
       };
       this.entries.set(c.id, e);
       this.entryList.push(e);
@@ -328,6 +332,8 @@ export class MatchRunner {
     for (const e of this.entryList) {
       this.updateView(e);
       const me = e.playerId !== null ? sim.players.get(e.playerId) ?? null : null;
+      const full = e.sent === 0;
+      e.sent++;
       const vx = e.hasView ? e.view.x : 0, vy = e.hasView ? e.view.y : 0, vz = e.hasView ? e.view.z : 0;
       const players: NetPlayer[] = [];
       let gone: EntityId[] | undefined;
@@ -341,7 +347,7 @@ export class MatchRunner {
         }
         if (p.life !== 'dead' && e.gone.has(p.id)) e.gone.delete(p.id);
         const mate = me !== null && p.team === me.team;
-        let always = p === me || mate;
+        let always = full || p === me || mate;
         if (!always && me) {
           const lt = e.combat.get(p.id);
           always = lt !== undefined && time - lt <= COMBAT_RELEVANCE_TIME;
@@ -357,10 +363,10 @@ export class MatchRunner {
       const vehicles: NetVehicle[] = [];
       for (const v of sim.vehicleList) {
         const mine = me !== null && me.vehicleId === v.id;
-        if (!mine) {
+        if (!mine && !full) {
           const vrt = sim.vrtById.get(v.id);
           const every = vrt && vrt.asleep
-            ? RELEVANCE_BANDS[RELEVANCE_BANDS.length - 1].every
+            ? SLEEPING_VEHICLE_EVERY
             : this.bandEvery(v.pos.x - vx, v.pos.y - vy, v.pos.z - vz);
           if ((n + v.id) % every !== 0) continue;
         }

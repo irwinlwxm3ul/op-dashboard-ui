@@ -26,19 +26,6 @@ export function distToSegment(px: number, pz: number, ax: number, az: number, bx
   return out;
 }
 
-/** Distance from P to the nearest road centreline (Infinity if no roads). */
-export function distToRoads(roads: readonly Road[], px: number, pz: number): number {
-  let best = Infinity;
-  for (const r of roads) {
-    for (let i = 0; i + 1 < r.pts.length; i++) {
-      const a = r.pts[i], b = r.pts[i + 1];
-      const d = distToSegment(px, pz, a.x, a.z, b.x, b.z).d - r.width / 2;
-      if (d < best) best = d;
-    }
-  }
-  return best;
-}
-
 /** Minimal binary min-heap of node ids keyed by a Float64 score (ties broken by id). */
 class NodeHeap {
   private ids: number[] = [];
@@ -87,76 +74,104 @@ class NodeHeap {
 }
 
 /**
- * A* on a coarse lattice (spacing `step`) from A to B. `penalty(x, z, h)` returns an extra cost
- * multiplier >= 0 for a node, or Infinity for impassable nodes. Grade is penalised quadratically.
- * Returns world points from exactly A to exactly B, or null if unreachable.
+ * Coarse routing lattice (spacing `step`) with per-node heights, cost multipliers (Infinity =
+ * impassable) and an optional tag (e.g. the town whose centre a node lies in).
  */
-export function routeRoad(
-  hf: Heightfield, ax: number, az: number, bx: number, bz: number, step: number,
-  penalty: (x: number, z: number, h: number) => number,
-): Vec2[] | null {
-  const half = hf.half;
-  const n = Math.floor(hf.size / step) + 1;
-  const N = n * n;
-  const nodeH = new Float64Array(N);
-  const pen = new Float64Array(N);
-  for (let j = 0; j < n; j++) {
-    for (let i = 0; i < n; i++) {
-      const x = -half + i * step, z = -half + j * step, h = hf.heightAt(x, z);
-      nodeH[j * n + i] = h;
-      pen[j * n + i] = penalty(x, z, h);
-    }
-  }
-  const idx = (x: number, z: number): number => {
-    const i = Math.min(n - 1, Math.max(0, Math.round((x + half) / step)));
-    const j = Math.min(n - 1, Math.max(0, Math.round((z + half) / step)));
-    return j * n + i;
-  };
-  const start = idx(ax, az), goal = idx(bx, bz);
-  pen[start] = Math.min(pen[start], 0);
-  pen[goal] = Math.min(pen[goal], 0);
-  const g = new Float64Array(N).fill(Infinity);
-  const came = new Int32Array(N).fill(-1);
-  const closed = new Uint8Array(N);
-  const gx = goal % n, gz = Math.floor(goal / n);
-  const heap = new NodeHeap();
-  g[start] = 0;
-  heap.push(start, 0);
-  const DI = [1, -1, 0, 0, 1, 1, -1, -1];
-  const DJ = [0, 0, 1, -1, 1, -1, 1, -1];
-  while (heap.size > 0) {
-    const cur = heap.pop();
-    if (closed[cur]) continue;
-    closed[cur] = 1;
-    if (cur === goal) break;
-    const ci = cur % n, cj = Math.floor(cur / n);
-    for (let k = 0; k < 8; k++) {
-      const ni = ci + DI[k], nj = cj + DJ[k];
-      if (ni < 0 || nj < 0 || ni >= n || nj >= n) continue;
-      const nb = nj * n + ni;
-      if (closed[nb] || pen[nb] === Infinity) continue;
-      const len = k < 4 ? step : step * Math.SQRT2;
-      const grade = Math.abs(nodeH[nb] - nodeH[cur]) / len;
-      const c = len * (1 + 0.5 * (pen[cur] + pen[nb]) + 40 * grade * grade);
-      const ng = g[cur] + c;
-      if (ng < g[nb]) {
-        g[nb] = ng;
-        came[nb] = cur;
-        const hx = (ni - gx) * step, hz = (nj - gz) * step;
-        heap.push(nb, ng + Math.sqrt(hx * hx + hz * hz));
+export class RouteGrid {
+  readonly n: number;
+  readonly step: number;
+  readonly half: number;
+  private readonly h: Float64Array;
+  private readonly pen: Float64Array;
+  private readonly tag: Int16Array;
+
+  constructor(
+    hf: Heightfield, step: number,
+    penalty: (x: number, z: number, h: number) => number,
+    tagOf: (x: number, z: number) => number = () => -1,
+  ) {
+    this.step = step;
+    this.half = hf.half;
+    const n = (this.n = Math.floor(hf.size / step) + 1);
+    this.h = new Float64Array(n * n);
+    this.pen = new Float64Array(n * n);
+    this.tag = new Int16Array(n * n);
+    for (let j = 0; j < n; j++) {
+      for (let i = 0; i < n; i++) {
+        const x = -this.half + i * step, z = -this.half + j * step, h = hf.heightAt(x, z);
+        const k = j * n + i;
+        this.h[k] = h;
+        this.pen[k] = penalty(x, z, h);
+        this.tag[k] = tagOf(x, z);
       }
     }
   }
-  if (!closed[goal]) return null;
-  const nodes: number[] = [];
-  for (let c = goal; c !== -1; c = came[c]) nodes.push(c);
-  nodes.reverse();
-  const pts: Vec2[] = [{ x: ax, z: az }];
-  for (let k = 1; k < nodes.length - 1; k++) {
-    pts.push({ x: -half + (nodes[k] % n) * step, z: -half + Math.floor(nodes[k] / n) * step });
+
+  private idx(x: number, z: number): number {
+    const n = this.n;
+    const i = Math.min(n - 1, Math.max(0, Math.round((x + this.half) / this.step)));
+    const j = Math.min(n - 1, Math.max(0, Math.round((z + this.half) / this.step)));
+    return j * n + i;
   }
-  pts.push({ x: bx, z: bz });
-  return pts;
+
+  /**
+   * A* from A to B. Nodes tagged with anything other than -1, tagA or tagB cost `tagPenalty`
+   * extra; grade is penalised quadratically. Returns world points from exactly A to exactly B,
+   * or null if unreachable.
+   */
+  route(ax: number, az: number, bx: number, bz: number, tagA: number, tagB: number, tagPenalty: number): Vec2[] | null {
+    const n = this.n, N = n * n, step = this.step, half = this.half;
+    const start = this.idx(ax, az), goal = this.idx(bx, bz);
+    const cost = new Float64Array(N);
+    for (let k = 0; k < N; k++) {
+      const t = this.tag[k];
+      cost[k] = this.pen[k] + (t >= 0 && t !== tagA && t !== tagB ? tagPenalty : 0);
+    }
+    cost[start] = Math.min(cost[start], 0);
+    cost[goal] = Math.min(cost[goal], 0);
+    const g = new Float64Array(N).fill(Infinity);
+    const came = new Int32Array(N).fill(-1);
+    const closed = new Uint8Array(N);
+    const gx = goal % n, gz = Math.floor(goal / n);
+    const heap = new NodeHeap();
+    const nodeH = this.h;
+    g[start] = 0;
+    heap.push(start, 0);
+    const DI = [1, -1, 0, 0, 1, 1, -1, -1];
+    const DJ = [0, 0, 1, -1, 1, -1, 1, -1];
+    while (heap.size > 0) {
+      const cur = heap.pop();
+      if (closed[cur]) continue;
+      closed[cur] = 1;
+      if (cur === goal) break;
+      const ci = cur % n, cj = Math.floor(cur / n);
+      for (let k = 0; k < 8; k++) {
+        const ni = ci + DI[k], nj = cj + DJ[k];
+        if (ni < 0 || nj < 0 || ni >= n || nj >= n) continue;
+        const nb = nj * n + ni;
+        if (closed[nb] || cost[nb] === Infinity) continue;
+        const len = k < 4 ? step : step * Math.SQRT2;
+        const grade = Math.abs(nodeH[nb] - nodeH[cur]) / len;
+        const ng = g[cur] + len * (1 + 0.5 * (cost[cur] + cost[nb]) + 40 * grade * grade);
+        if (ng < g[nb]) {
+          g[nb] = ng;
+          came[nb] = cur;
+          const hx = (ni - gx) * step, hz = (nj - gz) * step;
+          heap.push(nb, ng + Math.sqrt(hx * hx + hz * hz));
+        }
+      }
+    }
+    if (!closed[goal]) return null;
+    const nodes: number[] = [];
+    for (let c = goal; c !== -1; c = came[c]) nodes.push(c);
+    nodes.reverse();
+    const pts: Vec2[] = [{ x: ax, z: az }];
+    for (let k = 1; k < nodes.length - 1; k++) {
+      pts.push({ x: -half + (nodes[k] % n) * step, z: -half + Math.floor(nodes[k] / n) * step });
+    }
+    pts.push({ x: bx, z: bz });
+    return pts;
+  }
 }
 
 /** Chaikin corner cutting (endpoints preserved). */

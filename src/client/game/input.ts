@@ -66,6 +66,8 @@ export class InputController implements InputApi {
   cameraMode: CameraMode;
   /** Called when the interact key is pressed (ClientGame performs the current interaction). */
   onInteract: (() => void) | null = null;
+  /** Called on a left click while dead (ClientGame cycles the spectated player). */
+  onDeadClick: (() => void) | null = null;
 
   private settingsValue: Settings;
   private codeToAction = new Map<string, KeyAction>();
@@ -107,6 +109,7 @@ export class InputController implements InputApi {
     this.rebuildKeymap();
     this.unsubSettings = settings.subscribe((s) => {
       const keysChanged = s.keybinds !== this.settingsValue.keybinds;
+      if (s.cameraMode !== this.settingsValue.cameraMode) this.cameraMode = s.cameraMode;
       this.settingsValue = s;
       if (keysChanged) {
         this.rebuildKeymap();
@@ -307,6 +310,10 @@ export class InputController implements InputApi {
     if (button === 0) {
       if (down) {
         if (!this.enabledFlag) return;
+        if (this.ctx.life === 'dead') {
+          this.onDeadClick?.();
+          return;
+        }
         if (this.grenadeArmed) {
           this.throwGrenade();
           return;
@@ -495,6 +502,7 @@ export class InputController implements InputApi {
     this.unsubSettings();
     this.uiListeners.clear();
     this.onInteract = null;
+    this.onDeadClick = null;
   }
 
   // ---------------------------------------------------------------------------

@@ -4,7 +4,7 @@
 
 import { angleDiff } from '../math';
 import type { PlayerState } from '../types';
-import { NF_BLOCKED, NF_UNKNOWN } from './nav';
+import { NF_BLOCKED, NF_NEAR, NF_UNKNOWN } from './nav';
 import { MAX_PLAN_DIST, PATH_DONE, PATH_FAILED, PATH_IDLE } from './pathfind';
 import type { BotState } from './state';
 import type { BotSystem } from './system';
@@ -77,7 +77,9 @@ export function followPath(sys: BotSystem, b: BotState, p: PlayerState): void {
     while (i < path.count) {
       const wx = path.pts[i * 2], wz = path.pts[i * 2 + 1];
       const d = Math.hypot(wx - px, wz - pz);
-      if (d > (i === path.count - 1 ? b.arrive : 0.75)) break;
+      // Tight waypoints (doorways, corners) must really be reached before turning.
+      const reach = i === path.count - 1 ? b.arrive : sys.grid.flagsAt(wx, wz, false) & NF_NEAR ? 0.4 : 0.75;
+      if (d > reach) break;
       i++;
     }
     b.pathIdx = i;

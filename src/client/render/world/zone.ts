@@ -11,8 +11,8 @@ const WALL_BOTTOM = -40;
 const WALL_TOP = 400;
 const WALL_SEGMENTS = 256;
 const RING_MAX_SEGMENTS = 1024;
-const RING_HEIGHT = 2.2;
-const RING_SINK = 0.6;
+const RING_HEIGHT = 0.9;
+const RING_SINK = 0.35;
 /** Visual circle values snap instead of smoothing when they jump more than this (m). */
 const SNAP_DISTANCE = 40;
 
@@ -34,7 +34,7 @@ const wallFragment = /* glsl */ `
 uniform float uTime;
 uniform float uRadius;
 uniform vec3 uColor;
-uniform float uIntensity;
+uniform vec3 uGlow;
 uniform float uFogDensity;
 varying vec3 vWPos;
 varying float vU;
@@ -47,18 +47,22 @@ void main() {
   if (above < -0.5) discard;
   float arc = vU * 6.2831853 * uRadius;
   float h = vWPos.y;
-  // Bands scrolling upward + faint vertical lines, broken up by flowing noise.
-  float scan = smoothstep(0.82, 1.0, fract(h * 0.12 - uTime * 0.25));
-  float fineScan = smoothstep(0.7, 1.0, fract(h * 0.9 - uTime * 1.1)) * 0.35;
-  float vlines = smoothstep(0.93, 1.0, fract(arc * 0.05)) * 0.35;
-  float n = dzNoise(vec2(arc * 0.03, h * 0.04 - uTime * 0.18)) * 0.6 + dzNoise(vec2(arc * 0.11, h * 0.15 + uTime * 0.3)) * 0.4;
-  float groundGlow = 1.0 - smoothstep(0.0, 4.0, above);
-  float heightFade = 1.0 - smoothstep(25.0, ${WALL_TOP.toFixed(1)}, h);
-  float a = (0.16 + 0.28 * scan + fineScan * 0.4 + vlines + 0.22 * n) * heightFade + groundGlow * 1.1;
+  // Vertical scan streaks scrolling upward (smooth noise stretched vertically, faded with
+  // distance so they never alias), slow soft bands and flowing noise.
+  float near = 1.0 - smoothstep(60.0, 320.0, vViewDepth);
+  float streak = dzNoise(vec2(arc * 0.45, h * 0.02 - uTime * 0.35));
+  streak = smoothstep(0.55, 0.95, streak) * near;
+  float band = smoothstep(0.7, 1.0, fract(h * 0.03 - uTime * 0.08));
+  float n = dzNoise(vec2(arc * 0.02, h * 0.025 - uTime * 0.12)) * 0.6 + dzNoise(vec2(arc * 0.07, h * 0.08 + uTime * 0.2)) * 0.4;
+  float groundGlow = 1.0 - smoothstep(0.0, 3.5, above);
+  float heightFade = 1.0 - smoothstep(30.0, ${WALL_TOP.toFixed(1)}, h);
   // Fog reduces the wall far less than terrain so it reads across the map.
   float fogF = 1.0 - exp(-uFogDensity * uFogDensity * vViewDepth * vViewDepth);
-  a *= 1.0 - 0.55 * fogF;
-  gl_FragColor = vec4(uColor * a * uIntensity, 1.0);
+  float vis = 1.0 - 0.55 * fogF;
+  // Translucent blue tint (premultiplied) + additive glow on streaks, bands and the ground line.
+  float tint = (0.27 + 0.1 * n + 0.04 * band) * heightFade * vis;
+  float glow = ((0.12 * streak + 0.05 * band) * (0.6 + 0.4 * n) * heightFade + groundGlow * 0.9) * vis;
+  gl_FragColor = vec4(uColor * tint + uGlow * glow, tint);
 }
 `;
 
@@ -81,11 +85,12 @@ uniform float uFogDensity;
 varying float vV;
 varying float vViewDepth;
 void main() {
-  float core = 1.0 - smoothstep(0.0, 0.55, abs(vV - 0.32));
-  float fade = 1.0 - smoothstep(0.25, 1.0, vV);
+  // Bright line just above the ground (v ~ 0.4) with a soft glow fading upward.
+  float core = 1.0 - smoothstep(0.0, 0.18, abs(vV - 0.4));
+  float fade = (1.0 - smoothstep(0.4, 1.0, vV)) * step(0.3, vV);
   float pulse = 0.85 + 0.15 * sin(uTime * 2.4);
   float fogF = 1.0 - exp(-uFogDensity * uFogDensity * vViewDepth * vViewDepth);
-  float a = (core * 0.9 + fade * 0.35) * pulse * (1.0 - 0.6 * fogF);
+  float a = (core * 0.8 + fade * 0.25) * pulse * (1.0 - 0.6 * fogF);
   gl_FragColor = vec4(uColor * a, 1.0);
 }
 `;
@@ -118,8 +123,8 @@ export class ZoneRenderer {
       uniforms: {
         uTime: shared.uTime,
         uRadius: { value: 1 },
-        uColor: { value: new THREE.Color(0x2f6dff) },
-        uIntensity: { value: 1.25 },
+        uColor: { value: new THREE.Color(0x1e4fe0) },
+        uGlow: { value: new THREE.Color(0x6aa8ff) },
         uFogDensity: { value: fogDensity },
         uHeightTex: { value: heights.texture },
         uHeightInfo: { value: heights.info },
@@ -128,7 +133,11 @@ export class ZoneRenderer {
       fragmentShader: wallFragment,
       transparent: true,
       depthWrite: false,
-      blending: THREE.AdditiveBlending,
+      // Premultiplied "over" blending: rgb already carries tint*alpha plus additive glow.
+      blending: THREE.CustomBlending,
+      blendEquation: THREE.AddEquation,
+      blendSrc: THREE.OneFactor,
+      blendDst: THREE.OneMinusSrcAlphaFactor,
       side: THREE.DoubleSide,
       toneMapped: false,
     });
@@ -162,7 +171,7 @@ export class ZoneRenderer {
       name: 'dz-zone-ring',
       uniforms: {
         uTime: shared.uTime,
-        uColor: { value: new THREE.Color(0xf4f8ff).multiplyScalar(1.6) },
+        uColor: { value: new THREE.Color(0xf4f8ff).multiplyScalar(1.1) },
         uFogDensity: { value: fogDensity },
       },
       vertexShader: ringVertex,

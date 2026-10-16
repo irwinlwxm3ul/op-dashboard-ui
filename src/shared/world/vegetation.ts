@@ -13,6 +13,8 @@ export interface VegetationParams {
   noiseSeed: number;
   /** Lowest terrain height for trees / bushes (keeps them off beaches and out of water). */
   minLandH: number;
+  /** Candidates are drawn from [-extent, extent]^2 (defaults to the whole map). */
+  extent?: number;
   /** Additional exclusion (e.g. firing range corridor). */
   exclude?: (x: number, z: number) => boolean;
   /** Forest density bias added to the noise (higher = more uniform cover). */
@@ -69,7 +71,7 @@ export class ForestField {
 
 export function placeVegetation(world: GeneratedWorld, mask: OccupancyMask, rng: Rng, p: VegetationParams): void {
   const hf = world.hf;
-  const lim = world.half - 6;
+  const lim = Math.min(world.half - 6, p.extent ?? Infinity);
   const bias = p.forestBias ?? 0;
   const forest = new ForestField(p.noiseSeed, world.size);
 
@@ -77,17 +79,17 @@ export function placeVegetation(world: GeneratedWorld, mask: OccupancyMask, rng:
   for (let attempts = 0, max = p.trees * 80; world.trees.length < p.trees && attempts < max; attempts++) {
     const x = r2(rng.range(-lim, lim)), z = r2(rng.range(-lim, lim));
     const dens = 0.025 + 0.975 * forest.density(x, z, bias);
-    if (rng.next() > dens) continue;
-    if (mask.get(x, z) & TREE_BLOCK) continue;
+    const roll = rng.next();
+    if (mask.get(x, z) & TREE_BLOCK || roll > dens) continue;
     const h = hf.heightAt(x, z);
     if (h < p.minLandH || hf.flatness(x, z) < 0.74) continue;
     if (p.exclude && p.exclude(x, z)) continue;
     const alt = h > 45 ? 1 : h > 25 ? 0.5 : 0;
-    const roll = rng.next();
+    const kr = rng.next();
     let kind: TreeKind;
-    if (roll < 0.04 + alt * 0.04) kind = 'dead';
-    else if (roll < 0.35 + alt * 0.45) kind = 'pine';
-    else if (roll < 0.7 + alt * 0.2) kind = 'oak';
+    if (kr < 0.04 + alt * 0.04) kind = 'dead';
+    else if (kr < 0.35 + alt * 0.45) kind = 'pine';
+    else if (kr < 0.7 + alt * 0.2) kind = 'oak';
     else kind = 'birch';
     const height = kind === 'pine' ? rng.range(9, 16) : kind === 'dead' ? rng.range(6, 10) : kind === 'birch' ? rng.range(7, 13) : rng.range(7, 14);
     const r = Math.min(0.5, Math.max(0.2, 0.2 + (height - 6) * 0.025 + rng.range(-0.03, 0.05)));
@@ -118,8 +120,8 @@ export function placeVegetation(world: GeneratedWorld, mask: OccupancyMask, rng:
   for (let attempts = 0, max = p.bushes * 60; world.bushes.length < p.bushes && attempts < max; attempts++) {
     const x = r2(rng.range(-lim, lim)), z = r2(rng.range(-lim, lim));
     const dens = 0.2 + 0.8 * forest.density(x, z, bias + 0.15);
-    if (rng.next() > dens) continue;
-    if (mask.get(x, z) & BUSH_BLOCK) continue;
+    const roll = rng.next();
+    if (mask.get(x, z) & BUSH_BLOCK || roll > dens) continue;
     const h = hf.heightAt(x, z);
     if (h < p.minLandH - 0.4 || hf.flatness(x, z) < 0.65) continue;
     if (p.exclude && p.exclude(x, z)) continue;

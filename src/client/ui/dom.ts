@@ -176,15 +176,15 @@ export class ClassFlag {
   }
 }
 
-/** Bar fill driven by transform: scaleX (compositor only). Writes when the change is visible. */
+/** Bar fill driven by transform: scaleX / scaleY (compositor only). Writes when the change is visible. */
 export class BarFill {
   private last = -1;
-  constructor(readonly el: HTMLElement, private readonly eps = 0.002) {}
+  constructor(readonly el: HTMLElement, private readonly eps = 0.002, private readonly axis: 'x' | 'y' = 'x') {}
   set(frac: number): void {
     const f = frac < 0 ? 0 : frac > 1 ? 1 : frac;
     if (Math.abs(f - this.last) >= this.eps || (f === 0 && this.last !== 0) || (f === 1 && this.last !== 1)) {
       this.last = f;
-      this.el.style.transform = `scaleX(${f.toFixed(4)})`;
+      this.el.style.transform = this.axis === 'x' ? `scaleX(${f.toFixed(4)})` : `scaleY(${f.toFixed(4)})`;
     }
   }
   invalidate(): void {

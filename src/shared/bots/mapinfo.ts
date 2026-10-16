@@ -96,15 +96,22 @@ export function bushCoverHeight(world: World, info: MapInfo, x: number, z: numbe
 
 const tmp = { x: 0, z: 0 };
 
+export const INTERIOR_NONE = 0;
+export const INTERIOR_OK = 1;
+/** The building's nav tiles are not generated yet (try again next think). */
+export const INTERIOR_PENDING = 2;
+
 /**
- * A free ground-floor nav cell inside building `bi` (lazily computed and cached). Returns false
- * when the building has no reachable-looking interior cell.
+ * A free ground-floor nav cell inside building `bi` (lazily computed and cached). Returns
+ * INTERIOR_OK (out written), INTERIOR_NONE when the building has no usable interior cell, or
+ * INTERIOR_PENDING while its nav tiles still have to be generated.
  */
-export function buildingInterior(world: World, info: MapInfo, grid: NavGrid, bi: number, out: { x: number; z: number }): boolean {
+export function buildingInterior(world: World, info: MapInfo, grid: NavGrid, bi: number, out: { x: number; z: number }): number {
   let x = info.bInterior[bi * 2];
   if (Number.isNaN(x)) {
     const b = world.buildings[bi];
     const cx = info.bCenter[bi * 2], cz = info.bCenter[bi * 2 + 1];
+    if (!grid.ready(cx, cz, 7)) return INTERIOR_PENDING;
     let found = false;
     if (grid.nearestFree(cx, cz, 6, tmp)) {
       // Must be inside the footprint and not blocked.
@@ -117,8 +124,8 @@ export function buildingInterior(world: World, info: MapInfo, grid: NavGrid, bi:
     info.bInterior[bi * 2 + 1] = found ? tmp.z : Infinity;
     x = info.bInterior[bi * 2];
   }
-  if (!Number.isFinite(x)) return false;
+  if (!Number.isFinite(x)) return INTERIOR_NONE;
   out.x = x;
   out.z = info.bInterior[bi * 2 + 1];
-  return true;
+  return INTERIOR_OK;
 }

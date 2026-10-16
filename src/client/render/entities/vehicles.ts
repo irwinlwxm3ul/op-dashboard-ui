@@ -75,24 +75,21 @@ function buildBuggy(paint: GeoBuilder, chassis: GeoBuilder): void {
   paint.box(0.18, 0.26, 1.5, xform(hx - 0.12, floorY + 0.16, 0.1), PAINT);
   paint.taper(hx * 1.4, 0.85, hx * 1.2, 0.7, 0.42, xform(0, floorY + 0.25, hz - 0.5), PAINT);
   // Roll cage (tubes).
-  const t = (x: number, y: number, z: number, len: number, rx: number, rz: number): void => {
-    chassis.cyl(0.035, 0.035, len, 6, xform(x, y, z, rx, 0, rz), { color: TUBE });
-  };
+  const tube = { color: TUBE };
   const topY = hy - 0.02, baseY = floorY + 0.05, cx = hx * 0.72;
   const fz = -0.35, rz = 0.8;
-  const postH = topY - baseY;
   for (const x of [-cx, cx]) {
-    t(x, baseY + postH / 2, fz, postH, -0.12, 0);
-    t(x, baseY + postH / 2, rz, postH, 0, 0);
-    t(x, topY, (fz + rz) / 2, rz - fz, Math.PI / 2, 0);
-    // Front diagonal down to the nose.
-    t(x * 0.9, (topY + floorY + 0.25) / 2, fz - 0.55, 1.25, -0.95, 0);
-    // Rear diagonal to the engine.
-    t(x * 0.95, (topY + floorY + 0.3) / 2, rz + 0.45, 1.0, 0.8, 0);
+    chassis.strut(x, baseY, fz - 0.08, x, topY, fz, 0.035, 6, tube);
+    chassis.strut(x, baseY, rz, x, topY, rz, 0.035, 6, tube);
+    chassis.strut(x, topY, fz, x, topY, rz, 0.035, 6, tube);
+    // Front bar down to the nose, rear bar down to the engine bay.
+    chassis.strut(x, topY, fz, x * 0.85, floorY + 0.32, -hz + 0.35, 0.03, 6, tube);
+    chassis.strut(x, topY, rz, x * 0.9, floorY + 0.42, hz - 0.2, 0.03, 6, tube);
   }
-  t(0, topY, fz, cx * 2, 0, Math.PI / 2);
-  t(0, topY, rz, cx * 2, 0, Math.PI / 2);
-  t(0, topY - 0.02, (fz + rz) / 2, cx * 2, 0, Math.PI / 2);
+  chassis.strut(-cx, topY, fz, cx, topY, fz, 0.035, 6, tube);
+  chassis.strut(-cx, topY, rz, cx, topY, rz, 0.035, 6, tube);
+  chassis.strut(-cx, topY, (fz + rz) / 2, cx, topY, (fz + rz) / 2, 0.03, 6, tube);
+  chassis.strut(-cx, topY, rz, cx, baseY + 0.2, rz, 0.028, 6, tube);
   // Seats, steering wheel, dash, lights, exhaust, engine.
   for (const s of d.seatOffsets) seatBlock(chassis, s.x, s.y, s.z, 0.44);
   steeringWheel(chassis, 'buggy');
@@ -186,9 +183,9 @@ function buildWheel(type: VehicleType): THREE.BufferGeometry {
   const rz = Math.PI / 2;
   b.cyl(r, r, w, 14, xform(0, 0, 0, 0, 0, rz), { color: 0x1a1a1a });
   // Tread blocks so the spin reads.
-  for (let i = 0; i < 8; i++) {
-    const a = (i / 8) * Math.PI * 2;
-    b.box(w * 1.04, 0.05, r * 0.32, xform(0, Math.cos(a) * r * 0.97, Math.sin(a) * r * 0.97, a), { color: 0x141414 });
+  for (let i = 0; i < 12; i++) {
+    const a = (i / 12) * Math.PI * 2;
+    b.box(w * 0.9, 0.035, r * 0.2, xform(0, Math.cos(a) * r, Math.sin(a) * r, a), { color: 0x121212 });
   }
   const rim = type === 'bike' ? METAL : 0x4a4f45;
   b.cyl(r * 0.55, r * 0.55, w * 1.06, 10, xform(0, 0, 0, 0, 0, rz), { color: rim });
@@ -310,72 +307,13 @@ export class VehicleRenderer {
    */
   update(vehicles: ReadonlyMap<EntityId, VehicleView>, camPos: THREE.Vector3, dt: number, scale: number, maxDist: number): void {
     this.frameNo++;
-    const maxD2 = maxDist * maxDist;
-    vehicles.forEach((v) => {
-      const s = this.slot(v);
-      s.seen = this.frameNo;
-      const def = VEHICLES[v.type];
-      const dx = v.pos.x - camPos.x, dy = v.pos.y - camPos.y, dz = v.pos.z - camPos.z;
-      const d2 = dx * dx + dy * dy + dz * dz;
-      const visible = d2 < maxD2;
-      for (const i of s.instances) this.batch.setVisibleAt(i, visible);
-      if (!visible) return;
-      // Body transform (Ry * Rx * Rz).
-      _e.set(v.pitch, v.yaw, v.roll, 'YXZ');
-      _q.setFromEuler(_e);
-      _p.set(v.pos.x, v.pos.y, v.pos.z);
-      _m.compose(_p, _q, _one);
-      this.batch.setMatrixAt(s.instances[0], _m);
-      this.batch.setMatrixAt(s.instances[1], _m);
-      // Wheels.
-      const h = HANDLING[v.type];
-      if (!v.destroyed) s.wheelAngle = (s.wheelAngle - (v.speed / h.wheelRadius) * dt) % (Math.PI * 2);
-      const steerAngle = -v.steer * def.steerMax;
-      const wy = wheelCenterY(v.type);
-      const wheels = WHEELS[v.type];
-      if (v.type === 'bike') {
-        // Fork: rotate about the raked steering axis through the front axle.
-        const ax = this.bike;
-        _e.set(ax.rake, 0, 0, 'YXZ');
-        _r.makeRotationFromEuler(_e);
-        _w.makeRotationY(steerAngle);
-        _r.multiply(_w).setPosition(ax.axle);
-        _w.multiplyMatrices(_m, _r);
-        this.batch.setMatrixAt(s.instances[4], _w);
-        _r.makeRotationX(s.wheelAngle);
-        _w.multiply(_r);
-        this.batch.setMatrixAt(s.instances[2], _w);
-        const rw = wheels[1];
-        _r.makeRotationX(s.wheelAngle).setPosition(rw.x, wy, rw.z);
-        _w.multiplyMatrices(_m, _r);
-        this.batch.setMatrixAt(s.instances[3], _w);
-      } else {
-        for (let i = 0; i < 4; i++) {
-          const wp = wheels[i];
-          const front = i < 2;
-          _e.set(s.wheelAngle, front ? steerAngle : 0, 0, 'YXZ');
-          _r.makeRotationFromEuler(_e).setPosition(wp.x, wy, wp.z);
-          _w.multiplyMatrices(_m, _r);
-          this.batch.setMatrixAt(s.instances[2 + i], _w);
-        }
-      }
-      // Wreck tint.
-      const wrecked = v.destroyed;
-      const tint = wrecked ? _wreck : null;
-      if (wrecked !== (s.destroyedFor > 0)) {
-        _c.setHex(vehiclePaintHex(v.id));
-        this.batch.setColorAt(s.instances[0], tint ?? _c);
-        for (let i = 1; i < s.instances.length; i++) this.batch.setColorAt(s.instances[i], tint ?? _white);
-      }
-      s.destroyedFor = wrecked ? s.destroyedFor + dt : 0;
-      // Damage smoke / fire (only when reasonably close).
-      if (d2 < 600 * 600) this.emitDamage(v, s, _m, dt);
-    });
+    this.cam.copy(camPos);
+    this.dt = dt;
+    this.maxD2 = maxDist * maxDist;
+    vehicles.forEach(this.visit);
     // Remove vehicles that disappeared.
     this.removeList.length = 0;
-    this.slots.forEach((s) => {
-      if (s.seen !== this.frameNo) this.removeList.push(s.id);
-    });
+    this.slots.forEach(this.collectStale);
     for (const id of this.removeList) {
       const s = this.slots.get(id);
       if (s) this.free(s);
@@ -383,6 +321,75 @@ export class VehicleRenderer {
     this.smoke.update(dt, 1.2, 0.6, scale);
     this.fire.update(dt, 0.4, 0.2, scale);
   }
+
+  // Per-frame parameters for the bound visitors below (avoids allocating closures every frame).
+  private readonly cam = new THREE.Vector3();
+  private dt = 0;
+  private maxD2 = 0;
+
+  private readonly collectStale = (s: VehicleSlot): void => {
+    if (s.seen !== this.frameNo) this.removeList.push(s.id);
+  };
+
+  private readonly visit = (v: VehicleView): void => {
+    const dt = this.dt;
+    const s = this.slot(v);
+    s.seen = this.frameNo;
+    const def = VEHICLES[v.type];
+    const dx = v.pos.x - this.cam.x, dy = v.pos.y - this.cam.y, dz = v.pos.z - this.cam.z;
+    const d2 = dx * dx + dy * dy + dz * dz;
+    const visible = d2 < this.maxD2;
+    for (let i = 0; i < s.instances.length; i++) this.batch.setVisibleAt(s.instances[i], visible);
+    if (!visible) return;
+    // Body transform (Ry * Rx * Rz).
+    _e.set(v.pitch, v.yaw, v.roll, 'YXZ');
+    _q.setFromEuler(_e);
+    _p.set(v.pos.x, v.pos.y, v.pos.z);
+    _m.compose(_p, _q, _one);
+    this.batch.setMatrixAt(s.instances[0], _m);
+    this.batch.setMatrixAt(s.instances[1], _m);
+    // Wheels: spin with the signed forward speed, front wheels steer (steer > 0 = right).
+    const h = HANDLING[v.type];
+    if (!v.destroyed) s.wheelAngle = (s.wheelAngle - (v.speed / h.wheelRadius) * dt) % (Math.PI * 2);
+    const steerAngle = -v.steer * def.steerMax;
+    const wy = wheelCenterY(v.type);
+    const wheels = WHEELS[v.type];
+    if (v.type === 'bike') {
+      // Fork: rotate about the raked steering axis through the front axle.
+      const ax = this.bike;
+      _e.set(ax.rake, 0, 0, 'YXZ');
+      _r.makeRotationFromEuler(_e);
+      _w.makeRotationY(steerAngle);
+      _r.multiply(_w).setPosition(ax.axle);
+      _w.multiplyMatrices(_m, _r);
+      this.batch.setMatrixAt(s.instances[4], _w);
+      _r.makeRotationX(s.wheelAngle);
+      _w.multiply(_r);
+      this.batch.setMatrixAt(s.instances[2], _w);
+      const rw = wheels[1];
+      _r.makeRotationX(s.wheelAngle).setPosition(rw.x, wy, rw.z);
+      _w.multiplyMatrices(_m, _r);
+      this.batch.setMatrixAt(s.instances[3], _w);
+    } else {
+      for (let i = 0; i < 4; i++) {
+        const wp = wheels[i];
+        _e.set(s.wheelAngle, i < 2 ? steerAngle : 0, 0, 'YXZ');
+        _r.makeRotationFromEuler(_e).setPosition(wp.x, wy, wp.z);
+        _w.multiplyMatrices(_m, _r);
+        this.batch.setMatrixAt(s.instances[2 + i], _w);
+      }
+    }
+    // Burnt wreck tint (switch colours only on state changes).
+    const wrecked = v.destroyed;
+    if (wrecked !== (s.destroyedFor > 0)) {
+      _c.setHex(vehiclePaintHex(v.id));
+      this.batch.setColorAt(s.instances[0], wrecked ? _wreck : _c);
+      for (let i = 1; i < s.instances.length; i++) this.batch.setColorAt(s.instances[i], wrecked ? _wreck : _white);
+    }
+    s.destroyedFor = wrecked ? s.destroyedFor + Math.max(dt, 1e-4) : 0;
+    // Damage smoke / fire (only when reasonably close).
+    if (d2 < 600 * 600) this.emitDamage(v, s, _m, dt);
+  };
 
   private emitDamage(v: VehicleView, s: VehicleSlot, m: THREE.Matrix4, dt: number): void {
     const hpFrac = v.hp / VEHICLES[v.type].health;

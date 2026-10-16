@@ -33,6 +33,7 @@ const _a = new THREE.Vector3();
 const _b = new THREE.Vector3();
 const _c = new THREE.Vector3();
 const _col = new THREE.Color();
+const _up = new THREE.Vector3(0, 1, 0);
 
 /** Transform helper: translation, rotation (radians, Euler YXZ) and scale. */
 export function xform(
@@ -140,6 +141,25 @@ export class GeoBuilder {
     this.add(g, m, style);
     g.dispose();
     return this;
+  }
+
+  /** Cylindrical strut between two points (model space of `base`). */
+  strut(
+    ax: number, ay: number, az: number, bx: number, by: number, bz: number, r: number, seg: number,
+    style: PartStyle, base?: THREE.Matrix4,
+  ): this {
+    _a.set(ax, ay, az);
+    _b.set(bx, by, bz);
+    _c.subVectors(_b, _a);
+    const len = _c.length();
+    if (len < 1e-6) return this;
+    _c.multiplyScalar(1 / len);
+    _q.setFromUnitVectors(_up, _c);
+    _p.addVectors(_a, _b).multiplyScalar(0.5);
+    _s.set(1, 1, 1);
+    const m = new THREE.Matrix4().compose(_p, _q, _s);
+    if (base) m.premultiply(base);
+    return this.cyl(r, r, len, seg, m, style);
   }
 
   /** Torus (ring) around local Y axis (torus lies in XZ). */

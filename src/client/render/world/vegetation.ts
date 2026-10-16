@@ -328,7 +328,7 @@ export class VegetationRenderer {
       layer.cols[i * 3 + 1] = it.col[1];
       layer.cols[i * 3 + 2] = it.col[2];
       if (layer.trunk) layer.trunk[i] = it.trunk;
-      // keepFar bit 1: always kept; 2: density-dependent (rank stored in the remaining bits).
+      // keepFar code: 1 = always kept in the far band; 128 + rank (0..99) = kept while rank < density * 100.
       const rank = Math.floor(hashFloat(Math.round(it.x * 10), Math.round(it.z * 10), 0x5eed) * 100);
       const small = smallCulled && it.h < 1.2;
       layer.keepFar[i] = densityCulled || small ? 128 + Math.min(99, rank) : 1;

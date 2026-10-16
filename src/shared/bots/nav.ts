@@ -22,7 +22,7 @@
 // through the middle of doorways.
 
 import { STEP_HEIGHT } from '../constants';
-import type { RockDef, TreeDef, Vec3, World, WorldBox } from '../types';
+import type { RockDef, TreeDef, World, WorldBox } from '../types';
 
 export const NAV_TILE = 64;
 const TILE_SHIFT = 6;
@@ -56,8 +56,12 @@ const FLOOR_MAX_ABOVE_TERRAIN = 2.0;
 export const MAX_STEP_UP = STEP_HEIGHT + 0.02;
 /** Sub-samples per metre for box rasterisation. */
 const FINE = 4;
+/** Minimum rasterised obstacle width (just over the sub-sample spacing). */
+const MIN_RASTER = 1 / FINE + 0.01;
 /** Minimum terrain normal Y that is comfortably walkable (MAX_SLOPE_DEG is 50 deg, keep margin). */
 const MIN_WALK_NORMAL_Y = 0.68;
+/** Same limit as a squared terrain gradient: n.y = 1 / sqrt(1 + |grad|^2). */
+const MAX_WALK_GRADIENT2 = 1 / (MIN_WALK_NORMAL_Y * MIN_WALK_NORMAL_Y) - 1;
 /** Water deeper than this (m) is treated as blocked (bots avoid swimming). */
 const DEEP_WATER = 1.0;
 const TREE_TRUNK_FRAC = 0.6;
@@ -86,7 +90,6 @@ const boxBuf: WorldBox[] = [];
 const boxSorted: WorldBox[] = [];
 const treeBuf: TreeDef[] = [];
 const rockBuf: RockDef[] = [];
-const scratchN: Vec3 = { x: 0, y: 1, z: 0 };
 const byTop = (a: WorldBox, b: WorldBox): number => a.max.y - b.max.y || a.id - b.id;
 
 export class NavGrid {
@@ -236,10 +239,25 @@ export class NavGrid {
   }
 
   /**
-   * Nearest free cell centre to (x, z) within `maxR` cells (ring search, preferring cells away
-   * from walls within the same ring). Writes into out and returns true when found.
+   * Are all tiles covering the square (x +- r, z +- r) generated? Missing tiles are generated
+   * within this tick's budget; returns false while some are still missing.
    */
-  nearestFree(x: number, z: number, maxR: number, out: { x: number; z: number }): boolean {
+  ready(x: number, z: number, r: number): boolean {
+    const a = this.cell(x - r), b = this.cell(x + r), c = this.cell(z - r), d = this.cell(z + r);
+    let ok = this.ensureCell(a, c, false);
+    ok = this.ensureCell(b, c, false) && ok;
+    ok = this.ensureCell(a, d, false) && ok;
+    ok = this.ensureCell(b, d, false) && ok;
+    return ok;
+  }
+
+  /**
+   * Nearest free cell centre to (x, z) within `maxR` cells (ring search, preferring cells away
+   * from walls within the same ring). Writes into out and returns true when found. Without
+   * `force` it returns false (no generation spike) while the area's tiles are not generated yet.
+   */
+  nearestFree(x: number, z: number, maxR: number, out: { x: number; z: number }, force = true): boolean {
+    if (!force && !this.ready(x, z, maxR + 1)) return false;
     const gx = this.cell(x), gz = this.cell(z);
     for (let r = 0; r <= maxR; r++) {
       let best = -1, bestD = Infinity, bestNear = true;
@@ -266,6 +284,48 @@ export class NavGrid {
       }
     }
     return false;
+  }
+
+  /**
+   * Geometric clearance test for a straight walk from a to b: the segment must stay at least
+   * `clearance` (XZ) away from every box, trunk and rock that obstructs a standing character at
+   * the floor heights of the endpoints. Boxes are expanded as squares (slightly conservative at
+   * corners, which keeps shortcuts off wall corners). Used for path smoothing only.
+   */
+  clearSegment(ax: number, az: number, bx: number, bz: number, clearance: number): boolean {
+    const w = this.world;
+    const ba = this.base(this.cell(ax), this.cell(az)), bb = this.base(this.cell(bx), this.cell(bz));
+    const lo = Math.min(ba, bb) + CLEAR_LO, hi = Math.max(ba, bb) + CLEAR_HI;
+    const m = clearance + 0.6;
+    const minX = Math.min(ax, bx) - m, maxX = Math.max(ax, bx) + m;
+    const minZ = Math.min(az, bz) - m, maxZ = Math.max(az, bz) + m;
+    const dx = bx - ax, dz = bz - az;
+    boxBuf.length = 0;
+    const boxes = w.queryBoxes(minX, minZ, maxX, maxZ, boxBuf);
+    for (let i = 0; i < boxes.length; i++) {
+      const b = boxes[i];
+      if (b.min.y >= hi || b.max.y <= lo) continue;
+      // The floor the walker stands on is not an obstacle.
+      if (b.max.y <= Math.max(ba, bb) + 0.05 && b.max.y <= Math.min(ba, bb) + CLEAR_LO) continue;
+      if (segmentHitsRect(ax, az, dx, dz, b.min.x - clearance, b.min.z - clearance, b.max.x + clearance, b.max.z + clearance)) {
+        return false;
+      }
+    }
+    treeBuf.length = 0;
+    const trees = w.queryTrees(minX, minZ, maxX, maxZ, treeBuf);
+    for (let i = 0; i < trees.length; i++) {
+      const t = trees[i];
+      if (t.y >= hi || t.y + t.h * TREE_TRUNK_FRAC <= lo) continue;
+      if (segmentPointDist2(ax, az, dx, dz, t.x, t.z) < (t.r + clearance) * (t.r + clearance)) return false;
+    }
+    rockBuf.length = 0;
+    const rocks = w.queryRocks(minX, minZ, maxX, maxZ, rockBuf);
+    for (let i = 0; i < rocks.length; i++) {
+      const r = rocks[i];
+      if (r.y - 1 >= hi || r.y + r.h <= lo) continue;
+      if (segmentPointDist2(ax, az, dx, dz, r.x, r.z) < (r.r + clearance) * (r.r + clearance)) return false;
+    }
+    return true;
   }
 
   /**
@@ -365,24 +425,30 @@ export class NavGrid {
     boxSorted.sort(byTop);
     const hasBoxes = boxSorted.length > 0;
     if (hasBoxes) {
-      for (let fj = 0; fj < FW; fj++) {
-        const row = (fj >> 2) * PADW;
-        for (let fi = 0; fi < FW; fi++) {
-          const o = fj * FW + fi;
-          fineFloor[o] = padTerr[row + (fi >> 2)];
-          fineFlags[o] = 0;
+      // Sub-grid initialisation (terrain per coarse cell): one written row per coarse row, the
+      // other three copied natively.
+      for (let pj = 0; pj < PADW; pj++) {
+        const o0 = pj * FINE * FW;
+        const row = pj * PADW;
+        for (let pi = 0; pi < PADW; pi++) {
+          const h = padTerr[row + pi];
+          const o = o0 + pi * FINE;
+          fineFloor[o] = h;
+          fineFloor[o + 1] = h;
+          fineFloor[o + 2] = h;
+          fineFloor[o + 3] = h;
         }
+        for (let r = 1; r < FINE; r++) fineFloor.copyWithin(o0 + r * FW, o0, o0 + FW);
       }
+      fineFlags.fill(0);
       for (let i = 0; i < boxSorted.length; i++) this.rasterFloor(boxSorted[i], wx0, wz0);
       for (let i = 0; i < boxSorted.length; i++) this.rasterBox(boxSorted[i], wx0, wz0);
       // Coarse cells take the sub-sample at their centre.
       for (let pj = 0; pj < PADW; pj++) {
         for (let pi = 0; pi < PADW; pi++) {
           const k = pj * PADW + pi;
-          if (padFlags[k] & NF_BLOCKED && padTerr[k] === 0 && padBase[k] === 0) {
-            // Map edge cell: keep blocked.
-            continue;
-          }
+          const gx = gx0 + pi, gz = gz0 + pj;
+          if (gx < EDGE_CELLS || gz < EDGE_CELLS || gx >= cells - EDGE_CELLS || gz >= cells - EDGE_CELLS) continue;
           const o = (pj * FINE + 2) * FW + pi * FINE + 2;
           padBase[k] = fineFloor[o];
           if (fineFlags[o] & FF_BOX) padFlags[k] |= NF_ON_BOX;
@@ -427,8 +493,12 @@ export class NavGrid {
           padFlags[k] = f | NF_BLOCKED;
           continue;
         }
-        const n = w.normalAt(wx0 + pi + 0.5, wz0 + pj + 0.5, scratchN);
-        if (n.y < MIN_WALK_NORMAL_Y) padFlags[k] = f | NF_BLOCKED;
+        // Slope from central differences of the cell-centre terrain (one-sided at the border).
+        const hx0 = pi > 0 ? padTerr[k - 1] : padTerr[k], hx1 = pi < PADW - 1 ? padTerr[k + 1] : padTerr[k];
+        const hz0 = pj > 0 ? padTerr[k - PADW] : padTerr[k], hz1 = pj < PADW - 1 ? padTerr[k + PADW] : padTerr[k];
+        const gxs = (hx1 - hx0) / (pi > 0 && pi < PADW - 1 ? 2 : 1);
+        const gzs = (hz1 - hz0) / (pj > 0 && pj < PADW - 1 ? 2 : 1);
+        if (gxs * gxs + gzs * gzs > MAX_WALK_GRADIENT2) padFlags[k] = f | NF_BLOCKED;
       }
     }
 
@@ -476,11 +546,14 @@ export class NavGrid {
   private rasterBox(b: WorldBox, wx0: number, wz0: number): void {
     const I = BLOCK_INFLATE, N = NEAR_INFLATE;
     const by0 = b.min.y, by1 = b.max.y;
-    // Sub-samples (inflated by I).
-    const fi0 = Math.max(0, Math.ceil((b.min.x - I - wx0) * FINE));
-    const fi1 = Math.min(FW - 1, Math.floor((b.max.x + I - wx0) * FINE));
-    const fj0 = Math.max(0, Math.ceil((b.min.z - I - wz0) * FINE));
-    const fj1 = Math.min(FW - 1, Math.floor((b.max.z + I - wz0) * FINE));
+    // Sub-samples (inflated by I, and never thinner than the sample spacing so thin fences and
+    // railings cannot slip between samples).
+    const ix = Math.max(I, (MIN_RASTER - (b.max.x - b.min.x)) / 2);
+    const iz = Math.max(I, (MIN_RASTER - (b.max.z - b.min.z)) / 2);
+    const fi0 = Math.max(0, Math.ceil((b.min.x - ix - wx0) * FINE));
+    const fi1 = Math.min(FW - 1, Math.floor((b.max.x + ix - wx0) * FINE));
+    const fj0 = Math.max(0, Math.ceil((b.min.z - iz - wz0) * FINE));
+    const fj1 = Math.min(FW - 1, Math.floor((b.max.z + iz - wz0) * FINE));
     for (let fj = fj0; fj <= fj1; fj++) {
       for (let fi = fi0; fi <= fi1; fi++) {
         const o = fj * FW + fi;
@@ -603,6 +676,39 @@ function dirMask(k: number): number {
   if (oW && oN && orthOpen(wv, n - 1, n - 1, NF_EDGE_S) && orthOpen(n, n - 1, n - 1, NF_EDGE_E)) m |= 1 << 5; // NW
   if (oE && oN && orthOpen(e, n + 1, n + 1, NF_EDGE_S) && orthOpen(n, n + 1, n, NF_EDGE_E)) m |= 1 << 7; // NE
   return m;
+}
+
+/** Does the segment (ax, az) + t (dx, dz), t in [0, 1], touch the rectangle? (slab test) */
+function segmentHitsRect(ax: number, az: number, dx: number, dz: number, x0: number, z0: number, x1: number, z1: number): boolean {
+  let t0 = 0, t1 = 1;
+  if (Math.abs(dx) < 1e-12) {
+    if (ax < x0 || ax > x1) return false;
+  } else {
+    let ta = (x0 - ax) / dx, tb = (x1 - ax) / dx;
+    if (ta > tb) { const tt = ta; ta = tb; tb = tt; }
+    if (ta > t0) t0 = ta;
+    if (tb < t1) t1 = tb;
+    if (t0 > t1) return false;
+  }
+  if (Math.abs(dz) < 1e-12) {
+    if (az < z0 || az > z1) return false;
+  } else {
+    let ta = (z0 - az) / dz, tb = (z1 - az) / dz;
+    if (ta > tb) { const tt = ta; ta = tb; tb = tt; }
+    if (ta > t0) t0 = ta;
+    if (tb < t1) t1 = tb;
+    if (t0 > t1) return false;
+  }
+  return true;
+}
+
+/** Squared distance from point (px, pz) to the segment (ax, az) + t (dx, dz). */
+function segmentPointDist2(ax: number, az: number, dx: number, dz: number, px: number, pz: number): number {
+  const l2 = dx * dx + dz * dz;
+  let t = l2 > 1e-12 ? ((px - ax) * dx + (pz - az) * dz) / l2 : 0;
+  t = t < 0 ? 0 : t > 1 ? 1 : t;
+  const qx = ax + dx * t - px, qz = az + dz * t - pz;
+  return qx * qx + qz * qz;
 }
 
 const grids = new WeakMap<World, NavGrid>();

@@ -217,6 +217,8 @@ export class Viewmodel {
   }
 
   private selfId: number | null = null;
+  /** Casing ejections requested by events, spawned after posing. */
+  private pendingEjects = 0;
 
   /** Main per-frame update. Returns true when the viewmodel will be drawn. */
   update(inp: VmInput, dt: number): boolean {
@@ -253,6 +255,11 @@ export class Viewmodel {
 
     this.scene.updateMatrixWorld();
     this.publishMuzzle(inp);
+    // Casings queued by events this frame spawn from the freshly posed gun.
+    while (this.pendingEjects > 0) {
+      this.pendingEjects--;
+      this.ejectCasing();
+    }
     this.renderPending = this.visible;
     return this.visible;
   }
@@ -305,7 +312,7 @@ export class Viewmodel {
       this.pumpEjected = false;
     } else {
       if (gun.slide) this.slideT = SLIDE_TIME;
-      if (this.visible) this.ejectCasing(0);
+      if (this.visible) this.pendingEjects++;
     }
     // A shot interrupts any reload animation (the sim cancels shell-by-shell reloads on fire).
     if (this.reload.active && this.reload.perShell > 0) this.reload.done = true;
@@ -415,7 +422,7 @@ export class Viewmodel {
       const dur = this.boltDuration();
       if (!this.boltEjected && this.boltT / dur >= 0.45) {
         this.boltEjected = true;
-        if (this.visible) this.ejectCasing(0);
+        if (this.visible) this.pendingEjects++;
       }
       if (this.boltT >= dur) this.boltActive = false;
     }
@@ -424,7 +431,7 @@ export class Viewmodel {
       this.pumpT += dt;
       if (!this.pumpEjected && this.pumpT / PUMP_TIME >= 0.42) {
         this.pumpEjected = true;
-        if (this.visible) this.ejectCasing(0);
+        if (this.visible) this.pendingEjects++;
       }
       if (this.pumpT >= PUMP_TIME) this.pumpActive = false;
     }
@@ -1053,18 +1060,17 @@ export class Viewmodel {
     this.flash.light.position.copy(this.v).applyMatrix4(this.m4);
   }
 
-  private ejectCasing(delay: number): void {
+  private ejectCasing(): void {
     const gun = this.gun;
-    if (!gun) return;
+    if (!gun || !this.visible) return;
     const main = this.core.camera;
-    gun.root.updateMatrixWorld(true);
     this.v.copy(gun.eject).applyMatrix4(gun.root.matrixWorld);
     this.vmToWorld(this.v, main, this.worldTmp);
     // Out to the right, up and slightly back (camera space) + the player's own velocity.
     const side = gun.id === 'shotgun' || gun.id === 'sniper' ? 1.4 : 1.9;
     this.velTmp.set(side + Math.random() * 0.7, 1.3 + Math.random() * 0.6, 0.35 + Math.random() * 0.4).applyQuaternion(main.quaternion);
     this.casings.eject(gun.casing, this.worldTmp.x, this.worldTmp.y, this.worldTmp.z,
-      this.velTmp.x + this.playerVel.x, this.velTmp.y + this.playerVel.y, this.velTmp.z + this.playerVel.z, delay);
+      this.velTmp.x + this.playerVel.x, this.velTmp.y + this.playerVel.y, this.velTmp.z + this.playerVel.z);
   }
 
   /** Player velocity (for casing inheritance), updated by the rig each frame. */

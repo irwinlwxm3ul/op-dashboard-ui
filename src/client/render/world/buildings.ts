@@ -10,7 +10,8 @@
 import * as THREE from 'three';
 import type { BuildingDef, World, WorldBox } from '../../../shared/types';
 import {
-  boxBaseColor, buildingFaceShade, emitBox, materialRM, visibleFaces, type Aabb, type BuildingContext, type FaceStyle,
+  BoxNeighbourhood, boxBaseColor, buildingFaceShade, emitBox, materialRM, visibleFaces, type Aabb, type BuildingContext,
+  type FaceStyle,
 } from './boxGeometry';
 import { GeoBuilder, linearRgb } from './geoBuilder';
 import { distanceToAabb, selectBand } from './lod';
@@ -170,6 +171,7 @@ export class BuildingRenderer {
     const owned = new Uint8Array(boxes.length);
     const shellBuilder = new GeoBuilder().addAttribute('rm', 2).addAttribute('bld', 1);
     const shade: number[] = [1, 1, 1, 1, 1, 1];
+    const neighbours: Aabb[] = [];
 
     world.buildings.forEach((bd, index) => {
       const list: WorldBox[] = [];
@@ -182,9 +184,10 @@ export class BuildingRenderer {
       if (list.length === 0) return;
       const ctx = this.buildingContext(bd, list);
       const full = new GeoBuilder().addAttribute('rm', 2);
+      const near = new BoxNeighbourhood(list);
       for (const b of list) {
         if (b.kind === 'target') continue;
-        const mask = visibleFaces(b, list, heightAt);
+        const mask = visibleFaces(b, near.touching(b, 0.03, neighbours), heightAt);
         if (!mask) continue;
         const style: FaceStyle = {
           color: boxBaseColor(b),
@@ -248,8 +251,8 @@ export class BuildingRenderer {
       minX = Math.min(minX, b.min.x); minY = Math.min(minY, b.min.y); minZ = Math.min(minZ, b.min.z);
       maxX = Math.max(maxX, b.max.x); maxY = Math.max(maxY, b.max.y); maxZ = Math.max(maxZ, b.max.z);
     }
-    let interiorTop = -Infinity;
-    for (const b of list) if (b.kind === 'roof') interiorTop = Math.max(interiorTop, b.min.y);
+    let interiorTop = Infinity;
+    for (const b of list) if (b.kind === 'roof') interiorTop = Math.min(interiorTop, b.min.y);
     if (!Number.isFinite(interiorTop)) interiorTop = maxY;
     return { min: { x: minX, y: minY, z: minZ }, max: { x: maxX, y: maxY, z: maxZ }, interiorTop };
   }
@@ -318,10 +321,12 @@ export class BuildingRenderer {
       list.push(b);
     }
     const shade: number[] = [1, 1, 1, 1, 1, 1];
+    const neighbours: Aabb[] = [];
     for (const [key, list] of buckets) {
       const gb = new GeoBuilder().addAttribute('rm', 2);
+      const near = new BoxNeighbourhood(list);
       for (const b of list) {
-        const mask = visibleFaces(b, list, world.heightAt);
+        const mask = visibleFaces(b, near.touching(b, 0.03, neighbours), world.heightAt);
         if (!mask) continue;
         emitBox(gb, b, mask, {
           color: boxBaseColor(b),

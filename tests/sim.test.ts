@@ -9,7 +9,7 @@ import {
 import { GEAR, THROWABLES, WEAPONS, computeDamage, fireInterval, sightDrop, simulateTrajectory } from '../src/shared/items';
 import { lineOfSight } from '../src/shared/physics';
 import { Rng } from '../src/shared/rng';
-import { GameSim, ZONE_PHASES, ZONE_PRE_TIME, trainingTargetPosition } from '../src/shared/sim';
+import { GameSim, TRAINING_TARGET_CENTER_HEIGHT, ZONE_PHASES, ZONE_PRE_TIME, trainingTargetPosition } from '../src/shared/sim';
 import type { SimEvent } from '../src/shared/sim';
 import { damageInfo, damagePlayer } from '../src/shared/sim/combat';
 import { VEHICLES, exitPosition } from '../src/shared/vehicles';
@@ -106,7 +106,8 @@ class Harness {
     p.weapons[slot] = { id: weapon, mag: w.magSize };
     p.ammo[w.ammo] = reserve;
     this.setIdle(id, { slot });
-    this.step(Math.ceil(w.drawTime / TICK_DT) + 2);
+    // Stale queued inputs may delay the switch by a few ticks.
+    this.stepUntil(() => p.activeSlot === slot && p.drawTimer === 0, Math.ceil(w.drawTime / TICK_DT) + 12);
     expect(p.activeSlot).toBe(slot);
     expect(p.drawTimer).toBe(0);
   }
@@ -142,8 +143,9 @@ function areaClear(w: World, x0: number, z0: number, x1: number, z1: number): bo
 
 /** Flat dry open rectangle [x-w0, x+w1] x [z-len, z+3] with no colliders. */
 function findOpen(w: World, len: number, w0: number, w1: number): { x: number; z: number } {
-  for (let z = -320; z <= 320; z += 8) {
-    for (let x = -320; x <= 320; x += 8) {
+  const lim = w.half - len - Math.max(w0, w1) - 10;
+  for (let z = -lim; z <= lim; z += 6) {
+    for (let x = -lim; x <= lim; x += 6) {
       const h0 = w.heightAt(x, z);
       if (h0 < w.waterLevel + 2) continue;
       let ok = true;
@@ -343,6 +345,9 @@ describe('GameSim combat', () => {
     expect(pistol).toBeGreaterThan(10);
     // Holding the trigger of a semi weapon fires once.
     h.step(10);
+    p.weapons[2]!.mag = 15;
+    p.reloadTimer = 0;
+    p.reloadTotal = 0;
     const s3 = p.stats.shotsFired;
     h.step(30, () => ({ [a]: { pitch: 0.6, buttons: BTN.FIRE } }));
     expect(p.stats.shotsFired - s3).toBe(1);
@@ -437,15 +442,16 @@ describe('downed, revive, bleed out, elimination', () => {
     expect(h.p(a1).revive?.target).toBe(a0);
     expect(pa.revivedBy).toBe(a1);
     const hp0 = pa.downedHp;
-    const n = Math.ceil(REVIVE_TIME / TICK_DT) + 2;
+    h.step(30, () => ({ [a1]: { buttons: BTN.INTERACT }, [a0]: { slot: 0, buttons: BTN.FIRE } }));
+    // Bleeding is paused while being revived.
+    expect(pa.downedHp).toBe(hp0);
+    const n = Math.ceil(REVIVE_TIME / TICK_DT) - 28;
     h.step(n, () => ({ [a1]: { buttons: BTN.INTERACT }, [a0]: { slot: 0, buttons: BTN.FIRE } }));
     expect(pa.stats.shotsFired).toBe(fired);
     expect(h.of('revived')[0]).toMatchObject({ reviver: a1, target: a0 });
     expect(pa.life).toBe('alive');
     expect(pa.health).toBe(10);
     expect(h.p(a1).stats.revives).toBe(1);
-    // Bleeding is paused while being revived.
-    expect(hp0).toBe(DOWNED_HEALTH);
   });
 
   it('a revive is interrupted by moving and the second knock bleeds faster', () => {
@@ -889,54 +895,86 @@ describe('training ground', () => {
     expect(p.life).toBe('alive');
     expect(p.weapons[0]?.id).toBe('ar');
 
-    // Moving targets ping-pong deterministically.
-    const moving = layout.targets.find((t) => t.kind === 'moving' && t.a && t.b && t.speed);
-    if (moving) {
-      const pa = trainingTargetPosition(moving, 0);
-      expect(pa).toEqual(moving.a);
-      const L = Math.hypot(moving.b!.x - moving.a!.x, moving.b!.z - moving.a!.z);
-      const pb = trainingTargetPosition(moving, L / moving.speed!);
-      expect(pb.x).toBeCloseTo(moving.b!.x, 6);
-      expect(trainingTargetPosition(moving, (2 * L) / moving.speed!).x).toBeCloseTo(moving.a!.x, 6);
-    }
-    // Shoot a static target: private targetHit read-out with distance and damage.
-    const target = layout.targets.find((t) => t.kind === 'static' && t.range <= 60) ?? layout.targets.find((t) => t.kind === 'static');
-    const box = target && h.world.boxes.find((b) => b.kind === 'target'
-      && Math.hypot((b.min.x + b.max.x) / 2 - target.pos.x, (b.min.z + b.max.z) / 2 - target.pos.z) < 3
-      && b.max.y - b.min.y > 0.8);
-    if (target && box) {
-      const centre = { x: (box.min.x + box.max.x) / 2, y: box.min.y + (box.max.y - box.min.y) * 0.5, z: (box.min.z + box.max.z) / 2 };
-      // Stand on the firing line in front of the target.
-      const fl = layout.firingLine;
-      h.place(a, centre.x + (fl.x - centre.x) * Math.min(1, 40 / Math.max(1, Math.hypot(fl.x - centre.x, fl.z - centre.z))),
-        centre.z + (fl.z - centre.z) * Math.min(1, 40 / Math.max(1, Math.hypot(fl.x - centre.x, fl.z - centre.z))));
+    // Moving targets ping-pong deterministically (base position = target centre - 1.3 m).
+    const moving = layout.targets.find((t) => t.kind === 'moving' && t.a && t.b && t.speed)!;
+    expect(moving).toBeTruthy();
+    const L = Math.hypot(moving.b!.x - moving.a!.x, moving.b!.z - moving.a!.z);
+    const m0 = trainingTargetPosition(moving, 0);
+    expect(m0.x).toBeCloseTo(moving.a!.x, 6);
+    expect(m0.y).toBeCloseTo(moving.a!.y - TRAINING_TARGET_CENTER_HEIGHT, 6);
+    expect(trainingTargetPosition(moving, L / moving.speed!).x).toBeCloseTo(moving.b!.x, 6);
+    expect(trainingTargetPosition(moving, (2 * L) / moving.speed!).x).toBeCloseTo(moving.a!.x, 6);
+    expect(trainingTargetPosition(moving, (0.5 * L) / moving.speed!).x).toBeCloseTo((moving.a!.x + moving.b!.x) / 2, 6);
+
+    const fl = layout.firingLine;
+    const shootFrom = (x: number, z: number, aimAt: Vec3) => {
+      h.place(a, x, z);
       h.setIdle(a, { slot: 0 });
       h.step(25);
-      const eye = h.sim.eyePos(a);
-      if (lineOfSight(h.world, eye, { x: centre.x, y: centre.y, z: centre.z }) || true) {
-        const aim = h.aimAt(a, centre);
-        h.setIdle(a, { ...aim, slot: 0, buttons: BTN.ADS });
-        h.step(15);
-        h.clearEvents();
-        h.step(1, () => ({ [a]: { buttons: BTN.ADS | BTN.FIRE } }));
-        const th = h.simEvents('targetHit');
-        expect(th.length).toBe(1);
-        expect(th[0].to).toEqual([a]);
-        const ev = th[0].ev as Ev<'targetHit'>;
-        expect(ev.target).toBe(target.id);
-        expect(ev.part).toBe('body');
-        expect(ev.damage).toBeCloseTo(computeDamage('ar', 'body', ev.distance, NO_ARMOR).health, 0);
-      }
-    }
+      const aim = h.aimAt(a, aimAt);
+      h.setIdle(a, { ...aim, slot: 0, buttons: BTN.ADS });
+      h.step(15);
+      h.clearEvents();
+      h.step(1, () => ({ [a]: { buttons: BTN.ADS | BTN.FIRE } }));
+      return h.simEvents('targetHit');
+    };
+    // Static 25 m target (a steel plate box): body and head (top 22 %) read-outs.
+    const target = layout.targets.filter((t) => t.kind === 'static').sort((x, y) => x.range - y.range)[0];
+    const box = h.world.boxes.find((bx) => bx.id === target.id)!;
+    expect(box.kind).toBe('target');
+    const bc = { x: (box.min.x + box.max.x) / 2, y: box.min.y + (box.max.y - box.min.y) * 0.45, z: (box.min.z + box.max.z) / 2 };
+    let th = shootFrom(target.pos.x, fl.z - 1, bc);
+    expect(th.length).toBe(1);
+    expect(th[0].to).toEqual([a]);
+    let ev = th[0].ev as Ev<'targetHit'>;
+    expect(ev.target).toBe(target.id);
+    expect(ev.part).toBe('body');
+    expect(Math.abs(ev.distance - target.range)).toBeLessThan(3);
+    expect(ev.damage).toBeCloseTo(computeDamage('ar', 'body', ev.distance, NO_ARMOR).health, 0);
+    th = shootFrom(target.pos.x, fl.z - 1, { ...bc, y: box.max.y - 0.15 });
+    ev = th[0].ev as Ev<'targetHit'>;
+    expect(ev.part).toBe('head');
+    expect(ev.damage).toBeCloseTo(computeDamage('ar', 'head', ev.distance, NO_ARMOR).health, 0);
+    // Moving target: hit-tested as a standing dummy at its (time-based) position.
+    h.setIdle(a, { slot: 0 });
+    h.place(a, (moving.a!.x + moving.b!.x) / 2, fl.z - 1);
+    h.step(25);
+    const tShot = h.sim.time;
+    const base = trainingTargetPosition(moving, tShot);
+    const aim = h.aimAt(a, { x: base.x, y: base.y + 1.2, z: base.z });
+    h.setIdle(a, { ...aim, slot: 0, buttons: BTN.ADS });
+    h.clearEvents();
+    // Aim at where it is now and claim to see exactly that time (no rewind).
+    h.step(1, () => ({ [a]: { ...aim, buttons: BTN.ADS | BTN.FIRE, rt: tShot * 1000 } }));
+    const mh = h.of('targetHit');
+    expect(mh.length).toBe(1);
+    expect(mh[0].target).toBe(moving.id);
   });
 });
 
 describe('determinism and performance', () => {
   /** Trivial scripted driver: jumps, wanders, picks up nearby loot, shoots the nearest enemy. */
-  function runScripted(seed: number, players: number, ticks: number, teamSize: 1 | 2 | 4 = 2) {
+  function runScripted(seed: number, players: number, ticks: number, teamSize: 1 | 2 | 4 = 2, cluster = false) {
     const sim = new GameSim({ ...BASE, seed, maxPlayers: players, teamSize, botFill: true });
     sim.fillBots();
     sim.start();
+    if (cluster) {
+      // Everyone on the ground within ~100 m of each other: a dense firefight.
+      const crng = new Rng(seed);
+      let i = 0;
+      for (const p of sim.players.values()) {
+        let x = 0, z = 0;
+        for (let k = 0; k < 50; k++) {
+          const a = crng.next() * Math.PI * 2, r = 20 + crng.next() * 80;
+          x = Math.cos(a) * r; z = Math.sin(a) * r;
+          if (sim.world.heightAt(x, z) > 1) break;
+        }
+        p.mode = 'ground';
+        p.pos.x = x; p.pos.z = z; p.pos.y = sim.world.groundAt(x, z);
+        p.onGround = true;
+        p.yaw = (i++ % 8) * 0.8;
+      }
+    }
     const rng = new Rng(seed ^ 0x9e37);
     const seq = new Map<number, number>();
     const near: PlayerState[] = [];
@@ -1003,8 +1041,14 @@ describe('determinism and performance', () => {
   });
 
   it('a 64-player match steps well within the tick budget', () => {
-    const r = runScripted(99, 64, 30 * 60);
-    console.log(`[sim perf] 64 players avg ${r.avg.toFixed(2)} ms/tick, worst ${r.worst.toFixed(1)} ms`);
-    expect(r.avg).toBeLessThan(20);
+    const drop = runScripted(99, 64, 30 * 60);
+    console.log(`[sim perf] 64 players, drop phase: avg ${drop.avg.toFixed(2)} ms/tick, worst ${drop.worst.toFixed(1)} ms`);
+    expect(drop.avg).toBeLessThan(20);
+    const fight = runScripted(7, 64, 30 * 30, 2, true);
+    const shots = [...fight.sim.players.values()].reduce((s, p) => s + p.stats.shotsFired, 0);
+    const dead = [...fight.sim.players.values()].filter((p) => p.life !== 'alive').length;
+    console.log(`[sim perf] 64 players, firefight: avg ${fight.avg.toFixed(2)} ms/tick, worst ${fight.worst.toFixed(1)} ms, shots ${shots}, down/dead ${dead}`);
+    expect(shots).toBeGreaterThan(500);
+    expect(fight.avg).toBeLessThan(20);
   });
 });

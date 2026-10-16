@@ -15,27 +15,33 @@ import type { PlayerRt } from './players';
 import { GIVE_AMMO, GIVE_COOLDOWN, GIVE_COUNTS, TARGET_HEAD_FRAC, TRAINING_SPAWN_SPACING } from './tuning';
 
 /**
- * Position of a training target at sim time `timeSec` (seconds). Moving targets ping-pong between
- * `a` and `b` at `speed` m/s, deterministic from the time so the client renders the same thing.
+ * Height of a training target's aim point above its base. The world places TrainingTarget.pos (and
+ * a / b) at the target centre, i.e. this far above the ground the dummy stands on.
+ */
+export const TRAINING_TARGET_CENTER_HEIGHT = 1.3;
+
+/**
+ * Base (feet) position of a training target at sim time `timeSec` (seconds): where a dummy stands
+ * and where its standing hitboxes are built. Moving targets ping-pong between `a` and `b` at
+ * `speed` m/s, deterministic from the time so the client renders exactly what the server tests.
  */
 export function trainingTargetPosition(target: TrainingTarget, timeSec: number, out: Vec3 = { x: 0, y: 0, z: 0 }): Vec3 {
   const a = target.a, b = target.b;
   if (target.kind !== 'moving' || !a || !b || !(target.speed && target.speed > 0)) {
-    out.x = target.pos.x; out.y = target.pos.y; out.z = target.pos.z;
+    out.x = target.pos.x; out.y = target.pos.y - TRAINING_TARGET_CENTER_HEIGHT; out.z = target.pos.z;
     return out;
   }
   const dx = b.x - a.x, dy = b.y - a.y, dz = b.z - a.z;
   const L = Math.sqrt(dx * dx + dy * dy + dz * dz);
-  if (L < 1e-6) {
-    out.x = a.x; out.y = a.y; out.z = a.z;
-    return out;
+  let f = 0;
+  if (L > 1e-6) {
+    const period = 2 * L;
+    let s = (Math.max(0, timeSec) * target.speed) % period;
+    if (s > L) s = period - s;
+    f = s / L;
   }
-  const period = 2 * L;
-  let s = (Math.max(0, timeSec) * target.speed) % period;
-  if (s > L) s = period - s;
-  const f = s / L;
   out.x = a.x + dx * f;
-  out.y = a.y + dy * f;
+  out.y = a.y + dy * f - TRAINING_TARGET_CENTER_HEIGHT;
   out.z = a.z + dz * f;
   return out;
 }

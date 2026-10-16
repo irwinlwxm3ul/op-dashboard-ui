@@ -101,7 +101,7 @@ export class Compass implements Widget {
     if (!self) return;
     if (!this.width) this.width = this.strip.clientWidth || 420;
     const heading = bearingFromYaw(cam.yaw);
-    if (Math.abs(heading - this.lastHeading) > 0.05) {
+    if (!(Math.abs(heading - this.lastHeading) <= 0.05)) {
       this.lastHeading = heading;
       const x = this.width / 2 - (heading - START) * PX;
       this.track.style.transform = `translate3d(${x.toFixed(1)}px,0,0)`;

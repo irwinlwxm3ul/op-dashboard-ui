@@ -123,7 +123,13 @@ export class GrassRenderer {
     mesh.castShadow = false;
     mesh.receiveShadow = true;
     mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
-    (mesh.instanceMatrix.array as Float32Array).fill(0);
+    // Start with collapsed (zero-scale) instances until their patch is generated.
+    const m0 = mesh.instanceMatrix.array as Float32Array;
+    m0.fill(0);
+    for (let o = 0; o < m0.length; o += 16) {
+      m0[o + 13] = -10000;
+      m0[o + 15] = 1;
+    }
     mesh.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(cap * 3), 3);
     mesh.instanceColor.setUsage(THREE.DynamicDrawUsage);
     this.mesh = mesh;

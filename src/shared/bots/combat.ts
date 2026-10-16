@@ -277,9 +277,9 @@ export function combatThink(sys: BotSystem, b: BotState, p: PlayerState): void {
       const l = Math.hypot(ax, az) || 1;
       ax /= l;
       az /= l;
-      if (sys.grid.nearestFree(p.pos.x + ax * 14, p.pos.z + az * 14, 4, sys.xz)) {
-        setDest(sys, b, p, sys.xz.x, sys.xz.z, 1.5, true);
-      }
+      const fx = p.pos.x + ax * 14, fz = p.pos.z + az * 14;
+      if (sys.grid.nearestFree(fx, fz, 4, sys.xz, false)) setDest(sys, b, p, sys.xz.x, sys.xz.z, 1.5, true);
+      else setDest(sys, b, p, fx, fz, 1.5, true);
       break;
     }
     default:

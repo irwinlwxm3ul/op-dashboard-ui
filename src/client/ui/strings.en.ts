@@ -57,9 +57,5 @@ export const uiStrings = {
   // HUD
   'ui.hud.teamsLabel': 'Teams',
   'ui.hud.eliminatedHint': 'Press {key} to open the menu and leave the match.',
-  'ui.hud.respawnKey': 'Respawn',
-  'ui.hud.palette': 'Item spawner',
-  'ui.hud.swap': 'Swap',
-  'ui.hud.magazine': '{mag}/{size}',
   'ui.feed.died': '{victim} died',
 } as const;

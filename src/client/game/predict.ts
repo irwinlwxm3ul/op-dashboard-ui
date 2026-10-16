@@ -43,13 +43,14 @@ export interface PredictRt {
   lastShotTime: number;
   /** Effective sprint state of the last tick. */
   sprinting: boolean;
-  /** Smoothed driver throttle / yaw rate of the predicted vehicle (not networked). */
+  /** Smoothed throttle, yaw rate and ground contact of the driven vehicle (not networked). */
   vehThrottle: number;
   vehYawRate: number;
+  vehOnGround: boolean;
 }
 
 export function createPredictRt(): PredictRt {
-  return { releaseTime: 1e9, lastShotTime: -1e9, sprinting: false, vehThrottle: 0, vehYawRate: 0 };
+  return { releaseTime: 1e9, lastShotTime: -1e9, sprinting: false, vehThrottle: 0, vehYawRate: 0, vehOnGround: true };
 }
 
 export function copyPredictRt(dst: PredictRt, src: PredictRt): PredictRt {
@@ -58,6 +59,7 @@ export function copyPredictRt(dst: PredictRt, src: PredictRt): PredictRt {
   dst.sprinting = src.sprinting;
   dst.vehThrottle = src.vehThrottle;
   dst.vehYawRate = src.vehYawRate;
+  dst.vehOnGround = src.vehOnGround;
   return dst;
 }
 
@@ -296,9 +298,11 @@ export function predictTick(
         vehicleControls(input, ctl);
         v.throttle = rt.vehThrottle;
         v.yawRate = rt.vehYawRate;
+        v.onGround = rt.vehOnGround;
         stepVehicle(v, ctl, dt, env.world, env.others, ev.vehicle);
         rt.vehThrottle = v.throttle;
         rt.vehYawRate = v.yawRate;
+        rt.vehOnGround = v.onGround;
       }
       break;
     }
@@ -625,7 +629,7 @@ export function vehicleFromNet(n: NetVehicle): VehicleState {
   return v;
 }
 
-/** Overwrite a VehicleState with network data (keeps the non-networked yawRate / throttle). */
+/** Overwrite a VehicleState with network data (keeps the non-networked yawRate / throttle / onGround). */
 export function applyNetVehicle(v: VehicleState, n: NetVehicle): void {
   v.id = n.id;
   v.type = n.t;
@@ -643,6 +647,4 @@ export function applyNetVehicle(v: VehicleState, n: NetVehicle): void {
   for (let i = 0; i < n.seats.length; i++) v.seats[i] = n.seats[i];
   v.destroyed = n.destroyed;
   v.burnTimer = n.burning ? Math.max(v.burnTimer, 0.01) : 0;
-  const def = VEHICLES[n.t];
-  v.onGround = def ? true : v.onGround;
 }

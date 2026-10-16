@@ -72,7 +72,11 @@ export class KillFeed implements Widget {
   private name(id: EntityId | null): string {
     if (id === null) return '';
     const f = this.frame;
-    return f?.roster.get(id)?.name ?? f?.players.get(id)?.name ?? t('common.unknown');
+    const fromFrame = f?.roster.get(id)?.name ?? f?.players.get(id)?.name;
+    if (fromFrame) return fromFrame;
+    // Events can arrive before the first HUD frame: fall back to the match roster.
+    const r = this.env?.game.init.roster.find((x) => x.id === id);
+    return r?.name ?? t('common.unknown');
   }
 
   private role(id: EntityId | null): 'me' | 'mate' | 'other' {

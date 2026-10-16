@@ -73,7 +73,7 @@ export class DropMeter implements Widget {
     this.chute = new ClassFlag(this.el, 'dz-drop-chute');
     const gauge = h('div', 'dz-drop-gauge', this.el);
     const bar = h('div', 'dz-drop-bar', gauge);
-    this.fill = new BarFill(h('div', 'dz-drop-fill', bar));
+    this.fill = new BarFill(h('div', 'dz-drop-fill', bar), 0.002, 'y');
     const line = h('div', 'dz-drop-line', bar);
     line.style.bottom = `${(AUTO_CHUTE_HEIGHT / PLANE_ALTITUDE) * 100}%`;
     const me = h('div', 'dz-drop-me', bar);

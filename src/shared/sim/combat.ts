@@ -101,8 +101,9 @@ export function damagePlayer(sim: GameSim, v: PlayerState, amount: number, info:
     knockPlayer(sim, v, enemy ? a : null, info.source, info.part === 'head', info.distance);
   } else if (result === 'kill') {
     const wasDowned = v.life === 'downed';
-    // Credit: the finishing enemy (also recorded as lastAttacker above) or whoever hurt them last.
-    const credit = enemy ? a.id : v.lastAttacker;
+    // Credit: the finishing enemy; a knocked player finished by the zone / a fall still counts for
+    // whoever downed them, a standing player killed by the environment counts for nobody.
+    const credit = enemy ? a.id : wasDowned ? v.lastAttacker : null;
     killPlayer(sim, v, credit, info.source, info.part === 'head', info.distance, wasDowned && enemy);
   }
   return result;
@@ -194,6 +195,10 @@ export function killPlayer(
     spillInventory(sim, v);
   }
   v.spectating = pickSpectateTarget(sim, v);
+  // Whoever was watching this player moves on.
+  for (const o of sim.playerList) {
+    if (o !== v && o.life === 'dead' && o.spectating === v.id) o.spectating = pickSpectateTarget(sim, o);
+  }
   if (sim.config.mode === 'br') checkTeam(sim, v.team);
 }
 
@@ -295,7 +300,7 @@ export function spillInventory(sim: GameSim, p: PlayerState): void {
 export function pickSpectateTarget(sim: GameSim, p: PlayerState): EntityId | null {
   const team = sim.teams[p.team];
   if (team) {
-    if (p.spectating !== null) {
+    if (p.spectating !== null && p.spectating !== p.id) {
       const cur = sim.players.get(p.spectating);
       if (cur && cur.team === p.team && cur.life !== 'dead') return cur.id;
     }

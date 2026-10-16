@@ -10,7 +10,7 @@ import { BTN } from '../types';
 import { WEAPON_RANGE, slotRounds } from './aim';
 import { activeWeapon, combatAct, combatThink, manageWeapon, steerAim, wantReload } from './combat';
 import { freeCapacity, lootUtility, wellEquipped, worstPrimarySlot } from './loot';
-import { buildingInterior } from './mapinfo';
+import { INTERIOR_NONE, INTERIOR_OK, INTERIOR_PENDING, buildingInterior } from './mapinfo';
 import {
   checkStuck, clearDest, facingMove, followPath, isAvoided, moveYaw, setDest,
 } from './movement';
@@ -23,6 +23,8 @@ import { insideNext, outsideCurrent, updateZoneTarget, zoneActive, zoneUrgency }
 const LOOT_RADIUS = 30;
 const EXPLORE_RADIUS = 220;
 const REVIVE_SEARCH = 120;
+/** Items more than this above the terrain lie on an upper floor. */
+const UPPER_FLOOR = 2.4;
 /** Goal stickiness (score bonus for the current goal). */
 const HYSTERESIS = 8;
 
@@ -266,7 +268,7 @@ function scanLoot(sys: BotSystem, b: BotState, p: PlayerState): void {
   const t = sys.now;
   const items = sys.sim.lootNear(p.pos.x, p.pos.z, LOOT_RADIUS, sys.lootBuf);
   const free = freeCapacity(p);
-  const grid = sys.grid;
+  const world = sys.world;
   if (b.blacklist.size > 48) {
     for (const [id, until] of b.blacklist) if (until <= t) b.blacklist.delete(id);
   }
@@ -281,7 +283,7 @@ function scanLoot(sys: BotSystem, b: BotState, p: PlayerState): void {
     if (it.id === b.lootId) s *= 1.25;
     if (s <= lootPickScore) continue;
     // Upper floors are skipped unless the bot is already up there (ground-floor navigation).
-    if (Math.abs(it.pos.y - p.pos.y) > 1.3 && it.pos.y - grid.base(grid.cell(it.pos.x), grid.cell(it.pos.z)) > 1.3) continue;
+    if (Math.abs(it.pos.y - p.pos.y) > 1.3 && it.pos.y - world.heightAt(it.pos.x, it.pos.z) > UPPER_FLOOR) continue;
     if (isAvoided(sys, b, it.pos.x, it.pos.z)) continue;
     lootPick = it.id;
     lootPickScore = s;
@@ -347,7 +349,9 @@ function pickExplore(sys: BotSystem, b: BotState, p: PlayerState): boolean {
     bestD = d;
   }
   if (best < 0) return false;
-  if (!buildingInterior(w, info, sys.grid, best, sys.xz)) {
+  const r = buildingInterior(w, info, sys.grid, best, sys.xz);
+  if (r === INTERIOR_PENDING) return false;
+  if (r === INTERIOR_NONE) {
     b.explored[best] = 1;
     return false;
   }
@@ -358,7 +362,7 @@ function pickExplore(sys: BotSystem, b: BotState, p: PlayerState): boolean {
 
 function exploreThink(sys: BotSystem, b: BotState, p: PlayerState): void {
   const bi = b.exploreBuilding;
-  if (bi < 0 || !buildingInterior(sys.world, sys.info, sys.grid, bi, sys.xz)) {
+  if (bi < 0 || buildingInterior(sys.world, sys.info, sys.grid, bi, sys.xz) !== INTERIOR_OK) {
     clearDest(sys, b);
     return;
   }
@@ -468,9 +472,14 @@ function idleThink(sys: BotSystem, b: BotState, p: PlayerState): void {
         z = p.pos.z + (rng.next() - 0.5) * 160;
       }
       if (Math.hypot(x - p.pos.x, z - p.pos.z) > 250 || !insideNext(sys, x, z) || !w.inBounds(x, z)) continue;
-      if (!sys.grid.nearestFree(x, z, 6, sys.xz)) continue;
-      b.wanderX = sys.xz.x;
-      b.wanderZ = sys.xz.z;
+      if (w.heightAt(x, z) < w.waterLevel + 0.5) continue;
+      // Snap to a free cell when the area is already mapped (the planner snaps otherwise).
+      if (sys.grid.nearestFree(x, z, 6, sys.xz, false)) {
+        x = sys.xz.x;
+        z = sys.xz.z;
+      }
+      b.wanderX = x;
+      b.wanderZ = z;
       found = true;
     }
     if (!found) {
@@ -581,7 +590,9 @@ export function downedThink(sys: BotSystem, b: BotState, p: PlayerState): void {
     const l = Math.hypot(ax, az) || 1;
     ax /= l;
     az /= l;
-    if (sys.grid.nearestFree(p.pos.x + ax * 8, p.pos.z + az * 8, 3, sys.xz)) setDest(sys, b, p, sys.xz.x, sys.xz.z, 1, false);
+    const fx = p.pos.x + ax * 8, fz = p.pos.z + az * 8;
+    if (sys.grid.nearestFree(fx, fz, 3, sys.xz, false)) setDest(sys, b, p, sys.xz.x, sys.xz.z, 1, false);
+    else setDest(sys, b, p, fx, fz, 1, false);
   } else {
     clearDest(sys, b);
   }

@@ -65,37 +65,54 @@ export function placeLoot(c: LootContext): void {
   const areas: number[] = [];
   let total = 0;
   for (const room of c.rooms) {
-    const a = Math.max(0, room.x1 - room.x0 - 1) * Math.max(0, room.z1 - room.z0 - 1);
+    // Open roofs get a sparse sprinkle compared with interiors.
+    const a = Math.max(0, room.x1 - room.x0 - 1) * Math.max(0, room.z1 - room.z0 - 1) * (room.indoor ? 1 : 0.15);
     areas.push(a);
     total += a;
   }
   const density = total > 0 ? indoorTarget / total : 0;
-  const placedRoom: { x: number; z: number }[] = [];
-  for (let i = 0; i < c.rooms.length; i++) {
+  const perRoom: { x: number; z: number }[][] = c.rooms.map(() => []);
+  /** One placement attempt in room i. */
+  const tryRoom = (i: number): boolean => {
     const room = c.rooms[i];
+    const x = r2(rng.range(room.x0 + 0.5, room.x1 - 0.5));
+    const z = r2(rng.range(room.z0 + 0.5, room.z1 - 0.5));
+    const sz = c.stairZones.get(room.building);
+    if (sz && inside(sz, x, z, 0.5)) return false;
+    const placed = perRoom[i];
+    for (const p of placed) if ((p.x - x) * (p.x - x) + (p.z - z) * (p.z - z) < 1.0) return false;
+    let y = room.y;
+    if (!lootSpotFree(world, x, z, y)) {
+      // A crate or similar may sit here: use its top if it is a clean surface.
+      const top = world.groundAt(x, z, room.y + 3);
+      if (top <= room.y + 0.05 || top > room.y + 2.2 || !lootSpotFree(world, x, z, top)) return false;
+      y = top;
+    }
+    if (Math.abs(world.groundAt(x, z, y) - y) > 0.005) return false;
+    placed.push({ x, z });
+    out.push({ pos: { x, y: r3(y + 0.05), z }, tier: jitterTier(rng, c.buildingTier(room.building)), indoor: room.indoor });
+    return true;
+  };
+  for (let i = 0; i < c.rooms.length; i++) {
     if (areas[i] < 1) continue;
     const expected = areas[i] * density;
     let n = Math.floor(expected) + (rng.next() < expected - Math.floor(expected) ? 1 : 0);
-    if (n === 0 && room.indoor && areas[i] >= 4) n = 1;
-    const sz = c.stairZones.get(room.building);
-    const tierBase = c.buildingTier(room.building);
-    placedRoom.length = 0;
-    for (let k = 0, tries = 0; k < n && tries < n * 25; tries++) {
-      const x = r2(rng.range(room.x0 + 0.5, room.x1 - 0.5));
-      const z = r2(rng.range(room.z0 + 0.5, room.z1 - 0.5));
-      if (sz && inside(sz, x, z, 0.5)) continue;
-      if (placedRoom.some((p) => (p.x - x) * (p.x - x) + (p.z - z) * (p.z - z) < 1.0)) continue;
-      let y = room.y;
-      if (!lootSpotFree(world, x, z, y)) {
-        // A crate or similar may sit here: use its top if it is a clean surface.
-        const top = world.groundAt(x, z, room.y + 3);
-        if (top <= room.y + 0.05 || top > room.y + 2.2 || !lootSpotFree(world, x, z, top)) continue;
-        y = top;
+    if (n === 0 && c.rooms[i].indoor && areas[i] >= 4) n = 1;
+    for (let k = 0, tries = 0; k < n && tries < n * 25; tries++) if (tryRoom(i)) k++;
+  }
+  // Top up rooms (area weighted) when crowded rooms rejected spots.
+  if (total > 0) {
+    const cum: number[] = [];
+    let acc = 0;
+    for (let i = 0; i < areas.length; i++) cum.push((acc += c.rooms[i].indoor ? areas[i] : 0));
+    for (let tries = 0, max = indoorTarget * 20; out.length < indoorTarget && tries < max && acc > 0; tries++) {
+      const r = rng.next() * acc;
+      let lo = 0, hi = cum.length - 1;
+      while (lo < hi) {
+        const mid = (lo + hi) >> 1;
+        if (cum[mid] <= r) lo = mid + 1; else hi = mid;
       }
-      if (Math.abs(world.groundAt(x, z, y) - y) > 0.005) continue;
-      placedRoom.push({ x, z });
-      out.push({ pos: { x, y: r3(y + 0.05), z }, tier: jitterTier(rng, tierBase), indoor: room.indoor });
-      k++;
+      tryRoom(lo);
     }
   }
 

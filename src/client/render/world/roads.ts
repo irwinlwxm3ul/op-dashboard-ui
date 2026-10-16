@@ -12,8 +12,8 @@ const LIFT = 0.07;
 const CAP_LIFT = 0.055;
 const STEP = 2.5;
 const CAP_SEGMENTS = 14;
-/** Roads at least this wide are asphalt with markings; narrower ones are dirt tracks. */
-const ASPHALT_MIN_WIDTH = 5.5;
+/** Roads at least this wide are asphalt with markings; narrower (village streets) are gravel tracks. */
+const ASPHALT_MIN_WIDTH = 6.5;
 
 const ASPHALT = linearRgb(0x5a5752);
 const DIRT = linearRgb(0x7c6a4f);

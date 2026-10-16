@@ -13,15 +13,16 @@ import type { MatchInit, NetPlayer, NetProjectile, NetVehicle, RosterEntry, Self
 import { LIFE_CODES, MODE_CODES, PF } from '../../shared/protocol';
 import { eyePosition, lineOfSight } from '../../shared/physics';
 import { trainingTargetPosition } from '../../shared/sim';
-import { FISTS_DRAW_TIME } from '../../shared/sim/tuning';
+import { FISTS_DRAW_TIME, VEHICLE_SLEEP_SPEED } from '../../shared/sim/tuning';
 import { BTN, STANCE_FROM_CODE } from '../../shared/types';
 import type {
   ClientAction, EntityId, LifeState, LootItem, MatchResults, MovementMode, PlayerInput, PlayerState, SurfaceMaterial,
   TrainingTarget, Vec3, VehicleState, World, WorldBox, ZoneState,
 } from '../../shared/types';
-import { seatWorldPosition, vehicleHitsPoint } from '../../shared/vehicles';
+import { seatWorldPosition, stepVehicle, vehicleHitsPoint } from '../../shared/vehicles';
+import type { VehicleStepEvents } from '../../shared/vehicles';
 import { generateWorld } from '../../shared/world';
-import { validateClientMessage, sanitizeInput } from '../../shared/validate';
+import { sanitizeAction, sanitizeInput, validateClientMessage } from '../../shared/validate';
 import type { Transport } from '../net/transport';
 import { ClockSync, RenderClock } from './clock';
 import { EventBus } from './events';
@@ -70,8 +71,8 @@ const STALE_MS = 10_000;
 /** Largest jump absorbed by the extrapolation correction of remote entities (m). */
 const REMOTE_SMOOTH_MAX = 3;
 const REMOTE_SMOOTH_DECAY = 12;
-/** Predicted time anchor tolerance (s) before re-anchoring to the clock estimate. */
-const PRED_TIME_TOLERANCE = 0.25;
+/** Vehicles closer than this (m) to the driven one take part in its collision prediction. */
+const OTHERS_RANGE = 40;
 /** PF.FIRING duration after a predicted shot (s). */
 const FIRING_FLAG_TIME = 0.2;
 
@@ -93,6 +94,7 @@ interface RemotePlayer {
   wasExtrapolating: boolean;
   lastSeen: number;
   deadSince: number;
+  rosterBot: boolean;
 }
 
 interface RemoteVehicle {
@@ -160,7 +162,6 @@ export class ClientGame implements ClientGameApi {
   // Snapshots & remote entities
   private readonly snapshots = new SampleRing<Snapshot>(SNAPSHOT_RING);
   private latest: Snapshot | null = null;
-  private latestArrival = 0;
   private readonly remotePlayers = new Map<EntityId, RemotePlayer>();
   private readonly remoteVehicles = new Map<EntityId, RemoteVehicle>();
   private readonly remoteProjectiles = new Map<EntityId, RemoteProjectile>();
@@ -198,7 +199,6 @@ export class ClientGame implements ClientGameApi {
   private prevRecoilY = 0;
   private recoilOffP = 0;
   private recoilOffY = 0;
-  private lastMode: MovementMode = 'plane';
   private lastStance: PlayerState['stance'] = 'stand';
   private lastAdsOn = false;
   private lastShotAt = -1e9;
@@ -211,6 +211,13 @@ export class ClientGame implements ClientGameApi {
   private readonly vehOffset = new SmoothOffset();
   private vehYawOff = 0;
   private readonly othersScratch: VehicleState[] = [];
+  private readonly othersPool: VehicleState[] = [];
+  private readonly predOthers: VehicleState[] = [];
+  private readonly otherVehEv: VehicleStepEvents = { crash: 0, crashPos: null, inWater: false };
+  /** Server tick minus input seq (measured from snapshots); NaN until known. */
+  private tickOffset = NaN;
+  private readonly tickOffsets = new Float64Array(20);
+  private tickOffsetHead = 0;
 
   // Interaction
   private interaction: Interaction | null = null;
@@ -218,6 +225,7 @@ export class ClientGame implements ClientGameApi {
   private readonly nearLoot: LootItem[] = [];
   private readonly lookDir = v3();
   private readonly eyeScratch = v3();
+  private readonly interactionEnv: InteractionEnv;
   private readonly inputCtx: InputContext = {
     mode: 'ground', life: 'alive', stance: 'stand', seat: -1, weapons: [null, null, null], activeSlot: -1,
     frags: 0, ads: 0, adsZoom: 1, scoped: false,
@@ -252,6 +260,7 @@ export class ClientGame implements ClientGameApi {
     this.world = opts.world ?? generateWorld(init.config.seed, init.config.mode === 'training' ? 'training' : 'island');
     this.input = opts.input ?? new InputController(settings);
     this.input.onInteract = () => this.performInteraction();
+    this.input.onDeadClick = () => this.spectateNext();
 
     for (const r of init.roster) this.roster.set(r.id, r);
     for (const l of init.loot) this.addLoot(l);
@@ -266,7 +275,20 @@ export class ClientGame implements ClientGameApi {
 
     this.env = {
       world: this.world, config: init.config, time: 0, plane: null, planeTime: 0, seatVehicle: null,
-      vehicle: null, others: this.othersScratch,
+      vehicle: null, others: this.predOthers,
+    };
+    this.interactionEnv = {
+      world: this.world,
+      self: createPredictedPlayerStub(),
+      eye: this.eyeScratch,
+      look: this.lookDir,
+      planePos: null,
+      players: this.playerViews,
+      vehicles: this.vehicleViews,
+      nearbyLoot: this.nearLoot,
+      training: init.config.mode === 'training' ? this.world.training : null,
+      lineOfSight: this.losFn,
+      vehicleNear: this.vehicleNearFn,
     };
 
     const localName = init.you !== null ? this.roster.get(init.you)?.name ?? '' : '';
@@ -310,6 +332,16 @@ export class ClientGame implements ClientGameApi {
   /** Magnitude (m) of the prediction correction currently being smoothed out (diagnostics). */
   get correction(): number {
     return this.errOffset.length;
+  }
+
+  /** Magnitude (m) of the driven-vehicle correction being smoothed out (diagnostics). */
+  get vehicleCorrection(): number {
+    return this.vehOffset.length;
+  }
+
+  /** Locally predicted vehicle (when driving), read only. */
+  get predictedVehicle(): Readonly<VehicleState> | null {
+    return this.predVehicle;
   }
 
   /** Predicted local player state (read only; diagnostics / tests). */
@@ -361,6 +393,26 @@ export class ClientGame implements ClientGameApi {
     if (!i) return;
     const a = interactionAction(i);
     if (a) this.input.queueAction(a);
+  }
+
+  /** While dead: switch the spectator camera to the next valid living player. */
+  spectateNext(): void {
+    const p = this.predicted;
+    if (!p || p.life !== 'dead') return;
+    // Server rule: teammates while any is alive, otherwise any living player.
+    let teamAlive = false;
+    for (const v of this.playerViews.values()) {
+      if (!v.isSelf && v.isTeammate && v.life !== 'dead') { teamAlive = true; break; }
+    }
+    const cur = p.spectating ?? -1;
+    let first = -1, next = -1;
+    for (const v of this.playerViews.values()) {
+      if (v.isSelf || v.life === 'dead' || (teamAlive && !v.isTeammate)) continue;
+      if (first < 0 || v.id < first) first = v.id;
+      if (v.id > cur && (next < 0 || v.id < next)) next = v.id;
+    }
+    const target = next >= 0 ? next : first;
+    if (target >= 0 && target !== cur) this.input.queueAction({ a: 'spectate', id: target });
   }
 
   dispose(): void {
@@ -418,7 +470,6 @@ export class ClientGame implements ClientGameApi {
     if (this.latest && s.time < this.latest.time) return; // stale / reordered
     this.snapshots.push(s.time, s);
     this.latest = s;
-    this.latestArrival = now;
     const selfId = this.init.you;
 
     // Players
@@ -497,22 +548,50 @@ export class ClientGame implements ClientGameApi {
     return copyPredictRt(this.spareRt.pop() ?? createPredictRt(), src);
   }
 
-  /** Estimated sim time (s) at which an input sent now is processed by the server. */
+  /** Estimated sim time (s) at which an input sent now is processed by the server (clock based). */
   private estimateInputTime(): number {
     return (this.clock.serverNow(this.now()) + this.clock.rtt / 2) / 1000 + TICK_DT;
   }
 
+  /**
+   * Sim time (s, start of the server tick) at which input `seq` is / was processed. Measured from
+   * snapshots (tick - ack) once known, so plane jumps etc. are predicted at the exact server tick.
+   */
+  private inputTime(seq: number): number {
+    if (Number.isFinite(this.tickOffset)) return (seq + this.tickOffset - 1) * TICK_DT;
+    return this.estimateInputTime();
+  }
+
+  /** Track the seq -> server tick mapping (minimum over ~1 s filters input starvation hiccups). */
+  private observeTickOffset(tick: number, ack: number): void {
+    if (!(ack > 0) || !Number.isFinite(tick)) return;
+    this.tickOffsets[this.tickOffsetHead % this.tickOffsets.length] = tick - ack;
+    this.tickOffsetHead++;
+    const n = Math.min(this.tickOffsetHead, this.tickOffsets.length);
+    let k = Infinity;
+    for (let i = 0; i < n; i++) if (this.tickOffsets[i] < k) k = this.tickOffsets[i];
+    this.tickOffset = k;
+  }
+
   private runTick(): void {
-    // Predicted sim time of this input: advances by exactly one tick, re-anchored when it drifts.
-    const est = this.estimateInputTime();
-    this.predTime = this.predTime < 0 || Math.abs(this.predTime + TICK_DT - est) > PRED_TIME_TOLERANCE
-      ? est : this.predTime + TICK_DT;
+    this.predTime = this.inputTime(this.seq + 1);
 
     const p = this.predicted;
     if (p) this.refreshInputContext(p);
     this.seq++;
     const raw = this.input.sample(this.seq, Math.max(0, Math.round(this.renderTime)));
-    const input = sanitizeInput(raw);
+    // Normalise exactly like the server will (wrapped yaw, clamped axes) so prediction uses the
+    // identical values. A malformed UI action is dropped on its own, never the whole tick.
+    let input = sanitizeInput(raw);
+    if (!input && raw.actions) {
+      const ok: ClientAction[] = [];
+      for (const a of raw.actions) {
+        const sa = sanitizeAction(a);
+        if (sa) ok.push(sa);
+      }
+      raw.actions = ok.length > 0 ? ok : undefined;
+      input = sanitizeInput(raw);
+    }
     if (!input) return;
     this.outbox.push(input);
 
@@ -526,6 +605,7 @@ export class ClientGame implements ClientGameApi {
       }
       this.prepareEnv(p, this.predTime);
       predictTick(p, this.rt, input, this.prevButtons, this.env, this.tickEv);
+      if (this.env.vehicle) this.stepOtherVehicles(this.env.vehicle);
       this.curPos.x = p.pos.x; this.curPos.y = p.pos.y; this.curPos.z = p.pos.z;
       this.emitTickEvents(p, input, this.tickEv);
       this.interaction = this.computeInteraction(p);
@@ -552,15 +632,51 @@ export class ClientGame implements ClientGameApi {
       env.seatVehicle = this.predVehicle && this.predVehicle.id === p.vehicleId ? this.predVehicle.type : rv ? rv.state.type : null;
     }
     env.vehicle = this.predVehicle && p.vehicleId === this.predVehicle.id && p.seat === 0 ? this.predVehicle : null;
-    const others = this.othersScratch;
-    others.length = 0;
-    if (env.vehicle) {
-      const vp = env.vehicle.pos;
-      for (const r of this.remoteVehicles.values()) {
-        if (r.state.id === env.vehicle.id) continue;
-        const dx = r.state.pos.x - vp.x, dz = r.state.pos.z - vp.z;
-        if (dx * dx + dz * dz < 40 * 40) others.push(r.state);
+    // Other vehicles for driver-side collisions: persistent copies rebased at every reconcile
+    // (stepVehicle pushes `others` around on contact; never hand it render objects).
+    env.others = this.predOthers;
+  }
+
+  /**
+   * Rebase the collision copies of vehicles near the driven one on their newest known states
+   * (parked vehicles are only sent at a low rate, but they do not move).
+   */
+  private rebaseOthers(driven: VehicleState): void {
+    const list = this.predOthers;
+    list.length = 0;
+    const vp = driven.pos;
+    for (const r of this.remoteVehicles.values()) {
+      const nv = r.ring.newest();
+      if (!nv || nv.id === driven.id) continue;
+      const dx = nv.p[0] - vp.x, dz = nv.p[2] - vp.z;
+      if (dx * dx + dz * dz >= OTHERS_RANGE * OTHERS_RANGE) continue;
+      let copy = this.othersPool[list.length];
+      if (!copy) {
+        copy = vehicleFromNet(nv);
+        this.othersPool.push(copy);
+      } else {
+        applyNetVehicle(copy, nv);
       }
+      copy.yawRate = 0;
+      copy.throttle = 0;
+      copy.onGround = true;
+      list.push(copy);
+    }
+  }
+
+  /** Driverless vehicles that were knocked into motion keep moving like on the server. */
+  private stepOtherVehicles(driven: VehicleState): void {
+    const list = this.predOthers;
+    for (let i = 0; i < list.length; i++) {
+      const o = list[i];
+      if (o.destroyed || o.seats[0] !== null) continue;
+      const vsq = o.vel.x * o.vel.x + o.vel.y * o.vel.y + o.vel.z * o.vel.z;
+      if (vsq <= VEHICLE_SLEEP_SPEED * VEHICLE_SLEEP_SPEED) continue;
+      const others = this.othersScratch;
+      others.length = 0;
+      others.push(driven);
+      for (let k = 0; k < list.length; k++) if (k !== i) others.push(list[k]);
+      stepVehicle(o, null, TICK_DT, this.world, others, this.otherVehEv);
     }
   }
 
@@ -584,6 +700,7 @@ export class ClientGame implements ClientGameApi {
   private reconcile(self: SelfState, snap: Snapshot): void {
     this.selfState = self;
     const ack = self.ack;
+    this.observeTickOffset(snap.tick, ack);
     // Acknowledged inputs become the baseline (client-only runtime state + edge buttons).
     while (this.pending.length > 0 && this.pending[0].input.seq <= ack) {
       const e = this.pending.shift()!;
@@ -610,24 +727,31 @@ export class ClientGame implements ClientGameApi {
       this.predicted = p;
       this.lastActiveSlot = p.activeSlot;
       this.lastStance = p.stance;
-      this.lastMode = p.mode;
     } else {
       applySelfState(p, self);
     }
     if (this.baselineSeq === ack) copyPredictRt(this.rt, this.baselineRt);
     p.lastButtons = this.baselineButtons;
 
-    // Driver-side vehicle prediction starts from the vehicle in the same snapshot.
+    // Driver-side vehicle prediction starts from the vehicle in the same snapshot. If the vehicle
+    // is (unexpectedly) missing from this snapshot, keep the current prediction as it is.
     this.predVehicle = null;
+    this.predOthers.length = 0;
+    let replayVehicle = false;
     if (p.mode === 'vehicle' && p.seat === 0 && p.vehicleId !== null) {
       const nv = findVehicle(snap.vehicles, p.vehicleId);
+      if (!nv && oldVeh && oldVeh.id === p.vehicleId) this.predVehicle = oldVeh;
       if (nv) {
+        replayVehicle = true;
         const keep = oldVeh && oldVeh.id === nv.id ? oldVeh : vehicleFromNet(nv);
         applyNetVehicle(keep, nv);
         this.predVehicle = keep;
-        if (this.baselineSeq !== ack) {
+        this.rebaseOthers(keep);
+        if (this.baselineSeq !== ack || oldVeh !== keep) {
+          // No predicted history for this vehicle yet: derive the hidden state.
           this.rt.vehThrottle = keep.throttle;
           this.rt.vehYawRate = keep.yawRate;
+          this.rt.vehOnGround = keep.onGround;
         }
       }
     }
@@ -644,8 +768,11 @@ export class ClientGame implements ClientGameApi {
     // Replay.
     let prevButtons = this.baselineButtons;
     for (const e of this.pending) {
+      e.time = this.inputTime(e.input.seq);
       this.prepareEnv(p, e.time);
+      if (!replayVehicle) this.env.vehicle = null;
       predictTick(p, this.rt, e.input, prevButtons, this.env, this.replayEv);
+      if (this.env.vehicle) this.stepOtherVehicles(this.env.vehicle);
       prevButtons = e.input.buttons;
       copyPredictRt(e.rt, this.rt);
     }
@@ -721,7 +848,6 @@ export class ClientGame implements ClientGameApi {
       this.lastAdsOn = adsOn;
       bus.push({ type: 'localAds', on: adsOn });
     }
-    this.lastMode = p.mode;
     this.footsteps(p);
   }
 
@@ -777,22 +903,13 @@ export class ClientGame implements ClientGameApi {
     this.lookDir.z = -Math.cos(cy) * ccp;
     let planePos: Vec3 | null = null;
     if (p.mode === 'plane' && this.latest?.plane) {
-      planePos = planePositionAt(this.latest.plane, this.latest.time / 1000, this.estimateInputTime(), this.planePos);
+      planePos = planePositionAt(this.latest.plane, this.latest.time / 1000, this.predTime + TICK_DT, this.planePos);
     }
     this.lootIndex.query(p.pos.x, p.pos.z, 4, this.nearLoot);
-    const env: InteractionEnv = {
-      world: this.world,
-      self: p,
-      eye,
-      look: this.lookDir,
-      planePos,
-      players: this.playerViews,
-      vehicles: this.vehicleViews,
-      nearbyLoot: this.nearLoot,
-      training: this.init.config.mode === 'training' ? this.world.training : null,
-      lineOfSight: this.losFn,
-      vehicleNear: this.vehicleNearFn,
-    };
+    const env = this.interactionEnv;
+    env.self = p;
+    env.eye = eye;
+    env.planePos = planePos;
     return resolveInteraction(env, this.interactionObj);
   }
 
@@ -832,6 +949,7 @@ export class ClientGame implements ClientGameApi {
       wasExtrapolating: false,
       lastSeen: 0,
       deadSince: -1,
+      rosterBot: r ? r.isBot : false,
     };
   }
 
@@ -857,10 +975,10 @@ export class ClientGame implements ClientGameApi {
   private updateRemotePlayers(dt: number): void {
     const t = this.renderTime;
     const br = this.brP;
-    for (const [id, r] of this.remotePlayers) {
+    for (const r of this.remotePlayers.values()) {
       if (this.serverNow - r.lastSeen > STALE_MS && r.lastSeen > 0) {
-        this.remotePlayers.delete(id);
-        this.playerViews.delete(id);
+        this.remotePlayers.delete(r.view.id);
+        this.playerViews.delete(r.view.id);
         continue;
       }
       if (!r.ring.bracket(t, br)) continue;
@@ -895,6 +1013,7 @@ export class ClientGame implements ClientGameApi {
       v.life = LIFE_LIST[b.l] ?? 'alive';
       v.team = b.team;
       v.isTeammate = b.team === this.init.team;
+      v.isBot = r.rosterBot || (b.f & PF.BOT) !== 0;
       v.weapon = b.w;
       v.flags = b.f;
       v.vehicleId = b.veh ?? null;
@@ -919,7 +1038,8 @@ export class ClientGame implements ClientGameApi {
     const br = this.brV;
     const alpha = clamp(this.tickAcc / TICK_DT, 0, 1);
     const pv = this.predVehicle;
-    for (const [id, r] of this.remoteVehicles) {
+    for (const r of this.remoteVehicles.values()) {
+      const id = r.view.id;
       if (this.serverNow - r.lastSeen > STALE_MS && r.lastSeen > 0) {
         this.remoteVehicles.delete(id);
         this.vehicleViews.delete(id);
@@ -1000,7 +1120,8 @@ export class ClientGame implements ClientGameApi {
   private updateProjectiles(): void {
     const t = this.renderTime;
     const br = this.brJ;
-    for (const [id, r] of this.remoteProjectiles) {
+    for (const r of this.remoteProjectiles.values()) {
+      const id = r.view.id;
       if (t >= r.goneAt || (r.goneAt === Infinity && this.serverNow - r.ring.newestTime() > STALE_MS)) {
         this.remoteProjectiles.delete(id);
         this.projectileViews.delete(id);
@@ -1077,7 +1198,11 @@ export class ClientGame implements ClientGameApi {
 
     // Plane (deterministic from its path; drawn at the predicted time so the local rider matches).
     if (latest?.plane && latest.plane.active) {
-      planePositionAt(latest.plane, latest.time / 1000, (this.serverNow + this.clock.rtt / 2) / 1000, this.planePos);
+      // Drawn on the local prediction timeline so a rider (and the jump) lines up exactly with it.
+      const t = this.predicted && this.predTime >= 0
+        ? this.predTime + clamp(this.tickAcc / TICK_DT, 0, 1) * TICK_DT
+        : (this.serverNow + this.clock.rtt / 2) / 1000;
+      planePositionAt(latest.plane, latest.time / 1000, t, this.planePos);
       f.planePos = this.planePos;
     } else {
       f.planePos = null;
@@ -1249,6 +1374,14 @@ export class ClientGame implements ClientGameApi {
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+/** Placeholder self for the reusable interaction env (replaced before every use). */
+function createPredictedPlayerStub(): InteractionEnv['self'] {
+  return {
+    id: -1, team: -1, pos: v3(), stance: 'stand', mode: 'ground', life: 'dead', vehicleId: null, seat: -1,
+    parachuteOpen: false, jumpY: 0, items: { bandage: 0, firstaid: 0, medkit: 0, energy: 0, fuel: 0, frag: 0 },
+  };
+}
 
 function findVehicle(list: NetVehicle[], id: EntityId): NetVehicle | null {
   for (const v of list) if (v.id === id) return v;

@@ -14,7 +14,7 @@ import { cancelRevive, damageInfo, damagePlayer, killPlayer } from './combat';
 import type { GameSim } from './GameSim';
 import { planePosition } from './plane';
 import type { PlayerRt } from './players';
-import { popInput } from './players';
+import { EDGE_BUTTONS, popInput } from './players';
 import {
   ADS_MOVE_MUL, EVENT_RANGE, MOVE_DEADZONE, NOISE_FOOTSTEP_INTERVAL, NOISE_FOOTSTEP_RADIUS, PITCH_LIMIT,
   REVIVE_HEALTH, REVIVE_KEEP_SLACK, SPRINT_MIN_FORWARD,
@@ -52,10 +52,14 @@ function onLanded(sim: GameSim, p: PlayerState, ev: MoveEvents, fromDrop: boolea
 
 export function updatePlayer(sim: GameSim, rt: PlayerRt, dt: number): void {
   const p = rt.p;
-  if (popInput(rt)) p.lastSeq = rt.last.seq;
+  const fresh = popInput(rt);
+  if (fresh) p.lastSeq = rt.last.seq;
   const input = rt.last;
   const held = input.buttons;
   const pressed = held & ~p.lastButtons;
+  // A repeated input has its edge buttons cleared; remember them as still held so the next real
+  // input (which may still hold the key) does not produce a second press.
+  const nextLast = fresh ? held : held | (p.lastButtons & EDGE_BUTTONS);
   rt.hasControls = false;
   if (rt.runOverCooldown > 0) rt.runOverCooldown -= dt;
   if (rt.giveCooldown > 0) rt.giveCooldown -= dt;
@@ -67,7 +71,7 @@ export function updatePlayer(sim: GameSim, rt: PlayerRt, dt: number): void {
   const acts = input.actions!;
   if (p.life === 'dead') {
     for (let i = 0; i < acts.length; i++) handleDeadAction(sim, rt, acts[i]);
-    p.lastButtons = held;
+    p.lastButtons = nextLast;
     return;
   }
 
@@ -76,7 +80,7 @@ export function updatePlayer(sim: GameSim, rt: PlayerRt, dt: number): void {
     if (isDead(p)) break;
   }
   if (isDead(p)) {
-    p.lastButtons = held;
+    p.lastButtons = nextLast;
     return;
   }
 
@@ -172,7 +176,7 @@ export function updatePlayer(sim: GameSim, rt: PlayerRt, dt: number): void {
     }
   }
   if (isDead(p)) {
-    p.lastButtons = held;
+    p.lastButtons = nextLast;
     return;
   }
 
@@ -219,5 +223,5 @@ export function updatePlayer(sim: GameSim, rt: PlayerRt, dt: number): void {
     p.downedHp -= DOWNED_BLEED_PER_SEC * (1 + 0.5 * (p.knockCount - 1)) * dt;
     if (p.downedHp <= 0) killPlayer(sim, p, p.lastAttacker, 'bleed', rt.knockHeadshot, rt.knockDistance, false);
   }
-  p.lastButtons = held;
+  p.lastButtons = nextLast;
 }

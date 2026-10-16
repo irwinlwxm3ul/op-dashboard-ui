@@ -60,10 +60,14 @@ export function createTerrainMaterial(): THREE.MeshStandardMaterial {
   float nFine = dzNoise(p * 2.3) * 0.55 + dzNoise(p * 5.3 + 1.7) * 0.45;
   float g = clamp(vDzSurf.x, 0.0, 1.0);
   float r = clamp(vDzSurf.y, 0.0, 1.0);
-  float grassMod = 1.0 + (nMid - 0.5) * 0.34 * midFade + (nFine - 0.5) * 0.38 * fineFade;
+  float grainFade = 1.0 - smoothstep(4.0, 24.0, camDist);
+  float nGrain = dzNoise(p * 11.0) * 0.6 + dzNoise(p * 23.0 + 5.3) * 0.4;
+  float clump = smoothstep(0.35, 0.8, dzNoise(p * 0.85 + 11.0));
+  float grassMod = 1.0 + (nMid - 0.5) * 0.42 * midFade + (nFine - 0.5) * 0.38 * fineFade
+    + (nGrain - 0.5) * 0.36 * grainFade - clump * 0.14 * fineFade;
   float strata = dzNoise(vec2((p.x + p.y) * 0.13, vDzWorld.y * 1.3));
   float rockMod = 1.0 + (strata - 0.5) * 0.4 * midFade + (nFine - 0.5) * 0.28 * fineFade;
-  float baseMod = 1.0 + (nMid - 0.5) * 0.18 * midFade + (nFine - 0.5) * 0.22 * fineFade;
+  float baseMod = 1.0 + (nMid - 0.5) * 0.18 * midFade + (nFine - 0.5) * 0.22 * fineFade + (nGrain - 0.5) * 0.2 * grainFade;
   float m = mix(mix(baseMod, grassMod, g), rockMod, r);
   diffuseColor.rgb *= m * (0.93 + 0.14 * nMacro);
   float dry = smoothstep(0.58, 0.82, dzNoise(p * 0.085 + 7.0)) * g;
@@ -71,7 +75,7 @@ export function createTerrainMaterial(): THREE.MeshStandardMaterial {
 }`,
       );
   };
-  mat.customProgramCacheKey = () => 'dz-terrain-v1';
+  mat.customProgramCacheKey = () => 'dz-terrain-v2';
   return mat;
 }
 

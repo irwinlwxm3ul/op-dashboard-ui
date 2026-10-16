@@ -116,7 +116,16 @@ export interface FaceStyle {
   bld?: number;
 }
 
-const _rgb: [number, number, number] = [0, 0, 0];
+const _cx = new Float64Array(4);
+const _cy = new Float64Array(4);
+const _cz = new Float64Array(4);
+
+function emitVertex(out: GeoBuilder, style: FaceStyle, x: number, y: number, z: number, n: readonly number[], r: number, g: number, b: number): number {
+  const i = out.vertex(x, y, z, n[0], n[1], n[2], r, g, b);
+  out.extra('rm', style.rm[0], style.rm[1]);
+  if (style.bld !== undefined) out.extra('bld', style.bld);
+  return i;
+}
 
 /** Emits the visible faces of an AABB into `out` (builder must declare `rm` and optionally `bld`). */
 export function emitBox(out: GeoBuilder, box: Aabb, mask: number, style: FaceStyle): void {
@@ -125,44 +134,102 @@ export function emitBox(out: GeoBuilder, box: Aabb, mask: number, style: FaceSty
     if (!(mask & (1 << f))) continue;
     const n = FACE_NORMALS[f];
     const corners = FACE_CORNERS[f];
+    for (let k = 0; k < 4; k++) {
+      const c = corners[k];
+      _cx[k] = c[0] ? mx.x : mn.x;
+      _cy[k] = c[1] ? mx.y : mn.y;
+      _cz[k] = c[2] ? mx.z : mn.z;
+    }
     const shade = style.faceShade[f];
-    const vertical = f !== 2 && f !== 3;
     const cr = style.color[0] * shade, cg = style.color[1] * shade, cb = style.color[2] * shade;
-    const px = (c: readonly [number, number, number]): number => (c[0] ? mx.x : mn.x);
-    const py = (c: readonly [number, number, number]): number => (c[1] ? mx.y : mn.y);
-    const pz = (c: readonly [number, number, number]): number => (c[2] ? mx.z : mn.z);
-    const emitV = (x: number, y: number, z: number, k: number): number => {
-      const i = out.vertex(x, y, z, n[0], n[1], n[2], cr * k, cg * k, cb * k);
-      out.extra('rm', style.rm[0], style.rm[1]);
-      if (style.bld !== undefined) out.extra('bld', style.bld);
-      return i;
-    };
-    if (!vertical) {
-      const a = emitV(px(corners[0]), py(corners[0]), pz(corners[0]), 1);
-      const b = emitV(px(corners[1]), py(corners[1]), pz(corners[1]), 1);
-      const c = emitV(px(corners[2]), py(corners[2]), pz(corners[2]), 1);
-      const d = emitV(px(corners[3]), py(corners[3]), pz(corners[3]), 1);
+    if (f === 2 || f === 3) {
+      const a = emitVertex(out, style, _cx[0], _cy[0], _cz[0], n, cr, cg, cb);
+      const b = emitVertex(out, style, _cx[1], _cy[1], _cz[1], n, cr, cg, cb);
+      const c = emitVertex(out, style, _cx[2], _cy[2], _cz[2], n, cr, cg, cb);
+      const d = emitVertex(out, style, _cx[3], _cy[3], _cz[3], n, cr, cg, cb);
       out.quad(a, b, c, d);
       continue;
     }
-    const height = mx.y - mn.y;
-    const bottomK = height > 0.5 ? style.bottomShade : 1;
-    const x0 = px(corners[0]), z0 = pz(corners[0]);
-    const x1 = px(corners[1]), z1 = pz(corners[1]);
+    const bottomK = mx.y - mn.y > 0.5 ? style.bottomShade : 1;
+    const x0 = _cx[0], z0 = _cz[0], x1 = _cx[1], z1 = _cz[1];
     const yb = mn.y, yt = mx.y;
     const len = Math.hypot(x1 - x0, z1 - z0);
     const strips = style.ribbed && len > 0.8 ? Math.max(2, Math.round(len / 0.3)) : 1;
     for (let s = 0; s < strips; s++) {
       const t0 = s / strips, t1 = (s + 1) / strips;
       const k = strips > 1 && s % 2 === 1 ? 0.82 : 1;
+      const kb = k * bottomK;
       const sx0 = x0 + (x1 - x0) * t0, sz0 = z0 + (z1 - z0) * t0;
       const sx1 = x0 + (x1 - x0) * t1, sz1 = z0 + (z1 - z0) * t1;
-      const a = emitV(sx0, yb, sz0, k * bottomK);
-      const b = emitV(sx1, yb, sz1, k * bottomK);
-      const c = emitV(sx1, yt, sz1, k);
-      const d = emitV(sx0, yt, sz0, k);
+      const a = emitVertex(out, style, sx0, yb, sz0, n, cr * kb, cg * kb, cb * kb);
+      const b = emitVertex(out, style, sx1, yb, sz1, n, cr * kb, cg * kb, cb * kb);
+      const c = emitVertex(out, style, sx1, yt, sz1, n, cr * k, cg * k, cb * k);
+      const d = emitVertex(out, style, sx0, yt, sz0, n, cr * k, cg * k, cb * k);
       out.quad(a, b, c, d);
     }
+  }
+}
+
+/**
+ * Uniform XZ grid over a set of boxes for neighbour queries (hidden-face culling), so merging
+ * thousands of boxes stays roughly linear.
+ */
+export class BoxNeighbourhood {
+  private readonly boxes: readonly Aabb[];
+  private readonly cells = new Map<number, number[]>();
+  private readonly stamp: Int32Array;
+  private query_ = 0;
+  private readonly cell: number;
+
+  constructor(boxes: readonly Aabb[], cell = 4) {
+    this.boxes = boxes;
+    this.cell = cell;
+    this.stamp = new Int32Array(boxes.length);
+    boxes.forEach((b, i) => {
+      const x0 = Math.floor(b.min.x / cell), x1 = Math.floor(b.max.x / cell);
+      const z0 = Math.floor(b.min.z / cell), z1 = Math.floor(b.max.z / cell);
+      for (let z = z0; z <= z1; z++) {
+        for (let x = x0; x <= x1; x++) {
+          const key = BoxNeighbourhood.key(x, z);
+          let list = this.cells.get(key);
+          if (!list) this.cells.set(key, (list = []));
+          list.push(i);
+        }
+      }
+    });
+  }
+
+  private static key(x: number, z: number): number {
+    return (x + 32768) * 65536 + (z + 32768);
+  }
+
+  /** Boxes (other than `a`) touching `a` within `margin`; written to `out`, which is cleared. */
+  touching(a: Aabb, margin: number, out: Aabb[]): Aabb[] {
+    out.length = 0;
+    const q = ++this.query_;
+    const c = this.cell;
+    const x0 = Math.floor((a.min.x - margin) / c), x1 = Math.floor((a.max.x + margin) / c);
+    const z0 = Math.floor((a.min.z - margin) / c), z1 = Math.floor((a.max.z + margin) / c);
+    for (let z = z0; z <= z1; z++) {
+      for (let x = x0; x <= x1; x++) {
+        const list = this.cells.get(BoxNeighbourhood.key(x, z));
+        if (!list) continue;
+        for (const i of list) {
+          if (this.stamp[i] === q) continue;
+          this.stamp[i] = q;
+          const b = this.boxes[i];
+          if (b === a) continue;
+          if (
+            b.min.x <= a.max.x + margin && b.max.x >= a.min.x - margin &&
+            b.min.y <= a.max.y + margin && b.max.y >= a.min.y - margin &&
+            b.min.z <= a.max.z + margin && b.max.z >= a.min.z - margin
+          ) {
+            out.push(b);
+          }
+        }
+      }
+    }
+    return out;
   }
 }
 
@@ -171,13 +238,14 @@ export function boxJitter(id: number): number {
   return 0.95 + (hash32(id, 0x6b0c) / 4294967296) * 0.1;
 }
 
+const _rgb: [number, number, number] = [0, 0, 0];
+
 /** Linear colour of a box after kind-specific tone tweaks. */
 export function boxBaseColor(box: WorldBox): [number, number, number] {
   hexToLinear(box.color, _rgb);
   let k = boxJitter(box.id);
   const kind: BoxKind = box.kind;
   if (kind === 'roof') k *= 0.93;
-  else if (kind === 'window_frame' || kind === 'door_frame') k *= 0.55;
   else if (kind === 'stairs') k *= 0.92;
   return [_rgb[0] * k, _rgb[1] * k, _rgb[2] * k];
 }
@@ -186,7 +254,7 @@ export interface BuildingContext {
   /** Building footprint / volume. */
   min: Vec3;
   max: Vec3;
-  /** Underside of the roof: points below it inside the footprint count as indoors. */
+  /** Lowest roof underside: points below it inside the footprint count as indoors. */
   interiorTop: number;
 }
 
@@ -197,7 +265,10 @@ export interface BuildingContext {
 export function buildingFaceShade(box: WorldBox, ctx: BuildingContext, out: number[]): number[] {
   const cx = (box.min.x + box.max.x) / 2, cy = (box.min.y + box.max.y) / 2, cz = (box.min.z + box.max.z) / 2;
   const dx = box.max.x - box.min.x, dz = box.max.z - box.min.z;
-  const thinWall = box.kind === 'wall' && Math.min(dx, dz) <= 0.45;
+  const thin = Math.min(dx, dz) <= 0.45;
+  const thinWall = box.kind === 'wall' && thin;
+  // Sill / lintel pieces around window and door openings (same colour as the wall).
+  const opening = (box.kind === 'window_frame' || box.kind === 'door_frame') && thin;
   const longX = dx >= dz;
   for (let f = 0; f < 6; f++) {
     const n = FACE_NORMALS[f];
@@ -211,6 +282,9 @@ export function buildingFaceShade(box: WorldBox, ctx: BuildingContext, out: numb
       py < ctx.interiorTop && py > ctx.min.y;
     let k = 1;
     if (inside) k = f === 2 ? 0.86 : f === 3 ? 0.74 : 0.8;
+    // Opening reveals: sill tops / lintel undersides and the wall ends inside the facade read as
+    // dark glass-less frames.
+    if (opening && (f === 2 || f === 3)) k *= 0.68;
     if (thinWall && f !== 2 && f !== 3) {
       const alongLong = longX ? n[0] !== 0 : n[2] !== 0;
       if (alongLong) {

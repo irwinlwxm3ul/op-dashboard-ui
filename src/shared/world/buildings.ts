@@ -602,29 +602,33 @@ export function generateBuilding(plan: BuildingPlan, id: number, hf: Heightfield
     }
   }
 
-  // ---- Entrance steps --------------------------------------------------------------------------
+  // ---- Entrance steps ----------------------------------------------------------------------------
+  // Treads (rise <= 0.25 m, 0.35 m deep) lead down from the threshold until they meet the terrain.
   const doorsWorld = planDoorsWorld(plan);
-  for (let i = 0; i < plan.doors.length; i++) {
-    const door = plan.doors[i];
-    const dw = doorsWorld[i];
-    const hOut = Math.min(hf.heightAt(dw.x + dw.nx * 0.6, dw.z + dw.nz * 0.6), hf.heightAt(dw.x + dw.nx * 1.4, dw.z + dw.nz * 1.4));
-    const gap = baseY - hOut;
-    if (gap <= 0.3) continue;
-    const n = Math.ceil(gap / 0.25);
-    const rise = gap / n;
+  for (const door of plan.doors) {
     const l = doorLocal(plan, door);
     const lat = door.width / 2 + 0.3;
-    for (let j = 1; j < n; j++) {
-      const top = baseY - j * rise;
-      const a = (j - 1) * 0.35, b = j * 0.35;
-      const bottom = Math.min(hOut, top) - 0.5;
-      if (l.nz !== 0) {
-        const z0 = l.z + l.nz * a, z1 = l.z + l.nz * b;
-        box(l.x - lat, bottom, z0, l.x + lat, top, z1, 'stairs', 'concrete', PAL.foundation);
-      } else {
-        const x0 = l.x + l.nx * a, x1 = l.x + l.nx * b;
-        box(x0, bottom, l.z - lat, x1, top, l.z + lat, 'stairs', 'concrete', PAL.foundation);
+    // Lowest terrain under a tread spanning [a, b] metres out from the wall face.
+    const treadLow = (a: number, b: number): number => {
+      let lo = Infinity;
+      for (const d of [a, (a + b) / 2, b]) {
+        for (const t of [-lat, 0, lat]) {
+          const lx = l.nz !== 0 ? l.x + t : l.x + l.nx * d;
+          const lz = l.nz !== 0 ? l.z + l.nz * d : l.z + t;
+          lo = Math.min(lo, hf.heightAt(toWorldX(plan.cx, plan.rot, lx, lz), toWorldZ(plan.cz, plan.rot, lx, lz)));
+        }
       }
+      return lo;
+    };
+    let top = baseY;
+    for (let j = 1; j <= 16; j++) {
+      const a = (j - 1) * 0.35, b = j * 0.35;
+      const ground = treadLow(a, b);
+      if (top - ground <= 0.3) break;
+      top = top - 0.25;
+      const bottom = Math.min(ground, top) - 0.5;
+      if (l.nz !== 0) box(l.x - lat, bottom, l.z + l.nz * a, l.x + lat, top, l.z + l.nz * b, 'stairs', 'concrete', PAL.foundation);
+      else box(l.x + l.nx * a, bottom, l.z - lat, l.x + l.nx * b, top, l.z + lat, 'stairs', 'concrete', PAL.foundation);
     }
   }
 

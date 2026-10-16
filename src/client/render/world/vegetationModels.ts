@@ -140,7 +140,7 @@ function addTier(
     }
   }
   const apex = vtx(gb, [0, yt, 0], [0, 1, 0], scaled(base, 1.12), 0);
-  const under = vtx(gb, [0, yb + (yt - yb) * 0.22, 0], [0, -1, 0], scaled(base, 0.55), 0);
+  const under = vtx(gb, [0, yb + (yt - yb) * 0.22, 0], [0, 1, 0], scaled(base, 0.5), 0);
   for (let s = 0; s < sides; s++) {
     const s1 = (s + 1) % sides;
     if (withMid) {
@@ -191,8 +191,9 @@ function addBlob(
     const z = c[2] + uz * radii[2] * k;
     const nb = norm([ux, uy, uz]);
     const nc = norm([x - canopyCenter[0], y - canopyCenter[1], z - canopyCenter[2]]);
-    const n = norm([nb[0] * 0.5 + nc[0] * 0.5, nb[1] * 0.5 + nc[1] * 0.5 + 0.15, nb[2] * 0.5 + nc[2] * 0.5]);
-    const shade = (0.7 + 0.42 * (uy * 0.5 + 0.5)) * tint;
+    // Upward-biased normals: foliage scatters light, so undersides should not go black.
+    const n = norm([nb[0] * 0.5 + nc[0] * 0.5, nb[1] * 0.5 + nc[1] * 0.5 + 0.45, nb[2] * 0.5 + nc[2] * 0.5]);
+    const shade = (0.76 + 0.36 * (uy * 0.5 + 0.5)) * tint;
     idx.push(vtx(gb, [x, y, z], n, scaled(base, shade), 0));
   }
   for (let i = 0; i < idx.length; i += 3) gb.tri(idx[i], idx[i + 1], idx[i + 2]);
