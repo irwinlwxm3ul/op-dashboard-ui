@@ -320,7 +320,7 @@ Every path has exactly one owner. Agents only write inside their own paths.
 
 | Owner | Paths |
 |---|---|
-| **integrator (main thread)** | `src/shared/{types,protocol,constants,math,rng,validate}.ts`, `src/shared/sim/view.ts`, `src/client/game/types.ts`, `src/client/render/contracts.ts`, `src/client/ui/contracts.ts`, `src/client/main.ts`, `src/client/app/**`, `index.html`, configs, `tests/e2e/**`, `README.md`, `PLAN.md`, `ARCHITECTURE.md` |
+| **integrator (main thread)** | `src/shared/{types,protocol,constants,math,rng,validate}.ts`, `src/shared/sim/view.ts`, `src/client/game/types.ts`, `src/client/render/contracts.ts`, `src/client/ui/contracts.ts`, `src/client/main.ts`, `src/client/app/**`, `index.html`, configs, `tests/e2e/**`, `tests/integration/**`, `README.md`, `PLAN.md`, `ARCHITECTURE.md` |
 | world | `src/shared/world/**`, `tests/world.test.ts` |
 | physics | `src/shared/physics/**`, `tests/physics.test.ts` |
 | items | `src/shared/items/**`, `tests/items.test.ts` |
