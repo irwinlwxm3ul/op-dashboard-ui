@@ -217,11 +217,16 @@ export const audio: {
 ### `src/client/i18n` — `index.ts`
 
 ```ts
-export type Lang = 'en' | 'ru' | 'zh' | 'es' | 'fr' | 'de' | 'pt' | 'ja' | 'ko' | 'ar';
-export const LANGUAGES: { code: Lang; native: string; dir: 'ltr' | 'rtl' }[];
+export type Lang = 'zh-CN' | 'zh-TW' | 'zh-HK' | 'ja' | 'en' | 'ko' | 'ru' | 'es' | 'fr' | 'de' | 'pt' | 'ar';
+export const PRIORITY_LANGS: readonly Lang[];          // ['zh-CN', 'zh-TW', 'zh-HK', 'ja'] — the main markets
+export const LANGUAGES: { code: Lang; native: string; dir: 'ltr' | 'rtl' }[];   // menu order, priority first
 export type TKey = keyof typeof en;                     // en.ts is the source of truth
 export function t(key: TKey, params?: Record<string, string | number>): string;   // {name} interpolation; plurals via key variants `x_one`, `x_other` selected with Intl.PluralRules when params.count is given
-export function initI18n(): Lang;                       // localStorage > navigator.languages > 'en'; applies <html lang dir>
+export function initI18n(): Lang;                       // localStorage > priority language anywhere in navigator.languages > first other supported > 'en'
+export function pickLanguage(stored: string | null, navLangs: readonly string[]): Lang;   // the pure selection behind initI18n
+export function matchLanguageTag(tag: string): Lang | null;   // zh by script then region: Hans/CN/SG -> zh-CN, HK/MO -> zh-HK, Hant/TW -> zh-TW
+export function intlLocale(lang?: Lang): string;        // BCP 47 locale for Intl
+export function uiFontStack(): string;                  // region font stack for canvas text
 export function setLanguage(lang: Lang): void;          // persists + applies + notifies
 export function getLanguage(): Lang;
 export function onLanguageChange(cb: (lang: Lang) => void): () => void;
@@ -232,8 +237,12 @@ export function translateDom(root: ParentNode): void;   // fills [data-i18n], [d
 export function itemName(id: ItemId): string;           // t(`item.${id}`)
 export function errorText(code: LobbyErrorCode): string;
 ```
-Locales live in `src/client/i18n/locales/{en,ru,zh,es,fr,de,pt,ja,ko,ar}.ts`; every non-English
-locale is typed `Record<TKey, string>` so a missing key is a compile error.
+Locales live in `src/client/i18n/locales/{en,zh-CN,zh-TW,zh-HK,ja,ko,ru,es,fr,de,pt,ar}.ts`. The priority
+locales (zh-CN, zh-TW, zh-HK, ja) are typed `PriorityLocaleDict = Record<TKey, string>`, so a missing key is a
+compile error; they also pass the script / regional-wording checks in `scripts/i18n-script.ts`. The other
+locales are `LocaleDict = Partial<Record<TKey, string>>`: new strings may stay untranslated there and
+fall back to English (zh-HK and zh-TW fall back to each other first). Terminology:
+`docs/i18n/glossary-east-asia.md`.
 
 ---
 

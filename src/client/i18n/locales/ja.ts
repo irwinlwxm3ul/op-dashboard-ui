@@ -1,7 +1,7 @@
-import type { LocaleDict } from './en';
+import type { PriorityLocaleDict } from './en';
 
 // 日本語. Japanese has a single plural category (other); all plural variants share one text.
-export const ja: LocaleDict = {
+export const ja: PriorityLocaleDict = {
   // --- app
   'app.title': 'DROPZONE',
   'app.tagline': '降下し、装備を整え、最後の一人になれ。',

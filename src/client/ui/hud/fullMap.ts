@@ -2,7 +2,7 @@
 // with letters and numbers, town labels, zone circles, plane path, teammates, self and a local
 // waypoint placed / removed with right-click.
 
-import { fmtNumber } from '../../i18n';
+import { fmtNumber, uiFontStack } from '../../i18n';
 import type { FrameState } from '../../game/types';
 import type { CameraState } from '../../render/contracts';
 import { ariaTx, button, h, svgIcon, tx } from '../dom';
@@ -276,7 +276,7 @@ export class FullMap {
       const x = toX(v, town.x), y = toY(v, town.z);
       if (x < -100 || y < -40 || x > v.w + 100 || y > v.h + 40) continue;
       const size = Math.round((town.tier === 2 ? 15 : town.tier === 1 ? 13 : 11.5) * v.dpr * Math.min(1.5, 0.85 + this.zoom * 0.08));
-      ctx.font = `${town.tier === 2 ? 800 : 700} ${size}px system-ui, "Segoe UI", sans-serif`;
+      ctx.font = `${town.tier === 2 ? 800 : 700} ${size}px ${uiFontStack()}`;
       ctx.lineWidth = 3.5 * v.dpr;
       ctx.strokeStyle = 'rgba(0,0,0,0.65)';
       ctx.fillStyle = town.tier === 2 ? '#ffd27a' : '#ffffff';

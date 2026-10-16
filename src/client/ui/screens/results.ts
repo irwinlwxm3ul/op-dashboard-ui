@@ -1,6 +1,6 @@
 // Results screen: placement, winner celebration, personal stats, per-team breakdown, next actions.
 
-import { fmtDuration, fmtNumber, getLanguage, t } from '../../i18n';
+import { fmtDuration, fmtNumber, intlLocale, t } from '../../i18n';
 import type { MatchResults, PlayerResult } from '../../../shared/types';
 import type { FrameState } from '../../game/types';
 import type { MatchContext } from '../contracts';
@@ -11,10 +11,8 @@ import { loadSpOptions } from './singlePlayer';
 
 /** Locale-aware list ("A, B and C" / "A、B、C" / "A، B و C"). */
 function formatList(items: string[]): string {
-  const lang = getLanguage();
-  const locale = lang === 'zh' ? 'zh-CN' : lang === 'pt' ? 'pt-BR' : lang;
   if (typeof Intl.ListFormat !== 'function') return items.join(' · ');
-  return new Intl.ListFormat(locale, { style: 'long', type: 'conjunction' }).format(items);
+  return new Intl.ListFormat(intlLocale(), { style: 'long', type: 'conjunction' }).format(items);
 }
 
 export class ResultsScreen implements ScreenView {

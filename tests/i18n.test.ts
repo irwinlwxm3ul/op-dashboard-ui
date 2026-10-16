@@ -1,8 +1,9 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import type { ItemId, VehicleType } from '../src/shared/types';
 import {
-  DICTIONARIES, LANGUAGES, USER_TEXT_PARAMS, bidiIsolate, errorText, fmtDuration, fmtList, fmtNumber, getLanguage,
-  hasKey, initI18n, isLang, isRTL, itemName, langDir, onLanguageChange, pickLanguage, setLanguage, t, translateDom,
+  DICTIONARIES, LANGUAGES, PRIORITY_LANGS, USER_TEXT_PARAMS, bidiIsolate, errorText, fmtDuration, fmtList, fmtNumber, getLanguage,
+  hasKey, initI18n, intlLocale, isLang, isRTL, itemName, langDir, matchLanguageTag, onLanguageChange, pickLanguage,
+  setLanguage, t, translateDom,
   vehicleName, type Lang,
 } from '../src/client/i18n';
 import { en } from '../src/client/i18n/locales/en';
@@ -13,6 +14,7 @@ import {
 } from '../scripts/check-i18n';
 
 const OTHER_LANGS = LANGUAGES.map((l) => l.code).filter((c): c is Exclude<Lang, 'en'> => c !== 'en');
+const SECONDARY_LANGS = OTHER_LANGS.filter((c) => !PRIORITY_LANGS.includes(c));
 const CORE_KEYS = Object.keys(enCore);
 /** Bidi isolate wrappers t() puts around user text (FSI … PDI). */
 const FSI = '\u2068';
@@ -26,20 +28,34 @@ afterEach(() => setLanguage('en'));
 // ---------------------------------------------------------------------------
 
 describe('locale dictionaries', () => {
-  it('LANGUAGES lists the 10 supported languages with native names; only Arabic is RTL', () => {
-    expect(LANGUAGES).toHaveLength(10);
-    expect(LANGUAGES.map((l) => l.code)).toEqual(['en', 'ru', 'zh', 'es', 'fr', 'de', 'pt', 'ja', 'ko', 'ar']);
+  it('LANGUAGES lists the 12 supported languages, priority languages first; only Arabic is RTL', () => {
+    expect(LANGUAGES).toHaveLength(12);
+    expect(LANGUAGES.map((l) => l.code)).toEqual(['zh-CN', 'zh-TW', 'zh-HK', 'ja', 'en', 'ko', 'ru', 'es', 'fr', 'de', 'pt', 'ar']);
+    expect(LANGUAGES.slice(0, PRIORITY_LANGS.length).map((l) => l.code)).toEqual([...PRIORITY_LANGS]);
     expect(LANGUAGES.map((l) => l.native)).toEqual([
-      'English', 'Русский', '中文', 'Español', 'Français', 'Deutsch', 'Português', '日本語', '한국어', 'العربية',
+      '简体中文', '繁體中文（台灣地區）', '繁體中文（港澳地區）', '日本語', 'English', '한국어', 'Русский', 'Español', 'Français',
+      'Deutsch', 'Português', 'العربية',
     ]);
     expect(LANGUAGES.filter((l) => l.dir === 'rtl').map((l) => l.code)).toEqual(['ar']);
   });
 
-  it.each(OTHER_LANGS)('%s translates every core key and has no unknown keys', (code) => {
+  it.each([...PRIORITY_LANGS])('priority language %s translates every key (core and fragments), no unknown keys', (code) => {
+    const { missing, extra } = compareKeys(en, DICTIONARIES[code]);
+    expect(missing).toEqual([]);
+    expect(extra).toEqual([]);
+    expect(emptyValues(DICTIONARIES[code])).toEqual([]);
+  });
+
+  it.each(SECONDARY_LANGS)('%s has no unknown or empty keys (missing keys fall back to English)', (code) => {
     const dict = DICTIONARIES[code];
-    expect(CORE_KEYS.filter((k) => !Object.hasOwn(dict, k))).toEqual([]);
     expect(compareKeys(en, dict).extra).toEqual([]);
     expect(emptyValues(dict)).toEqual([]);
+  });
+
+  it('zh-TW and zh-HK are separate regional texts, not copies of each other', () => {
+    const tw = DICTIONARIES['zh-TW'];
+    const hk = DICTIONARIES['zh-HK'];
+    expect(Object.keys(en).filter((k) => tw[k] !== hk[k]).length).toBeGreaterThan(0);
   });
 
   it.each(OTHER_LANGS)('%s keeps the English placeholder set in every translation', (code) => {
@@ -107,10 +123,49 @@ describe('pickLanguage', () => {
 
   it('matches by primary subtag', () => {
     expect(pickLanguage(null, ['pt-BR'])).toBe('pt');
-    expect(pickLanguage(null, ['zh-TW'])).toBe('zh');
-    expect(pickLanguage(null, ['zh-Hans-CN'])).toBe('zh');
+    expect(pickLanguage(null, ['ja-JP'])).toBe('ja');
     expect(pickLanguage(null, ['ar-EG'])).toBe('ar');
     expect(pickLanguage(null, ['es_MX'])).toBe('es');
+  });
+
+  it('resolves Chinese by script, then region (HK and Macao share zh-HK)', () => {
+    const cases: [string, Lang][] = [
+      ['zh-CN', 'zh-CN'], ['zh-SG', 'zh-CN'], ['zh-MY', 'zh-CN'], ['zh', 'zh-CN'], ['zh-Hans', 'zh-CN'],
+      ['zh-Hans-CN', 'zh-CN'], ['zh-Hans-SG', 'zh-CN'], ['zh-Hans-HK', 'zh-CN'], ['cmn-Hans-CN', 'zh-CN'],
+      ['zh-TW', 'zh-TW'], ['zh-Hant', 'zh-TW'], ['zh-Hant-TW', 'zh-TW'], ['zh_TW', 'zh-TW'], ['ZH-tw', 'zh-TW'],
+      ['zh-HK', 'zh-HK'], ['zh-MO', 'zh-HK'], ['zh-Hant-HK', 'zh-HK'], ['zh-Hant-MO', 'zh-HK'],
+      ['yue', 'zh-HK'], ['yue-HK', 'zh-HK'], ['yue-Hant', 'zh-HK'], ['yue-Hans-CN', 'zh-CN'], ['yue-CN', 'zh-CN'],
+    ];
+    for (const [tag, lang] of cases) expect(matchLanguageTag(tag), tag).toBe(lang);
+    expect(matchLanguageTag('nl-NL')).toBeNull();
+    expect(matchLanguageTag('')).toBeNull();
+  });
+
+  it('matches the priority languages (zh-CN, zh-TW, zh-HK, ja) before any other browser language', () => {
+    expect(pickLanguage(null, ['en-SG', 'zh-SG'])).toBe('zh-CN');
+    expect(pickLanguage(null, ['en-HK', 'zh-HK', 'zh-TW'])).toBe('zh-HK');
+    expect(pickLanguage(null, ['en-US', 'zh-Hant-MO'])).toBe('zh-HK');
+    expect(pickLanguage(null, ['ko-KR', 'zh-TW'])).toBe('zh-TW');
+    expect(pickLanguage(null, ['fr-FR', 'de', 'ja'])).toBe('ja');
+    // Among priority languages the user's own order decides.
+    expect(pickLanguage(null, ['ja-JP', 'zh-CN'])).toBe('ja');
+    expect(pickLanguage(null, ['zh-TW', 'ja'])).toBe('zh-TW');
+    // A region alone is not a language choice: English in Hong Kong / Singapore stays English.
+    expect(pickLanguage(null, ['en-HK'])).toBe('en');
+    expect(pickLanguage(null, ['en-SG', 'en'])).toBe('en');
+  });
+
+  it('maps the old stored "zh" choice to zh-CN and matches stored codes case-insensitively', () => {
+    expect(pickLanguage('zh', ['zh-TW'])).toBe('zh-CN');
+    expect(pickLanguage('zh-hk', [])).toBe('zh-HK');
+    expect(pickLanguage('ZH-TW', ['ja'])).toBe('zh-TW');
+  });
+
+  it('hands region-specific locales to Intl', () => {
+    expect(intlLocale('zh-CN')).toBe('zh-CN');
+    expect(intlLocale('zh-TW')).toBe('zh-TW');
+    expect(intlLocale('zh-HK')).toBe('zh-HK');
+    expect(intlLocale('pt')).toBe('pt-BR');
   });
 
   it('takes the first supported browser language and defaults to English', () => {
@@ -171,8 +226,10 @@ describe('t', () => {
   it('fmtList joins with the language list pattern and isolates each item', () => {
     expect(fmtList(['A', 'B', 'C'])).toBe(`${iso('A')}, ${iso('B')}, and ${iso('C')}`);
     expect(fmtList(['A', 'B'], false)).toBe('A and B');
-    setLanguage('zh');
+    setLanguage('zh-CN');
     expect(fmtList(['王小明', 'Grim', 'Ann'], false)).toBe(new Intl.ListFormat('zh-CN', { type: 'conjunction' }).format(['王小明', 'Grim', 'Ann']));
+    setLanguage('zh-HK');
+    expect(fmtList(['陳大文', 'Grim'], false)).toBe(new Intl.ListFormat('zh-HK', { type: 'conjunction' }).format(['陳大文', 'Grim']));
     setLanguage('ar');
     const list = fmtList(['王小明', 'GrimNomad8', 'علي']);
     expect(list).toBe(new Intl.ListFormat('ar', { type: 'conjunction' }).format([iso('王小明'), iso('GrimNomad8'), iso('علي')]));
@@ -277,7 +334,7 @@ describe('language switching', () => {
     setLanguage('ar');
     expect(isRTL()).toBe(true);
     expect(langDir()).toBe('rtl');
-    setLanguage('zh');
+    setLanguage('zh-TW');
     expect(isRTL()).toBe(false);
     expect(langDir('ar')).toBe('rtl');
   });

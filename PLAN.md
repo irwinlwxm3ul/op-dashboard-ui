@@ -165,16 +165,28 @@ was looking at when they pressed the button. No positions, hits, damage, ammo or
 
 ## 7. Internationalization
 
-* Languages: **English, Russian, Chinese (Simplified), Spanish, French, German, Portuguese,
-  Japanese, Korean, Arabic (RTL)**.
+* **Priority languages** (the main markets): **Simplified Chinese (zh-CN)** for Mainland China and
+  Singapore, **Traditional Chinese (zh-TW)** for the Taiwan region, **Traditional Chinese (zh-HK)** for
+  Hong Kong SAR and Macao SAR, and **Japanese (ja)**. The two Traditional variants are written separately
+  with region-appropriate wording (e.g. 軟體/軟件, 網路/網絡, 解析度/解像度, 機車/電單車), not a script
+  conversion of each other; the shared terminology is in `docs/i18n/glossary-east-asia.md`.
+* Other languages: English, Korean, Russian, Spanish, French, German, Portuguese and Arabic (RTL). They
+  are complete today, but from now on new strings may ship untranslated there and fall back to English.
 * Every UI string goes through `t(key, params)`; keys are type-checked against the English
-  dictionary, plurals via `Intl.PluralRules`, numbers via `Intl.NumberFormat`.
-* Browser language detected from `navigator.languages`; manual switch in the main menu and settings,
-  persisted in `localStorage`.
+  dictionary, plurals via `Intl.PluralRules`, numbers via `Intl.NumberFormat` with the regional locale.
+* Detection: a stored manual choice wins; otherwise the browser's `navigator.languages` list is searched
+  for a priority language first (so `en-HK, zh-HK` → zh-HK and `en-SG, zh-SG` → zh-CN), then for any
+  other supported language, else English. Chinese tags resolve by script, then region: Hans/CN/SG/MY →
+  zh-CN, HK/MO → zh-HK, Hant/TW → zh-TW. The manual switch in the main menu and settings lists the
+  priority languages first and persists in `localStorage`.
+* `<html lang>` is the exact regional code, so Han characters take the region's glyph shapes and font
+  stack (PingFang SC/TC/HK, Microsoft YaHei/JhengHei, Noto Sans CJK SC/TC/HK/JP).
 * Arabic sets `<html dir="rtl" lang="ar">`; layout uses CSS logical properties so menus and HUD mirror.
 * The server never sends display text, only codes (`lobby.full`, `kill`, …) that the client translates.
-* `npm run check:i18n` fails if a locale misses a key or UI code assigns a raw string literal to
-  `textContent`/`innerHTML`/`placeholder`/`title`.
+* `npm run check:i18n` fails if a priority locale misses a key, any locale has unknown/empty keys or
+  wrong placeholders, a priority locale mixes scripts (Simplified characters in zh-TW/zh-HK, Traditional
+  in zh-CN, Chinese simplified or kyujitai in Japanese) or uses the other region's wording, or UI code
+  assigns a raw string literal to `textContent`/`innerHTML`/`placeholder`/`title`.
 
 ## 8. Manual acceptance tests
 
@@ -182,7 +194,9 @@ Setup: `npm install`, then `npm run dev` (client on :5173 + game server on :8787
 
 1. **Languages / RTL** — Main menu → language switcher → Arabic: all text is Arabic and the layout
    mirrors right-to-left. Switch to Japanese and back to English; reload → the choice persists. In a
-   browser set to German, a first visit opens in German.
+   browser set to German, a first visit opens in German. A browser listing `en-HK, zh-HK` (or
+   `zh-MO`) opens in Traditional Chinese (Hong Kong/Macao wording), `zh-TW` in Traditional Chinese
+   (Taiwan wording), `en-SG, zh-SG` in Simplified Chinese, and `ja` in Japanese.
 2. **Training ground ballistics** — Training → pick up the sniper → shoot the 300 m and 500 m targets.
    The tracer visibly arcs, impact is delayed (~0.4 s at 300 m), and you must aim above the target.
    The AR hits instantly at 100 m. Damage read-out shows head vs body.

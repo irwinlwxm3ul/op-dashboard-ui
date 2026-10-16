@@ -1,7 +1,7 @@
-import type { LocaleDict } from './en';
+import type { PriorityLocaleDict } from './en';
 
-// 简体中文. Chinese has a single plural category (other); all plural variants share one text.
-export const zh: LocaleDict = {
+// 简体中文 (Mainland China, Singapore). Chinese has a single plural category (other); all plural variants share one text.
+export const zhCN: PriorityLocaleDict = {
   // --- app
   'app.title': 'DROPZONE',
   'app.tagline': '跳伞落地，搜刮装备，成为最后的幸存者。',

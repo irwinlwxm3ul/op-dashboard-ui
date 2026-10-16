@@ -26,6 +26,9 @@ import { ar } from '../../src/client/i18n/locales/ar';
 import { de } from '../../src/client/i18n/locales/de';
 import { en } from '../../src/client/i18n/locales/en';
 import { ja } from '../../src/client/i18n/locales/ja';
+import { zhCN } from '../../src/client/i18n/locales/zh-CN';
+import { zhHK } from '../../src/client/i18n/locales/zh-HK';
+import { zhTW } from '../../src/client/i18n/locales/zh-TW';
 import {
   anglesTo, distXZ, events, frame, mouse, pageNow, prepare, queueAction, setAim, startTraining, tid, trackErrors,
   visibleTexts, waitForFrame, type DzWindow,
@@ -44,6 +47,7 @@ const NEUTRAL = new Set<string>(Object.keys(EN).filter((k) => (ar as Record<stri
 const ENGLISH = new Set<string>(Object.values(EN));
 const LATIN_WORD = /[A-Za-z]{2,}/;
 const ARABIC = /[\u0600-\u06FF]/;
+const HAN = /[\u3400-\u9FFF]/;
 
 /** Menu screens go back to the main menu on Escape. */
 async function backToMain(page: Page): Promise<void> {
@@ -79,10 +83,10 @@ async function sampleScreens(page: Page, modals: boolean): Promise<Record<string
 }
 
 /** Visible strings that are verbatim English UI text (ignoring brand / key caps / units). */
-function englishLeaks(screens: Record<string, string[]>): string[] {
+function englishLeaks(screens: Record<string, string[]>, neutral: ReadonlySet<string> = NEUTRAL): string[] {
   const leaks: string[] = [];
   for (const [screen, texts] of Object.entries(screens)) {
-    for (const t of texts) if (LATIN_WORD.test(t) && ENGLISH.has(t) && !NEUTRAL.has(t)) leaks.push(`${screen}: ${t}`);
+    for (const t of texts) if (LATIN_WORD.test(t) && ENGLISH.has(t) && !neutral.has(t)) leaks.push(`${screen}: ${t}`);
   }
   return leaks;
 }
@@ -101,7 +105,7 @@ test('AT1 languages: Arabic translates every menu screen and mirrors RTL, persis
   await page.locator(tid('lang-select')).selectOption('ar');
   await expect(page.locator('html')).toHaveAttribute('dir', 'rtl');
   await expect(page.locator('html')).toHaveAttribute('lang', 'ar');
-  await expect(page.locator(tid('main-sp'))).toContainText(ar['menu.singlePlayer']);
+  await expect(page.locator(tid('main-sp'))).toContainText(ar['menu.singlePlayer']!);
   const arabic = await sampleScreens(page, true);
   for (const [screen, texts] of Object.entries(arabic)) {
     expect(texts.some((t) => ARABIC.test(t)), `${screen} shows Arabic text`).toBe(true);
@@ -116,7 +120,7 @@ test('AT1 languages: Arabic translates every menu screen and mirrors RTL, persis
   await page.reload();
   await expect(page.locator(tid('main-sp'))).toBeVisible({ timeout: 60_000 });
   await expect(page.locator('html')).toHaveAttribute('dir', 'rtl');
-  await expect(page.locator(tid('main-sp'))).toContainText(ar['menu.singlePlayer']);
+  await expect(page.locator(tid('main-sp'))).toContainText(ar['menu.singlePlayer']!);
 
   await page.locator(tid('lang-select')).selectOption('ja');
   await expect(page.locator('html')).toHaveAttribute('lang', 'ja');
@@ -156,12 +160,53 @@ test('AT1 a first visit with a German browser opens in German', async ({ browser
   await page.goto('/');
   await expect(page.locator(tid('main-sp'))).toBeVisible({ timeout: 60_000 });
   await expect(page.locator('html')).toHaveAttribute('lang', 'de');
-  await expect(page.locator(tid('main-sp'))).toContainText(de['menu.singlePlayer']);
-  await expect(page.locator(tid('main-training'))).toContainText(de['menu.training']);
-  await expect(page.locator(tid('main-mp'))).toContainText(de['menu.multiplayer']);
+  await expect(page.locator(tid('main-sp'))).toContainText(de['menu.singlePlayer']!);
+  await expect(page.locator(tid('main-training'))).toContainText(de['menu.training']!);
+  await expect(page.locator(tid('main-mp'))).toContainText(de['menu.multiplayer']!);
   await expect(page.locator(tid('lang-select'))).toHaveValue('de');
   expect(errors).toEqual([]);
   await ctx.close();
+});
+
+test('AT1 priority markets: zh-CN / zh-TW / zh-HK / ja are matched before other browser languages; zh-HK menus are fully Chinese', async ({ browser }) => {
+  test.setTimeout(240_000);
+  // [navigator.languages, expected language, expected main-menu text]
+  const cases: [string[], string, string][] = [
+    [['en-HK', 'zh-HK', 'en'], 'zh-HK', zhHK['menu.singlePlayer']],
+    [['en-US', 'zh-MO'], 'zh-HK', zhHK['menu.singlePlayer']],
+    [['zh-TW', 'en-US'], 'zh-TW', zhTW['menu.singlePlayer']],
+    [['en-SG', 'zh-SG', 'ms'], 'zh-CN', zhCN['menu.singlePlayer']],
+    [['ko-KR', 'ja-JP'], 'ja', ja['menu.singlePlayer']],
+  ];
+  for (const [languages, code, text] of cases) {
+    const ctx = await browser.newContext({ locale: languages[0], viewport: { width: 960, height: 540 } });
+    await ctx.addInitScript((langs: string[]) => {
+      Object.defineProperty(navigator, 'languages', { get: () => langs });
+      Object.defineProperty(navigator, 'language', { get: () => langs[0] });
+    }, languages);
+    const page = await ctx.newPage();
+    const errors = trackErrors(page);
+    await prepare(page);
+    await page.goto('/');
+    await expect(page.locator(tid('main-sp'))).toBeVisible({ timeout: 60_000 });
+    await expect(page.locator('html'), languages.join(',')).toHaveAttribute('lang', code);
+    await expect(page.locator(tid('main-sp'))).toContainText(text);
+    await expect(page.locator(tid('lang-select'))).toHaveValue(code);
+    if (code === 'zh-HK') {
+      // The Hong Kong font stack is selected (Han glyph shapes follow the region).
+      const font = await page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue('--dz-font'));
+      expect(font).toContain('PingFang HK');
+      const screens = await sampleScreens(page, true);
+      for (const [screen, texts] of Object.entries(screens)) {
+        expect(texts.some((t) => HAN.test(t)), `${screen} shows Chinese text`).toBe(true);
+      }
+      const neutral = new Set(Object.keys(EN).filter((k) => (zhHK as Record<string, string>)[k] === EN[k]).map((k) => EN[k]));
+      expect(englishLeaks(screens, neutral), 'English strings left on zh-HK screens').toEqual([]);
+      await page.screenshot({ path: 'test-results/acceptance-zh-HK.png' });
+    }
+    expect(errors).toEqual([]);
+    await ctx.close();
+  }
 });
 
 // ---------------------------------------------------------------------------------------------

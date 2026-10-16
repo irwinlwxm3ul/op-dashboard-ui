@@ -58,9 +58,13 @@ vehicles → downed/revive → final circle → winner → results → back to t
 
 ## Languages
 
-English, Русский, 中文, Español, Français, Deutsch, Português, 日本語, 한국어, العربية (right-to-left).
-The game detects the browser language and has a switcher in the main menu and settings.
-`npm run check:i18n` verifies every locale is complete and that no UI code hardcodes text.
+Priority languages: **简体中文** (Mainland China, Singapore), **繁體中文（台灣地區）**, **繁體中文（港澳地區）**
+(Hong Kong SAR, Macao SAR) and **日本語**. The two Traditional Chinese variants use their own regional
+wording. Also: English, 한국어, Русский, Español, Français, Deutsch, Português and العربية (right-to-left).
+The game picks a priority language from the browser's language list first, then any other supported
+one; the switcher is in the main menu and settings. `npm run check:i18n` verifies the priority languages
+are complete and script-pure, that their regional wording is right, and that no UI code hardcodes text.
+Terminology: [docs/i18n/glossary-east-asia.md](docs/i18n/glossary-east-asia.md).
 
 ## Tests
 

@@ -2,9 +2,13 @@
 //
 //   npx tsx scripts/check-i18n.ts [--keys-only | --scan-only] [--strict-unused] [--verbose]
 //
-// 1. Every locale has exactly the key set of the merged English dictionary (core + ui/feel/flow
-//    fragments), no empty values, and every English plural family provides all CLDR categories.
-//    Fragment keys must stay in their namespace and never be defined twice.
+// 1. Every PRIORITY locale (zh-CN, zh-TW, zh-HK, ja) has exactly the key set of the merged English
+//    dictionary (core + ui/feel/flow fragments); other locales may miss keys (they fall back to
+//    English; reported as a warning) but never have unknown or empty ones. Every English plural
+//    family provides all CLDR categories. Fragment keys stay in their namespace, defined once.
+//    Priority locales also get script, character-form and regional-wording checks
+//    (scripts/i18n-script.ts): no Simplified characters in zh-TW / zh-HK, no Traditional ones in
+//    zh-CN, Taiwan vs Hong Kong forms and vocabulary, shinjitai in Japanese.
 // 2. Every translation uses the same {placeholder} set as English (plural _zero/_one/_two
 //    variants may spell the number out and omit {count}).
 // 3. Scans src/client/**/*.ts (except the locale files) for hardcoded user-facing strings:
@@ -26,7 +30,8 @@
 import { readdirSync, readFileSync } from 'node:fs';
 import { join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { DICTIONARIES, LANGUAGES } from '../src/client/i18n/index';
+import { DICTIONARIES, LANGUAGES, PRIORITY_LANGS } from '../src/client/i18n/index';
+import { scriptIssues } from './i18n-script';
 import { en } from '../src/client/i18n/locales/en';
 import { enCore } from '../src/client/i18n/locales/en.core';
 import { uiStrings } from '../src/client/ui/strings.en';
@@ -792,10 +797,13 @@ function runKeyChecks(verbose: boolean): number {
   for (const { code } of LANGUAGES) {
     if (code === 'en') continue;
     const dict = DICTIONARIES[code];
+    const priority = PRIORITY_LANGS.includes(code);
     const { missing, extra } = compareKeys(reference, dict);
-    if (missing.length > 0) {
+    if (missing.length > 0 && priority) {
       console.log(`[keys] ${code}: ${missing.length} missing — ${listPreview(missing, verbose)}`);
       problems += missing.length;
+    } else if (missing.length > 0) {
+      console.log(`[warn: keys] ${code}: ${missing.length} untranslated (English fallback) — ${listPreview(missing, verbose)}`);
     }
     if (extra.length > 0) {
       console.log(`[keys] ${code}: ${extra.length} unknown — ${listPreview(extra, verbose)}`);
@@ -808,6 +816,17 @@ function runKeyChecks(verbose: boolean): number {
     for (const m of comparePlaceholders(reference, dict)) {
       console.log(`[placeholders] ${code}: "${m.key}" has {${m.actual.join('},{')}} but English has {${m.expected.join('},{')}}`);
       problems++;
+    }
+    const issues = priority ? scriptIssues(code, dict) : [];
+    for (const issue of issues.filter((i) => i.level === 'error')) {
+      console.log(`[script] ${code}: "${issue.key}" — ${issue.message}`);
+      problems++;
+    }
+    const warnings = issues.filter((i) => i.level === 'warn');
+    if (warnings.length > 0) {
+      const shown = verbose ? warnings : warnings.slice(0, 5);
+      for (const w of shown) console.log(`[warn: script] ${code}: "${w.key}" — ${w.message}`);
+      if (shown.length < warnings.length) console.log(`[warn: script] ${code}: … (+${warnings.length - shown.length} more; --verbose lists all)`);
     }
   }
   const total = Object.keys(reference).length;

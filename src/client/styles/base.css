@@ -59,9 +59,22 @@
     'Noto Sans KR', Roboto, Arial, sans-serif;
 }
 
+/* Chinese: one stack per region so Han characters take that region's glyph shapes (zh-CN for
+   Mainland China and Singapore, zh-TW for Taiwan, zh-HK for Hong Kong and Macao). Later rules win
+   over the generic :lang(zh) one. */
 :root:lang(zh) {
   --dz-font: system-ui, -apple-system, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei',
-    'Noto Sans CJK SC', 'Noto Sans SC', Roboto, Arial, sans-serif;
+    'Noto Sans CJK SC', 'Noto Sans SC', 'Source Han Sans SC', Roboto, Arial, sans-serif;
+}
+
+:root:lang(zh-TW) {
+  --dz-font: system-ui, -apple-system, 'Segoe UI', 'PingFang TC', 'Microsoft JhengHei', 'Noto Sans CJK TC',
+    'Noto Sans TC', 'Source Han Sans TC', Roboto, Arial, sans-serif;
+}
+
+:root:lang(zh-HK) {
+  --dz-font: system-ui, -apple-system, 'Segoe UI', 'PingFang HK', 'Microsoft JhengHei', 'Noto Sans CJK HK',
+    'Noto Sans HK', 'Source Han Sans HC', 'Noto Sans CJK TC', 'Noto Sans TC', Roboto, Arial, sans-serif;
 }
 
 :root:lang(ar) {

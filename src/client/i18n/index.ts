@@ -10,7 +10,9 @@ import type { LobbyErrorCode } from '../../shared/protocol';
 import type { KeyAction } from '../game/types';
 import { en, type TKey } from './locales/en';
 import { ru } from './locales/ru';
-import { zh } from './locales/zh';
+import { zhCN } from './locales/zh-CN';
+import { zhTW } from './locales/zh-TW';
+import { zhHK } from './locales/zh-HK';
 import { es } from './locales/es';
 import { fr } from './locales/fr';
 import { de } from './locales/de';
@@ -19,20 +21,35 @@ import { ja } from './locales/ja';
 import { ko } from './locales/ko';
 import { ar } from './locales/ar';
 
-export type { TKey, CoreKey, LocaleDict } from './locales/en';
+export type { TKey, CoreKey, LocaleDict, PriorityLocaleDict } from './locales/en';
 
-export type Lang = 'en' | 'ru' | 'zh' | 'es' | 'fr' | 'de' | 'pt' | 'ja' | 'ko' | 'ar';
+/**
+ * UI languages. Chinese comes in three variants with their own wording, not just a script conversion:
+ * zh-CN (Simplified; Mainland China and Singapore), zh-TW (Traditional; Taiwan region) and zh-HK
+ * (Traditional; Hong Kong SAR and Macao SAR, which share Hong Kong usage).
+ */
+export type Lang = 'zh-CN' | 'zh-TW' | 'zh-HK' | 'ja' | 'en' | 'ko' | 'ru' | 'es' | 'fr' | 'de' | 'pt' | 'ar';
 
+/**
+ * The priority markets' languages. They must be complete (a missing key fails the type check and
+ * check:i18n), browser-language detection matches them before any other language, and the
+ * language menu lists them first.
+ */
+export const PRIORITY_LANGS: readonly Lang[] = ['zh-CN', 'zh-TW', 'zh-HK', 'ja'];
+
+/** Language menu order: priority languages first. `native` is the endonym shown in the menu. */
 export const LANGUAGES: { code: Lang; native: string; dir: 'ltr' | 'rtl' }[] = [
+  { code: 'zh-CN', native: '简体中文', dir: 'ltr' },
+  { code: 'zh-TW', native: '繁體中文（台灣地區）', dir: 'ltr' },
+  { code: 'zh-HK', native: '繁體中文（港澳地區）', dir: 'ltr' },
+  { code: 'ja', native: '日本語', dir: 'ltr' },
   { code: 'en', native: 'English', dir: 'ltr' },
+  { code: 'ko', native: '한국어', dir: 'ltr' },
   { code: 'ru', native: 'Русский', dir: 'ltr' },
-  { code: 'zh', native: '中文', dir: 'ltr' },
   { code: 'es', native: 'Español', dir: 'ltr' },
   { code: 'fr', native: 'Français', dir: 'ltr' },
   { code: 'de', native: 'Deutsch', dir: 'ltr' },
   { code: 'pt', native: 'Português', dir: 'ltr' },
-  { code: 'ja', native: '日本語', dir: 'ltr' },
-  { code: 'ko', native: '한국어', dir: 'ltr' },
   { code: 'ar', native: 'العربية', dir: 'rtl' },
 ];
 
@@ -57,22 +74,34 @@ export type ErrorCode = LobbyErrorCode | 'net.disconnected' | 'net.connectFailed
 
 type Dict = Readonly<Partial<Record<string, string>>>;
 
-const DICTS: Record<Lang, Dict> = { en, ru, zh, es, fr, de, pt, ja, ko, ar };
+const DICTS: Record<Lang, Dict> = {
+  'zh-CN': zhCN, 'zh-TW': zhTW, 'zh-HK': zhHK, ja, en, ko, ru, es, fr, de, pt, ar,
+};
 const EN: Dict = en;
+
+/**
+ * Same-script fallback before English: a key missing from one Traditional Chinese variant is taken
+ * from the other (never from Simplified Chinese, which would mix scripts).
+ */
+const FALLBACK: Partial<Record<Lang, Lang>> = { 'zh-HK': 'zh-TW', 'zh-TW': 'zh-HK' };
 
 /** Every language's dictionary (read-only; used by scripts/check-i18n.ts and tests). */
 export const DICTIONARIES: Readonly<Record<Lang, Dict>> = DICTS;
 
-/** BCP 47 locale handed to Intl for each language (zh is Simplified Chinese). */
+/** BCP 47 locale handed to Intl (number, list and plural formatting) for each language. */
 const INTL_LOCALE: Record<Lang, string> = {
-  en: 'en', ru: 'ru', zh: 'zh-CN', es: 'es', fr: 'fr', de: 'de', pt: 'pt-BR', ja: 'ja', ko: 'ko', ar: 'ar',
+  'zh-CN': 'zh-CN', 'zh-TW': 'zh-TW', 'zh-HK': 'zh-HK', ja: 'ja', en: 'en', ko: 'ko', ru: 'ru',
+  es: 'es', fr: 'fr', de: 'de', pt: 'pt-BR', ar: 'ar',
 };
 
+/** Language codes by lower-case spelling, for case-insensitive matching of stored choices. */
+const LANG_BY_LOWER: ReadonlyMap<string, Lang> = new Map(LANGUAGES.map((l) => [l.code.toLowerCase(), l.code]));
 const LANG_SET: ReadonlySet<string> = new Set(LANGUAGES.map((l) => l.code));
 const RTL_SET: ReadonlySet<Lang> = new Set(LANGUAGES.filter((l) => l.dir === 'rtl').map((l) => l.code));
 
 let current: Lang = 'en';
 let dict: Dict = EN;
+let fallbackDict: Dict | null = null;
 const listeners: ((lang: Lang) => void)[] = [];
 
 // ---------------------------------------------------------------------------
@@ -85,8 +114,10 @@ let minutesFmt: Intl.NumberFormat | null = null;
 let secondsFmt: Intl.NumberFormat | null = null;
 let listFmt: Intl.ListFormat | null = null;
 const customNumberFmts = new Map<string, Intl.NumberFormat>();
+let fontStack: string | null = null;
 
 function resetIntlCaches(): void {
+  fontStack = null;
   pluralRules = null;
   numberFmt = null;
   minutesFmt = null;
@@ -108,20 +139,78 @@ export function isLang(value: unknown): value is Lang {
 }
 
 /**
- * Chooses the UI language: a valid stored choice wins, then the first browser language whose
- * primary subtag is supported (pt-BR -> pt, zh-TW -> zh, ar-EG -> ar), else English.
+ * Font-family list for canvas text in the current language: the `--dz-font` stack from base.css,
+ * which lists the region's CJK fonts first (canvas text does not inherit CSS or `lang`).
+ */
+export function uiFontStack(): string {
+  if (fontStack !== null) return fontStack;
+  let value = '';
+  try {
+    if (typeof document !== 'undefined' && document.documentElement && typeof getComputedStyle === 'function') {
+      value = getComputedStyle(document.documentElement).getPropertyValue('--dz-font').trim();
+    }
+  } catch {
+    value = '';
+  }
+  return (fontStack = value || 'system-ui, sans-serif');
+}
+
+/** BCP 47 locale for Intl APIs in the given language (defaults to the current one). */
+export function intlLocale(lang: Lang = current): string {
+  return INTL_LOCALE[lang];
+}
+
+/**
+ * Maps one BCP 47 tag (any case, '-' or '_') to a supported language, or null.
+ * Chinese is resolved by script first, then region:
+ * * zh-Hans-* -> zh-CN; zh-Hant-HK / zh-Hant-MO -> zh-HK; any other zh-Hant -> zh-TW
+ * * zh-HK, zh-MO -> zh-HK; zh-TW -> zh-TW; zh-CN, zh-SG, zh-MY and a bare zh -> zh-CN
+ * * Cantonese (yue) -> zh-HK unless written in Simplified script; cmn is treated like zh.
+ * Other languages match on the primary subtag (pt-BR -> pt, ar-EG -> ar, ja-JP -> ja).
+ */
+export function matchLanguageTag(tag: string): Lang | null {
+  if (typeof tag !== 'string') return null;
+  const parts = tag.trim().toLowerCase().split(/[-_]/).filter((p) => p !== '');
+  if (parts.length === 0) return null;
+  const primary = parts[0];
+  let script = '';
+  let region = '';
+  for (const p of parts.slice(1)) {
+    if (!script && /^[a-z]{4}$/.test(p)) script = p;
+    else if (!region && /^([a-z]{2}|\d{3})$/.test(p)) region = p;
+  }
+  if (primary === 'zh' || primary === 'cmn' || primary === 'yue') {
+    if (script === 'hans') return 'zh-CN';
+    if (region === 'hk' || region === 'mo') return 'zh-HK';
+    if (script === 'hant') return primary === 'yue' ? 'zh-HK' : 'zh-TW';
+    if (region === 'tw') return 'zh-TW';
+    return primary === 'yue' && region !== 'cn' ? 'zh-HK' : 'zh-CN';
+  }
+  return LANG_BY_LOWER.get(primary) ?? null;
+}
+
+/**
+ * Chooses the UI language:
+ * 1. a valid stored choice (the language menu) wins; the old `zh` code maps to zh-CN;
+ * 2. otherwise the browser's preferred languages are searched for a PRIORITY language first
+ *    (zh-CN, zh-TW, zh-HK, ja): the first of the user's tags that maps to one wins, even if a
+ *    non-priority language is listed above it (e.g. ['en-SG', 'zh-SG'] -> zh-CN,
+ *    ['en-HK', 'zh-HK'] -> zh-HK, ['en-US', 'ja'] -> ja);
+ * 3. then the first tag that maps to any other supported language;
+ * 4. else English.
  */
 export function pickLanguage(stored: string | null, navLangs: readonly string[]): Lang {
   if (stored != null) {
     const s = stored.trim().toLowerCase();
-    if (isLang(s)) return s;
+    const lang = s === 'zh' ? 'zh-CN' : LANG_BY_LOWER.get(s);
+    if (lang) return lang;
   }
+  const matched: Lang[] = [];
   for (const tag of navLangs) {
-    if (typeof tag !== 'string') continue;
-    const primary = tag.trim().toLowerCase().split(/[-_]/)[0];
-    if (isLang(primary)) return primary;
+    const lang = matchLanguageTag(tag);
+    if (lang) matched.push(lang);
   }
-  return 'en';
+  return matched.find((l) => PRIORITY_LANGS.includes(l)) ?? matched[0] ?? 'en';
 }
 
 function readStoredLanguage(): string | null {
@@ -150,7 +239,9 @@ function browserLanguages(): readonly string[] {
 function applyDocumentLanguage(): void {
   if (typeof document === 'undefined' || !document.documentElement) return;
   const html = document.documentElement;
-  html.setAttribute('lang', current === 'zh' ? 'zh-Hans' : current);
+  // zh-CN / zh-TW / zh-HK / ja select the right Han glyph forms and the per-region font stacks
+  // in base.css (Han unification: the same code point is drawn differently per region).
+  html.setAttribute('lang', current);
   html.setAttribute('dir', RTL_SET.has(current) ? 'rtl' : 'ltr');
 }
 
@@ -162,6 +253,8 @@ function switchTo(lang: Lang): boolean {
   const changed = lang !== current;
   current = lang;
   dict = DICTS[lang];
+  const fb = FALLBACK[lang];
+  fallbackDict = fb ? DICTS[fb] : null;
   if (changed) resetIntlCaches();
   applyDocumentLanguage();
   translateBody();
@@ -225,7 +318,7 @@ export function hasKey(key: string): key is TKey {
 }
 
 function lookup(key: string): string {
-  return dict[key] ?? EN[key] ?? key;
+  return dict[key] ?? fallbackDict?.[key] ?? EN[key] ?? key;
 }
 
 // ---------------------------------------------------------------------------
