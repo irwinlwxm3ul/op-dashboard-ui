@@ -196,12 +196,12 @@ function ar(mats: Record<MatKey, THREE.Material>): GunModel {
   root.name = 'vm-ar';
   const m = base('ar', root);
   const b = new PartBuilder(mats);
-  b.box('metal', 0.04, 0.05, 0.24, 0, 0.04, -0.06);                         // upper receiver
+  b.box('metal', 0.04, 0.05, 0.21, 0, 0.04, -0.075);                        // upper receiver
   b.box('metal', 0.036, 0.032, 0.15, 0, 0.004, -0.035);                    // lower receiver
   b.box('polymer', 0.046, 0.052, 0.24, 0, 0.041, -0.3);                     // handguard
   for (let i = 0; i < 10; i++) b.box('darkMetal', 0.024, 0.005, 0.009, 0, 0.069, -0.39 + i * 0.022); // top rail teeth
   for (let i = 0; i < 4; i++) b.box('darkMetal', 0.0485, 0.006, 0.03, 0, 0.035, -0.4 + i * 0.06);   // side slots
-  b.box('darkMetal', 0.02, 0.006, 0.2, 0, 0.068, -0.06);                    // receiver rail
+  b.box('darkMetal', 0.02, 0.006, 0.18, 0, 0.068, -0.07);                   // receiver rail
   b.cylZ('darkMetal', 0.009, 0.009, 0.12, 0, 0.045, -0.48);                 // barrel
   b.cylZ('darkMetal', 0.012, 0.012, 0.055, 0, 0.045, -0.565);               // flash hider
   b.box('darkMetal', 0.006, 0.022, 0.012, 0, 0.062, -0.44);                 // gas block / folded front sight
@@ -213,12 +213,12 @@ function ar(mats: Record<MatKey, THREE.Material>): GunModel {
   b.box('polymer', 0.036, 0.022, 0.1, 0, -0.022, 0.205, -0.25);            // stock lower edge
   b.box('darkMetal', 0.002, 0.016, 0.04, 0.021, 0.045, -0.05);              // ejection port
   // Red dot: mount, housing tube (open), front/back rings.
-  b.box('darkMetal', 0.024, 0.014, 0.04, 0, 0.077, -0.05);
-  b.cylZ('darkMetal', 0.0145, 0.0145, 0.032, 0, 0.095, -0.05, 18, true);
-  b.ringZ('darkMetal', 0.0145, 0.0022, 0, 0.095, -0.066);
-  b.ringZ('darkMetal', 0.0145, 0.0022, 0, 0.095, -0.034);
-  b.box('darkMetal', 0.007, 0.007, 0.011, 0.0165, 0.095, -0.05);              // brightness knob
-  b.discZ('glass', 0.0138, 0, 0.095, -0.06);
+  b.box('darkMetal', 0.024, 0.026, 0.04, 0, 0.083, -0.05);                  // riser mount
+  b.cylZ('darkMetal', 0.0145, 0.0145, 0.032, 0, 0.107, -0.05, 18, true);
+  b.ringZ('darkMetal', 0.0145, 0.0022, 0, 0.107, -0.066);
+  b.ringZ('darkMetal', 0.0145, 0.0022, 0, 0.107, -0.034);
+  b.box('darkMetal', 0.007, 0.007, 0.011, 0.0165, 0.107, -0.05);             // brightness knob
+  b.discZ('glass', 0.0138, 0, 0.107, -0.06);
   root.add(b.build('ar-body'));
 
   // Reticle: tiny unlit dot on the sight axis, drawn above the glass.
@@ -226,15 +226,15 @@ function ar(mats: Record<MatKey, THREE.Material>): GunModel {
     new THREE.CircleGeometry(0.0014, 12),
     new THREE.MeshBasicMaterial({ color: 0xff2a1a, toneMapped: false, transparent: true, opacity: 0.95, depthWrite: false }),
   );
-  dot.position.set(0, 0.095, -0.0605);
+  dot.position.set(0, 0.107, -0.0605);
   dot.renderOrder = 3;
   dot.frustumCulled = false;
   root.add(dot);
   m.reticle = dot;
 
   const ch = new PartBuilder(mats);
-  ch.box('darkMetal', 0.04, 0.008, 0.014, 0, 0.068, 0.062);
-  ch.box('darkMetal', 0.008, 0.006, 0.03, 0, 0.068, 0.045);
+  ch.box('darkMetal', 0.034, 0.007, 0.012, 0, 0.068, 0.034);
+  ch.box('darkMetal', 0.008, 0.006, 0.03, 0, 0.068, 0.018);
   m.charge = addGroup(root, ch, 'ar-charge');
 
   const mag = new PartBuilder(mats);
@@ -247,11 +247,11 @@ function ar(mats: Record<MatKey, THREE.Material>): GunModel {
   m.eject.set(0.022, 0.046, -0.05);
   m.support.set(0, 0.0, -0.3);
   m.supportRot.set(0, 0, 0);
-  m.chargeAnchor.set(-0.012, 0.072, 0.07);
+  m.chargeAnchor.set(-0.012, 0.072, 0.045);
   m.magBottom.set(0, -0.176, -0.096);
   m.magDrop.set(0, -1, 0.04).normalize();
   m.gripRot.set(-0.3, 0, 0);
-  m.sightY = 0.095;
+  m.sightY = 0.107;
   m.sightZ = -0.034;
   m.eyeRelief = 0.24;
   m.hip.set(0.135, -0.165, -0.3);

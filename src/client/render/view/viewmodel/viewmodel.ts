@@ -38,7 +38,7 @@ import { releaseMaterials, retainMaterials, type MatKey } from './parts';
 
 /** Viewmodel vertical FOV at hip / fully aimed (deg). */
 const VM_FOV_HIP = 60;
-const VM_FOV_ADS = 50;
+const VM_FOV_ADS = 55;
 const HOLSTER_TIME = 0.14;
 const SLIDE_TIME = 0.07;
 const DRY_TIME = 0.18;

@@ -616,4 +616,85 @@ export const fr: LocaleDict = {
 
   // --- language
   'lang.label': 'Langue',
+
+  // --- ui: main menu
+  'ui.main.fontCredit': 'Police du titre : Lilita One (SIL Open Font License).',
+
+  // --- ui: lobby browser
+  'ui.mp.connectHint': 'Entrez votre nom et connectez-vous pour parcourir les salons en ligne.',
+  'ui.mp.connectedAs': 'Connecté en tant que {name}',
+  'ui.mp.disconnect': 'Se déconnecter',
+  'ui.mp.notConnected': 'Connectez-vous pour voir les salons ouverts.',
+  'ui.mp.defaultLobbyName': 'Salon de {name}',
+
+  // --- ui: lobby room
+  'ui.lobby.edit': 'Modifier',
+  'ui.lobby.teams': 'Équipes',
+  'ui.lobby.readyHint': 'Signalez-vous prêt dès que vous êtes paré à sauter.',
+
+  // --- ui: loading screen
+  'ui.loading.tip': 'Astuce',
+  'ui.tip.1': 'Les balles des fusils de tireur d’élite et de précision voyagent et chutent : visez au-dessus des cibles lointaines et anticipez les cibles mobiles.',
+  'ui.tip.2': 'Le cercle blanc sur la carte montre où la zone de jeu va se resserrer ensuite.',
+  'ui.tip.3': 'Les bandages et les trousses de secours soignent jusqu’à 75 PV. Les kits médicaux restaurent toute votre santé.',
+  'ui.tip.4': 'Les boissons énergisantes remplissent votre jauge de boost, qui vous soigne progressivement et vous fait courir plus vite.',
+  'ui.tip.5': 'En duo et en escouade, maintenez la touche d’interaction près d’un coéquipier à terre pour le réanimer.',
+  'ui.tip.6': 'S’accroupir et s’allonger réduisent le recul et la dispersion.',
+  'ui.tip.7': 'Les véhicules sont rapides mais bruyants. Surveillez la jauge de carburant et gardez un jerrican sur vous.',
+  'ui.tip.8': 'Faites un clic droit sur la grande carte pour placer un repère ; votre boussole et votre mini-carte vous y guident.',
+  'ui.tip.9': 'Les gilets et casques de niveau supérieur absorbent davantage de dégâts avant d’être détruits.',
+  'ui.tip.10': 'Passez par le terrain d’entraînement pour maîtriser la chute des balles avant votre prochain saut.',
+
+  // --- ui: results
+  'ui.results.yourStats': 'Vos statistiques',
+  'ui.results.ofTotal': '/ {n}',
+  'ui.results.winners': 'Vainqueurs : {names}',
+  'ui.results.spectator': 'Vous avez suivi cette partie en tant que spectateur.',
+
+  // --- ui: settings / controls
+  'ui.unit.degrees': '{n}°',
+  'ui.controls.groupMouse': 'Souris',
+  'ui.controls.capturing': 'Appuyez sur la nouvelle touche pour « {action} ». Échap pour annuler.',
+  'ui.controls.rebindAria': '{action} : {key}. Activez pour modifier.',
+  'ui.controls.reserved': 'La touche {key} est réservée par le navigateur. Choisissez-en une autre.',
+  'ui.controls.swapped': 'L’action « {action} » a été réattribuée à {key} pour éviter un conflit.',
+  'ui.controls.resetDone': 'Les touches ont été rétablies par défaut.',
+
+  // --- ui: key caps
+  'ui.key.delete': 'Suppr',
+  'ui.key.insert': 'Inser',
+  'ui.key.home': 'Début',
+  'ui.key.end': 'Fin',
+  'ui.key.pageUp': 'Pg. préc.',
+  'ui.key.pageDown': 'Pg. suiv.',
+  'ui.key.menu': 'Menu',
+
+  // --- ui: hud
+  'ui.hud.teamsLabel': 'Équipes',
+  'ui.hud.eliminatedHint': 'Appuyez sur {key} pour ouvrir le menu et quitter la partie.',
+  'ui.feed.died': '{victim} est mort',
+
+  // --- feel
+  'feel.kill.finished': 'Vous avez achevé {name}',
+  'feel.kill.distance': '{distance} m',
+  'feel.death.vehicle': 'Vous êtes mort dans un accident de véhicule',
+  'feel.source.zone': 'Zone bleue',
+  'feel.source.vehicle': 'Véhicule',
+  'feel.source.explosion': 'Explosion',
+  'feel.source.fall': 'Dégâts de chute',
+  'feel.source.bleed': 'Hémorragie',
+  'feel.source.drown': 'Noyade',
+  'feel.unknownPlayer': 'Inconnu',
+  'feel.target.damage': '{damage} dégâts',
+  'feel.target.distance': '{distance} m',
+
+  // --- flow
+  'flow.loading.world': 'Génération du terrain…',
+  'flow.loading.scene': 'Construction du monde…',
+  'flow.loading.connecting': 'Connexion à la partie…',
+  'flow.loading.waiting': 'En attente des données de la partie…',
+  'flow.loading.starting': 'Lancement de la simulation…',
+  'flow.loading.ready': 'Prêt',
+  'flow.clickToPlay': 'Cliquez pour jouer',
+  'flow.webglUnsupported': 'Votre navigateur ne prend pas en charge WebGL 2, requis par DROPZONE.',
 };
