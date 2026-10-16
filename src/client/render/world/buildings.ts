@@ -19,8 +19,8 @@ import type { PropVisibility } from './props';
 import { NOISE_GLSL, patchShader } from './shaders';
 
 const PROP_CHUNK = 128;
-/** Prop chunks farther than this (zoom-scaled) are not drawn: crates/fences are sub-pixel in the haze. */
-const PROP_DRAW_EDGES = [650];
+/** Prop chunks farther than this (zoom-scaled) are not drawn: crates/fences are a few pixels in the haze. */
+const PROP_DRAW_EDGES = [450];
 const LOD_HYSTERESIS = 15;
 const SHELL_TEX_WIDTH = 256;
 const INTERIOR_CORE = linearRgb(0x1f1d1b);

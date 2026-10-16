@@ -19,6 +19,8 @@ export interface VegetationProfile {
   bushVariants: number;
   /** Bushes cast sun shadows (near band). */
   bushShadows: boolean;
+  /** Multiplier on the model set's per-band instance budgets (nearest N get the full model). */
+  budgetScale: number;
 }
 
 export interface GrassProfile {
@@ -66,7 +68,7 @@ export const QUALITY_PROFILES: Readonly<Record<Quality, QualityProfile>> = {
     shadowExtent: 0,
     anisotropy: 1,
     terrainLod: [150, 330],
-    vegetation: { near: 95, mid: 320, far: 700, density: 0.45, treeVariants: 1, rockVariants: 2, bushVariants: 1, bushShadows: false },
+    vegetation: { near: 95, mid: 320, far: 700, density: 0.45, treeVariants: 1, rockVariants: 2, bushVariants: 1, bushShadows: false, budgetScale: 0.6 },
     grass: { enabled: false, radius: 0, density: 0 },
     buildingDetailDistance: 150,
     propModelDistance: 90,
@@ -82,7 +84,7 @@ export const QUALITY_PROFILES: Readonly<Record<Quality, QualityProfile>> = {
     shadowExtent: 100,
     anisotropy: 4,
     terrainLod: [200, 430],
-    vegetation: { near: 150, mid: 450, far: 900, density: 0.8, treeVariants: 2, rockVariants: 2, bushVariants: 2, bushShadows: false },
+    vegetation: { near: 150, mid: 450, far: 900, density: 0.8, treeVariants: 2, rockVariants: 2, bushVariants: 2, bushShadows: false, budgetScale: 1 },
     grass: { enabled: false, radius: 0, density: 0 },
     buildingDetailDistance: 220,
     propModelDistance: 140,
@@ -98,7 +100,7 @@ export const QUALITY_PROFILES: Readonly<Record<Quality, QualityProfile>> = {
     shadowExtent: 140,
     anisotropy: 8,
     terrainLod: [260, 540],
-    vegetation: { near: 175, mid: 500, far: 950, density: 1, treeVariants: 3, rockVariants: 4, bushVariants: 3, bushShadows: true },
+    vegetation: { near: 175, mid: 500, far: 950, density: 1, treeVariants: 3, rockVariants: 4, bushVariants: 3, bushShadows: true, budgetScale: 1.6 },
     grass: { enabled: true, radius: 45, density: 1.8 },
     buildingDetailDistance: 270,
     propModelDistance: 190,
@@ -114,7 +116,7 @@ export const QUALITY_PROFILES: Readonly<Record<Quality, QualityProfile>> = {
     shadowExtent: 190,
     anisotropy: 16,
     terrainLod: [340, 680],
-    vegetation: { near: 210, mid: 580, far: 1000, density: 1, treeVariants: 5, rockVariants: 6, bushVariants: 3, bushShadows: true },
+    vegetation: { near: 210, mid: 580, far: 1000, density: 1, treeVariants: 5, rockVariants: 6, bushVariants: 3, bushShadows: true, budgetScale: 2.4 },
     grass: { enabled: true, radius: 55, density: 2.6 },
     buildingDetailDistance: 340,
     propModelDistance: 250,

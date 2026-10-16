@@ -102,8 +102,11 @@ export class TerrainRenderer {
   readonly group = new THREE.Group();
   readonly material: THREE.MeshStandardMaterial;
   private readonly chunks: TerrainChunk[] = [];
-  /** 2x2 groups of chunks: one merged quarter-resolution mesh drawn while all four are at LOD2. */
-  private readonly supers: { mesh: THREE.Mesh; children: TerrainChunk[]; merged: boolean }[] = [];
+  /**
+   * 2x2 groups of chunks with merged half- and quarter-resolution meshes: while all four children
+   * sit at the same LOD >= 1, one merged mesh replaces four draw calls.
+   */
+  private readonly supers: { meshes: (THREE.Mesh | null)[]; children: TerrainChunk[]; mergedLod: number }[] = [];
   private readonly apron: THREE.Mesh;
   private readonly edges: [number, number] = [200, 430];
 
@@ -111,7 +114,8 @@ export class TerrainRenderer {
     this.group.name = 'terrain';
     this.material = createTerrainMaterial();
     const { res, cell, half } = field;
-    const farArrays = new Map<TerrainChunk, ChunkArrays>();
+    const farArrays = new Map<number, Map<TerrainChunk, ChunkArrays>>();
+    for (let l = 1; l < LOD_STEPS.length; l++) farArrays.set(l, new Map());
     for (let cz = 0; cz < TERRAIN_CHUNKS; cz++) {
       const [j0, j1] = chunkCellRange(res, TERRAIN_CHUNKS, cz);
       if (j1 <= j0) continue;
@@ -139,7 +143,7 @@ export class TerrainRenderer {
             chunk.minY = arrays.minY;
             chunk.maxY = arrays.maxY;
           }
-          if (l === LOD_STEPS.length - 1) farArrays.set(chunk, arrays);
+          if (l > 0) farArrays.get(l)!.set(chunk, arrays);
           const mesh = new THREE.Mesh(toGeometry(arrays), this.material);
           mesh.name = `terrain-${cx}-${cz}-lod${l}`;
           mesh.receiveShadow = true;
@@ -157,15 +161,20 @@ export class TerrainRenderer {
       for (let gx = 0; gx < TERRAIN_CHUNKS; gx += 2) {
         const children = this.chunks.filter((c) => c.cx >> 1 === gx >> 1 && c.cz >> 1 === gz >> 1);
         if (children.length < 2) continue;
-        const merged = mergeChunkArrays(children.map((c) => farArrays.get(c)!));
-        const mesh = new THREE.Mesh(toGeometry(merged), this.material);
-        mesh.name = `terrain-far-${gx >> 1}-${gz >> 1}`;
-        mesh.receiveShadow = true;
-        mesh.visible = false;
-        mesh.matrixAutoUpdate = false;
-        this.group.add(mesh);
+        const meshes: (THREE.Mesh | null)[] = [null];
+        for (let l = 1; l < LOD_STEPS.length; l++) {
+          const lodArrays = farArrays.get(l)!;
+          const merged = mergeChunkArrays(children.map((c) => lodArrays.get(c)!));
+          const mesh = new THREE.Mesh(toGeometry(merged), this.material);
+          mesh.name = `terrain-merged-${gx >> 1}-${gz >> 1}-lod${l}`;
+          mesh.receiveShadow = true;
+          mesh.visible = false;
+          mesh.matrixAutoUpdate = false;
+          this.group.add(mesh);
+          meshes.push(mesh);
+        }
         for (const c of children) c.sup = this.supers.length;
-        this.supers.push({ mesh, children, merged: false });
+        this.supers.push({ meshes, children, mergedLod: -1 });
       }
     }
     this.apron = this.buildApron(field, shade);
@@ -245,19 +254,23 @@ export class TerrainRenderer {
 
   /** Select chunk LODs for the camera (lodScale < 1 when zoomed in). */
   update(cx: number, cy: number, cz: number, lodScale: number): void {
-    const far = LOD_STEPS.length - 1;
     for (const ch of this.chunks) {
       const d = distanceToAabb(cx, cy, cz, ch.minX, ch.minY, ch.minZ, ch.maxX, ch.maxY, ch.maxZ) * lodScale;
       ch.lod = selectBand(d, ch.lod, this.edges, LOD_HYSTERESIS);
     }
     for (const sc of this.supers) {
-      let allFar = true;
-      for (const ch of sc.children) if (ch.lod !== far) allFar = false;
-      sc.merged = allFar;
-      sc.mesh.visible = allFar;
+      const lod = sc.children[0].lod;
+      let same = lod >= 1;
+      for (const ch of sc.children) if (ch.lod !== lod) same = false;
+      const merged = same ? lod : -1;
+      if (merged !== sc.mergedLod) {
+        if (sc.mergedLod > 0) sc.meshes[sc.mergedLod]!.visible = false;
+        if (merged > 0) sc.meshes[merged]!.visible = true;
+        sc.mergedLod = merged;
+      }
     }
     for (const ch of this.chunks) {
-      const inMerged = ch.sup >= 0 && this.supers[ch.sup].merged;
+      const inMerged = ch.sup >= 0 && this.supers[ch.sup].mergedLod > 0;
       const want = inMerged ? null : ch.meshes[ch.lod];
       if (want === ch.shown) continue;
       if (ch.shown) ch.shown.visible = false;
@@ -268,7 +281,7 @@ export class TerrainRenderer {
 
   dispose(): void {
     for (const ch of this.chunks) for (const m of ch.meshes) m.geometry.dispose();
-    for (const sc of this.supers) sc.mesh.geometry.dispose();
+    for (const sc of this.supers) for (const m of sc.meshes) m?.geometry.dispose();
     this.apron.geometry.dispose();
     this.material.dispose();
     this.group.removeFromParent();

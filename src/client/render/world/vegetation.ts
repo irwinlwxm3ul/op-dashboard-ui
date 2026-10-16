@@ -13,7 +13,7 @@ import { hash32, hashFloat } from '../../../shared/rng';
 import type { VegetationProfile } from '../core/quality';
 import { distanceToAabb, selectBand } from './lod';
 import { IMPOSTOR_CELL, TREE_KINDS, buildImpostorQuad } from './vegetationModels';
-import type { BandModel, SpeciesVariant, VegetationModelSet } from './vegetationSets';
+import type { BandModel, SpeciesGroup, SpeciesVariant, VegetationModelSet } from './vegetationSets';
 
 const GRID = 8;
 const HYSTERESIS = 10;
@@ -21,6 +21,11 @@ const HYSTERESIS = 10;
 const MAX_REAL_DISTANCE = 1060;
 const UPDATE_INTERVAL = 0.25;
 const NO_BAND = 255;
+const ONE: readonly [number, number, number] = [1, 1, 1];
+const GROUPS: readonly SpeciesGroup[] = ['tree', 'bush', 'rock'];
+/** Distance histogram for the instance budgets: 2 m buckets up to MAX_REAL_DISTANCE. */
+const BUCKET = 2;
+const BUCKETS = Math.ceil(MAX_REAL_DISTANCE / BUCKET) + 1;
 
 interface Slot {
   meshes: THREE.InstancedMesh[];
@@ -36,6 +41,10 @@ interface Slot {
 
 interface Layer {
   n: number;
+  /** Species group index into GROUPS (own band edges and instance budget). */
+  group: number;
+  /** Real distance of each item at the last update (scratch). */
+  dist: Float32Array;
   x: Float32Array;
   y: Float32Array;
   z: Float32Array;
@@ -91,7 +100,13 @@ export class VegetationRenderer {
   private readonly layers: Layer[] = [];
   private readonly slots: Slot[] = [];
   private readonly geometries: THREE.BufferGeometry[] = [];
-  private readonly edges = [150, 450, 900];
+  /** Profile-derived band edges per group (near, mid, far), before budgets. */
+  private readonly baseEdges = new Float64Array(9);
+  /** Effective (budget-limited, smoothed) edges per group, as selectBand edge arrays. */
+  private readonly edges: number[][] = [[150, 450, 900], [150, 450, 900], [150, 450, 900]];
+  private readonly budgets = new Float64Array(6);
+  private readonly hist = new Uint32Array(3 * BUCKETS);
+  private readonly profile: { near: number; mid: number; far: number; budgetScale: number } = { near: 0, mid: 0, far: 0, budgetScale: 0 };
   private density = 1;
   private shadows = true;
   private bushShadows = false;
@@ -149,13 +164,15 @@ export class VegetationRenderer {
     world.bushes.forEach((b, i) => {
       const s = (b.scale > 0 ? b.scale : 1) * (0.9 + hashFloat(i, 0xb05) * 0.2);
       const rot = hashFloat(i, 0xb06) * Math.PI * 2;
+      const vi = pickVariant(i, 0xb09, nb);
+      const vt = set.bushes[vi].tint ?? ONE;
       const tint = 0.88 + hashFloat(i, 0xb07) * 0.24;
       const hue = hashFloat(i, 0xb08) - 0.5;
-      bushItems[pickVariant(i, 0xb09, nb)].push({
+      bushItems[vi].push({
         x: b.x, y: b.y, z: b.z, h: s,
         mat: trs(b.x, b.y, b.z, rot, s, s, s),
         far: trs(b.x, b.y, b.z, rot, bi.w * s, bi.h * s, bi.w * s),
-        col: [tint * (1 + hue * 0.1), tint, tint * (1 - hue * 0.14)],
+        col: [tint * (1 + hue * 0.1) * vt[0], tint * vt[1], tint * (1 - hue * 0.14) * vt[2]],
         trunk: 1,
       });
     });
@@ -189,7 +206,7 @@ export class VegetationRenderer {
         const v: SpeciesVariant = set.trees[kind][vi];
         const near = this.makeSlot(`tree-${kind}-${vi}-near`, v.near, items.length, true, true, false);
         const mid = this.makeSlot(`tree-${kind}-${vi}-mid`, v.mid, items.length, false, true, false);
-        this.addLayer(items, [near, mid, farSlot], IMPOSTOR_CELL[kind]);
+        this.addLayer('tree', items, [near, mid, farSlot], IMPOSTOR_CELL[kind]);
       });
     }
     bushItems.forEach((items, vi) => {
@@ -198,14 +215,14 @@ export class VegetationRenderer {
       const near = this.makeSlot(`bush-${vi}-near`, v.near, items.length, true, false, false);
       const mid = this.makeSlot(`bush-${vi}-mid`, v.mid, items.length, false, false, false);
       if (near) this.bushSlots.add(near);
-      this.addLayer(items, [near, mid, farSlot], IMPOSTOR_CELL.bush, true);
+      this.addLayer('bush', items, [near, mid, farSlot], IMPOSTOR_CELL.bush, true);
     });
     rockItems.forEach((items, vi) => {
       if (items.length === 0) return;
       const v = set.rocks[vi];
       const near = this.makeSlot(`rock-${vi}-near`, v.near, items.length, true, false, false);
       const mid = this.makeSlot(`rock-${vi}-mid`, v.mid, items.length, false, false, false);
-      this.addLayer(items, [near, mid, mid], 0, false, true);
+      this.addLayer('rock', items, [near, mid, mid], 0, false, true);
     });
     this.applyShadowFlags();
   }
@@ -263,7 +280,7 @@ export class VegetationRenderer {
   }
 
   /** Sort items by terrain chunk and store them as typed arrays. */
-  private addLayer(items: RawItem[], slots: [Slot | null, Slot | null, Slot | null], cell: number, densityCulled = false, smallCulled = false): void {
+  private addLayer(group: SpeciesGroup, items: RawItem[], slots: [Slot | null, Slot | null, Slot | null], cell: number, densityCulled = false, smallCulled = false): void {
     const n = items.length;
     const chunks = GRID * GRID;
     const chunkOf = (it: RawItem): number => {
@@ -279,6 +296,8 @@ export class VegetationRenderer {
     const fill = Int32Array.from(counts);
     const layer: Layer = {
       n,
+      group: GROUPS.indexOf(group),
+      dist: new Float32Array(n),
       x: new Float32Array(n),
       y: new Float32Array(n),
       z: new Float32Array(n),
@@ -307,10 +326,11 @@ export class VegetationRenderer {
       layer.cols[i * 3 + 1] = it.col[1];
       layer.cols[i * 3 + 2] = it.col[2];
       if (layer.trunk) layer.trunk[i] = it.trunk;
-      // keepFar code: 1 = always kept in the far band; 128 + rank (0..99) = kept while rank < density * 100.
+      // keepFar code: 0 = never in the far band (small rocks), 1 = always kept,
+      // 128 + rank (0..99) = kept while rank < density * 100.
       const rank = Math.floor(hashFloat(Math.round(it.x * 10), Math.round(it.z * 10), 0x5eed) * 100);
       const small = smallCulled && it.h < 1.2;
-      layer.keepFar[i] = densityCulled || small ? 128 + Math.min(99, rank) : 1;
+      layer.keepFar[i] = small ? 0 : densityCulled ? 128 + Math.min(99, rank) : 1;
       layer.chunkMinY[c] = Math.min(layer.chunkMinY[c], it.y - 1);
       layer.chunkMaxY[c] = Math.max(layer.chunkMaxY[c], it.y + it.h);
     });
@@ -318,12 +338,40 @@ export class VegetationRenderer {
   }
 
   private applyProfile(v: Readonly<VegetationProfile>): boolean {
-    if (this.edges[0] === v.near && this.edges[1] === v.mid && this.edges[2] === v.far && this.density === v.density) return false;
-    this.edges[0] = v.near;
-    this.edges[1] = v.mid;
-    this.edges[2] = v.far;
+    const p = this.profile;
+    if (p.near === v.near && p.mid === v.mid && p.far === v.far && p.budgetScale === v.budgetScale && this.density === v.density) return false;
+    p.near = v.near;
+    p.mid = v.mid;
+    p.far = v.far;
+    p.budgetScale = v.budgetScale;
     this.density = v.density;
+    GROUPS.forEach((g, gi) => {
+      const sc = this.set.bandScale[g];
+      const near = v.near * sc[0];
+      const mid = Math.max(near + 1, v.mid * sc[1]);
+      this.baseEdges[gi * 3] = near;
+      this.baseEdges[gi * 3 + 1] = mid;
+      this.baseEdges[gi * 3 + 2] = Math.max(mid + 1, v.far);
+      const e = this.edges[gi];
+      e[0] = near;
+      e[1] = mid;
+      e[2] = this.baseEdges[gi * 3 + 2];
+      const b = this.set.budget[g];
+      this.budgets[gi * 2] = b[0] * v.budgetScale;
+      this.budgets[gi * 2 + 1] = b[1] * v.budgetScale;
+    });
     return true;
+  }
+
+  /** Scaled distance at which the group's cumulative instance count reaches `count`. */
+  private distanceAtCount(g: number, count: number): number {
+    const h = this.hist;
+    let acc = 0;
+    for (let b = 0; b < BUCKETS; b++) {
+      acc += h[g * BUCKETS + b];
+      if (acc >= count) return b * BUCKET;
+    }
+    return Infinity;
   }
 
   /** Distances / density (variant counts are fixed per renderer, see constructor). */
@@ -348,6 +396,7 @@ export class VegetationRenderer {
   }
 
   private keptFar(code: number): boolean {
+    if (code === 0) return false;
     if (code < 128) return true;
     return code - 128 < this.density * 100;
   }
@@ -360,11 +409,14 @@ export class VegetationRenderer {
     this.lastLodScale = lodScale;
     const force = this.forceUpdate;
     this.forceUpdate = false;
-    const edges = this.edges;
-    const farLimit = edges[2] + HYSTERESIS;
     let changed = force;
+
+    // Pass 1: chunk culling, item distances and per-group distance histograms.
+    this.hist.fill(0);
     for (const L of this.layers) {
       const band = L.band;
+      const gi = L.group;
+      const farLimit = this.baseEdges[gi * 3 + 2] + HYSTERESIS;
       for (let c = 0; c < GRID * GRID; c++) {
         const s = L.chunkStart[c], e = L.chunkStart[c + 1];
         if (s === e) continue;
@@ -379,14 +431,42 @@ export class VegetationRenderer {
                 changed = true;
               }
             }
-            L.chunkCulled[c] = 1;
           }
+          L.chunkCulled[c] = 1;
           continue;
         }
         L.chunkCulled[c] = 0;
         for (let i = s; i < e; i++) {
           const dx = L.x[i] - cx, dy = L.y[i] - cy, dz = L.z[i] - cz;
           const real = Math.sqrt(dx * dx + dy * dy + dz * dz);
+          L.dist[i] = real;
+          const b = Math.floor((real * lodScale) / BUCKET);
+          if (b < BUCKETS) this.hist[gi * BUCKETS + b]++;
+        }
+      }
+    }
+
+    // Budgets: the nearest N instances of a group keep the near model, the next M the mid model.
+    for (let gi = 0; gi < GROUPS.length; gi++) {
+      const nb = this.budgets[gi * 2], mb = this.budgets[gi * 2 + 1];
+      const nearT = Math.min(this.baseEdges[gi * 3], this.distanceAtCount(gi, nb));
+      const midT = Math.max(nearT + 1, Math.min(this.baseEdges[gi * 3 + 1], this.distanceAtCount(gi, nb + mb)));
+      const e = this.edges[gi];
+      // Smooth threshold moves (they shift as the camera walks through dense areas).
+      e[0] = force ? nearT : e[0] + (nearT - e[0]) * 0.5;
+      e[1] = force ? midT : e[1] + (midT - e[1]) * 0.5;
+      e[2] = this.baseEdges[gi * 3 + 2];
+    }
+
+    // Pass 2: band membership with hysteresis.
+    for (const L of this.layers) {
+      const band = L.band;
+      const edges = this.edges[L.group];
+      for (let c = 0; c < GRID * GRID; c++) {
+        if (L.chunkCulled[c]) continue;
+        const s = L.chunkStart[c], e = L.chunkStart[c + 1];
+        for (let i = s; i < e; i++) {
+          const real = L.dist[i];
           const cur = band[i] === NO_BAND ? -1 : band[i];
           let nb = selectBand(real * lodScale, cur, edges, HYSTERESIS);
           if (real > MAX_REAL_DISTANCE) nb = 3;

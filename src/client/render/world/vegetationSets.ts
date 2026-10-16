@@ -32,10 +32,21 @@ export interface SpeciesVariant {
   mid: BandModel;
   /** Trunk base radius in unit model space (trees; aTrunk = r / (trunkRadius * horizontal scale)). */
   trunkRadius: number;
+  /** Colour multiplier applied to every instance of this variant (palette matching). */
+  tint?: readonly [number, number, number];
 }
+
+export type SpeciesGroup = 'tree' | 'bush' | 'rock';
 
 export interface VegetationModelSet {
   readonly kind: 'procedural' | 'assets';
+  /** Multipliers on the quality profile's near / mid band distances per species group. */
+  bandScale: Record<SpeciesGroup, readonly [number, number]>;
+  /**
+   * Instance budgets per group at budgetScale 1: at most [near, mid] instances use the near / mid
+   * models (the nearest ones), the rest drop to the next band - bounds triangles in dense forests.
+   */
+  budget: Record<SpeciesGroup, readonly [number, number]>;
   trees: Record<TreeKind, SpeciesVariant[]>;
   bushes: SpeciesVariant[];
   rocks: SpeciesVariant[];
@@ -166,6 +177,9 @@ export function proceduralVegetationSet(shared: WorldUniforms): VegetationModelS
   const materials: THREE.Material[] = [treeMat, treeDepth, bushMat, bushDepth, rockMat, impostorMaterial];
   return {
     kind: 'procedural',
+    // Cheap models: distances from the profile, effectively unlimited budgets.
+    bandScale: { tree: [1, 1], bush: [1, 1], rock: [1, 1] },
+    budget: { tree: [1e6, 1e6], bush: [1e6, 1e6], rock: [1e6, 1e6] },
     trees,
     bushes,
     rocks,
@@ -287,7 +301,9 @@ export function assetVegetationSet(src: NatureGltfs, shared: WorldUniforms): Veg
   for (const v of NATURE_MODELS.bushes.variants) {
     const near = band(src.bushes.scene, v.node, { trunk: false, wrap: 0.3 }, true);
     const mid = band(src.bushes.scene, v.lod1Node ?? v.node, { trunk: false, wrap: 0.3 }, true);
-    if (near && mid) bushes.push({ near, mid, trunkRadius: 1 });
+    // The Ultimate Stylized Nature bushes are a saturated lime: pull them toward the muted palette.
+    const lime = v.material !== NATURE_MODELS.bushes.variants[0].material;
+    if (near && mid) bushes.push({ near, mid, trunkRadius: 1, tint: lime ? [0.62, 0.66, 0.5] : undefined });
   }
   const rocks: SpeciesVariant[] = [];
   for (const v of NATURE_MODELS.rocks.variants) {
@@ -308,6 +324,10 @@ export function assetVegetationSet(src: NatureGltfs, shared: WorldUniforms): Veg
   const wr = NATURE_MODELS.impostors.widthRatio;
   return {
     kind: 'assets',
+    // LOD0 trees are ~2 000 tris, LOD1 ~650: full models only close up, impostors take over early;
+    // budgets keep dense forests bounded (~300 k tris for trees at medium).
+    bandScale: { tree: [0.5, 0.5], bush: [0.25, 0.25], rock: [0.4, 1] },
+    budget: { tree: [80, 300], bush: [40, 150], rock: [60, 260] },
     trees,
     bushes,
     rocks,
