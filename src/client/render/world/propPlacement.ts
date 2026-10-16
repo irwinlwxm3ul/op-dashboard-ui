@@ -6,7 +6,7 @@
 
 import type { WorldBox } from '../../../shared/types';
 import { hash32 } from '../../../shared/rng';
-import { PROP_MODELS, propModelsForBox, type WorldPropId } from '../../assets';
+import { PROP_MODELS, propModelsForBox, type WorldPropId } from '../../assets/manifest-world';
 
 export interface PropPlacement {
   model: WorldPropId;

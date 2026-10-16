@@ -234,6 +234,7 @@ export function assetVegetationSet(src: NatureGltfs, shared: WorldUniforms): Veg
   const geometries: THREE.BufferGeometry[] = [];
   const materials: THREE.Material[] = [];
   const alphaTested: THREE.Material[] = [];
+  let ownAtlas: THREE.CanvasTexture | null = null;
   // One patched clone per source material (all variants / LODs of a kind share them).
   const patched = new Map<THREE.Material, { mat: THREE.Material; depth: THREE.Material | null }>();
   const patch = (srcMat: THREE.Material, opts: FoliageOptions, foliage: boolean): { mat: THREE.Material; depth: THREE.Material | null } => {
@@ -298,7 +299,9 @@ export function assetVegetationSet(src: NatureGltfs, shared: WorldUniforms): Veg
     disposeAll();
     return null;
   }
-  const atlas = src.impostorAtlas;
+  // The PNG atlas is shared app-wide (never disposed here); without it use an owned canvas atlas.
+  ownAtlas = src.impostorAtlas ? null : createImpostorAtlas();
+  const atlas = src.impostorAtlas ?? ownAtlas;
   const impostorMaterial = createImpostorMaterial(atlas);
   materials.push(impostorMaterial);
   alphaTested.push(impostorMaterial);
@@ -321,6 +324,7 @@ export function assetVegetationSet(src: NatureGltfs, shared: WorldUniforms): Veg
     // GPU copies, which are re-uploaded if the templates are used again.
     for (const g of geometries) g.dispose();
     for (const m of materials) m.dispose();
+    ownAtlas?.dispose();
   }
 }
 

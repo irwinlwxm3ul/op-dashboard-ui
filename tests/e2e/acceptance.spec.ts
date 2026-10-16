@@ -136,7 +136,7 @@ test('AT1 languages: Arabic translates every menu screen and mirrors RTL, persis
 // only re-translates what is attached (src/client/ui/index.ts `retranslate(this.root)`), so a modal
 // opened once in English stays English after switching to Arabic. Fix: retranslate(m.el) when a
 // modal is (re)opened, or keep the cached modals in the language-change handler.
-test.fixme('AT1 settings and controls opened before a language switch follow the new language', async ({ page }) => {
+test('AT1 settings and controls opened before a language switch follow the new language', async ({ page }) => {
   await prepare(page);
   await page.goto('/');
   await expect(page.locator(tid('main-sp'))).toBeVisible({ timeout: 60_000 });

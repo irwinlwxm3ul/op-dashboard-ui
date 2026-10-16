@@ -15,6 +15,7 @@ import {
 } from './boxGeometry';
 import { GeoBuilder, linearRgb } from './geoBuilder';
 import { distanceToAabb, selectBand } from './lod';
+import type { PropVisibility } from './props';
 import { NOISE_GLSL, patchShader } from './shaders';
 
 const PROP_CHUNK = 128;
@@ -37,33 +38,40 @@ interface BuildingEntry {
   band: number;
 }
 
-/** Building/prop material: per-vertex roughness/metalness + subtle world-space weathering. */
-function createBoxMaterial(shell: boolean): THREE.MeshStandardMaterial {
+type BoxMaterialMode = 'full' | 'shell' | 'props';
+
+/**
+ * Building/prop material: per-vertex roughness/metalness + subtle world-space weathering. The
+ * 'shell' and 'props' variants hide geometry per vertex through a visibility texture indexed by
+ * the `vid` attribute (building index / prop pid): hidden triangles collapse outside the clip volume.
+ */
+function createBoxMaterial(mode: BoxMaterialMode): THREE.MeshStandardMaterial {
   const mat = new THREE.MeshStandardMaterial({
-    name: shell ? 'dz-building-shell' : 'dz-building',
+    name: `dz-building-${mode}`,
     vertexColors: true,
     roughness: 0.9,
     metalness: 0,
   });
-  const shellVis: { value: THREE.Texture | null } = { value: null };
-  mat.userData.shellVis = shellVis;
+  const visTex: { value: THREE.Texture | null } = { value: null };
+  mat.userData.visTex = visTex;
+  const masked = mode !== 'full';
   mat.onBeforeCompile = (shader) => {
     let vs = shader.vertexShader;
     let head = 'attribute vec2 rm;\nvarying vec2 vDzRM;\nvarying vec3 vDzWorld;\n';
-    if (shell) head += 'attribute float bld;\nuniform sampler2D uShellVis;\n';
+    if (masked) head += 'attribute float vid;\nuniform sampler2D uVis;\n';
     vs = patchShader(vs, 'begin_vertex', '#include <begin_vertex>\nvDzRM = rm;\nvDzWorld = (modelMatrix * vec4(transformed, 1.0)).xyz;');
-    if (shell) {
+    if (masked) {
       vs = patchShader(
         vs,
         'project_vertex',
         `#include <project_vertex>
 {
-  int bi = int(bld + 0.5);
-  float vis = texelFetch(uShellVis, ivec2(bi % ${SHELL_TEX_WIDTH}, bi / ${SHELL_TEX_WIDTH}), 0).r;
+  int vi = int(vid + 0.5);
+  float vis = texelFetch(uVis, ivec2(vi % ${SHELL_TEX_WIDTH}, vi / ${SHELL_TEX_WIDTH}), 0).r;
   if (vis < 0.5) gl_Position = vec4(2.0, 2.0, 2.0, 1.0);
 }`,
       );
-      shader.uniforms.uShellVis = shellVis;
+      shader.uniforms.uVis = visTex;
     }
     shader.vertexShader = head + vs;
     let fs = shader.fragmentShader;
@@ -83,7 +91,7 @@ function createBoxMaterial(shell: boolean): THREE.MeshStandardMaterial {
     );
     shader.fragmentShader = 'varying vec2 vDzRM;\nvarying vec3 vDzWorld;\n' + NOISE_GLSL + fs;
   };
-  mat.customProgramCacheKey = () => (shell ? 'dz-building-shell-v1' : 'dz-building-v1');
+  mat.customProgramCacheKey = () => `dz-building-${mode}-v2`;
   return mat;
 }
 
@@ -139,6 +147,8 @@ export class BuildingRenderer {
   readonly group = new THREE.Group();
   private readonly material: THREE.MeshStandardMaterial;
   private readonly shellMaterial: THREE.MeshStandardMaterial;
+  private readonly propMaterial: THREE.MeshStandardMaterial;
+  private readonly propPids: ReadonlyMap<number, number>;
   private readonly targetMaterial: THREE.MeshStandardMaterial | null = null;
   private readonly targetTexture: THREE.CanvasTexture | null;
   private readonly entries: BuildingEntry[] = [];
@@ -151,10 +161,17 @@ export class BuildingRenderer {
   /** Prop chunk meshes with bounds for distance culling (props are tiny beyond ~650 m in haze). */
   private readonly propChunks: { mesh: THREE.Mesh; minX: number; minY: number; minZ: number; maxX: number; maxY: number; maxZ: number; band: number }[] = [];
 
-  constructor(world: World) {
+  /**
+   * `propPids` maps prop boxes that may be swapped for 3D models (props.ts) to their visibility
+   * index in `propVis`; those boxes always live in the merged prop meshes (even inside buildings).
+   */
+  constructor(world: World, propPids: ReadonlyMap<number, number>, propVis: PropVisibility) {
     this.group.name = 'buildings';
-    this.material = createBoxMaterial(false);
-    this.shellMaterial = createBoxMaterial(true);
+    this.material = createBoxMaterial('full');
+    this.shellMaterial = createBoxMaterial('shell');
+    this.propMaterial = createBoxMaterial('props');
+    (this.propMaterial.userData.visTex as { value: THREE.Texture | null }).value = propVis.texture;
+    this.propPids = propPids;
     this.targetTexture = world.kind === 'training' ? createTargetTexture() : null;
     if (this.targetTexture) {
       this.targetMaterial = new THREE.MeshStandardMaterial({ name: 'dz-target', map: this.targetTexture, roughness: 0.9 });
@@ -167,12 +184,12 @@ export class BuildingRenderer {
     this.shellTex.magFilter = THREE.NearestFilter;
     this.shellTex.generateMipmaps = false;
     this.shellTex.needsUpdate = true;
-    (this.shellMaterial.userData.shellVis as { value: THREE.Texture | null }).value = this.shellTex;
+    (this.shellMaterial.userData.visTex as { value: THREE.Texture | null }).value = this.shellTex;
 
     const heightAt = world.heightAt;
     const boxes = world.boxes;
     const owned = new Uint8Array(boxes.length);
-    const shellBuilder = new GeoBuilder().addAttribute('rm', 2).addAttribute('bld', 1);
+    const shellBuilder = new GeoBuilder().addAttribute('rm', 2).addAttribute('vid', 1);
     const shade: number[] = [1, 1, 1, 1, 1, 1];
     const neighbours: Aabb[] = [];
 
@@ -180,7 +197,7 @@ export class BuildingRenderer {
       const list: WorldBox[] = [];
       for (const id of bd.boxIds) {
         const b = boxes[id];
-        if (!b) continue;
+        if (!b || propPids.has(id)) continue;
         list.push(b);
         owned[id] = 1;
       }
@@ -325,7 +342,7 @@ export class BuildingRenderer {
     const shade: number[] = [1, 1, 1, 1, 1, 1];
     const neighbours: Aabb[] = [];
     for (const [key, list] of buckets) {
-      const gb = new GeoBuilder().addAttribute('rm', 2);
+      const gb = new GeoBuilder().addAttribute('rm', 2).addAttribute('vid', 1);
       const near = new BoxNeighbourhood(list);
       for (const b of list) {
         const mask = visibleFaces(b, near.touching(b, 0.03, neighbours), world.heightAt);
@@ -336,12 +353,13 @@ export class BuildingRenderer {
           faceShade: shade,
           bottomShade: 0.86,
           ribbed: b.kind === 'container',
+          bld: this.propPids.get(b.id) ?? 0,
         });
       }
       if (gb.isEmpty) continue;
       const geo = gb.build();
       this.geometries.push(geo);
-      const mesh = new THREE.Mesh(geo, this.material);
+      const mesh = new THREE.Mesh(geo, this.propMaterial);
       mesh.name = `props-${key}`;
       mesh.castShadow = true;
       mesh.receiveShadow = true;
@@ -461,6 +479,7 @@ export class BuildingRenderer {
     for (const g of this.geometries) g.dispose();
     this.material.dispose();
     this.shellMaterial.dispose();
+    this.propMaterial.dispose();
     this.shellTex.dispose();
     this.targetMaterial?.dispose();
     this.targetTexture?.dispose();

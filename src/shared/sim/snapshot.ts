@@ -142,10 +142,12 @@ export function selfState(p: PlayerState): SelfState {
     ammo: { ...p.ammo },
     items: { ...p.items },
     capacity: [Math.round(usedCapacity(p) * 100) / 100, capacity(p)],
-    fireCooldown: q4(p.fireCooldown),
-    reloadTimer: q4(p.reloadTimer),
+    // Weapon timers go out unrounded: client prediction compares them against exact thresholds
+    // (fire when cooldown <= 0), and a rounded value can shift a predicted shot by a tick.
+    fireCooldown: p.fireCooldown,
+    reloadTimer: p.reloadTimer,
     reloadTotal: q4(p.reloadTotal),
-    drawTimer: q4(p.drawTimer),
+    drawTimer: p.drawTimer,
     ads: q4(p.ads),
     sprayCount: p.sprayCount,
     bloom: q5(p.bloom),

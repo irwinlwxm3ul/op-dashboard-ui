@@ -585,7 +585,7 @@ describe('AT3 game feel', () => {
   // visible recoil dip / correction mid-spray and a late or missing predicted shot (no local tracer /
   // sound / kick for that bullet: 29 predicted vs 30 authoritative shots in one run). Un-skip once
   // fixed (send fireCooldown unquantised or compare with a tolerance >= the quantisation step).
-  it.skip('client-predicted shots and recoil match the server for every input of a spray', () => {
+  it('client-predicted shots and recoil match the server for every input of a spray', () => {
     const { c, spray } = setup(40);
     const a = spray();
     expect(a.times.length, 'one predicted shot per authoritative shot').toBe(a.server.length);
@@ -978,7 +978,7 @@ describe('AT7 lag compensation (150 ms one-way latency)', () => {
   const shotsBy = (h: Harness, S: SimClient, since: number) =>
     h.simEvs('shot', since).filter((e) => e.ev.shooter === S.id).length;
 
-  it.skip('AR taps at a strafing player register where the shooter aimed (interpolated view)', () => {
+  it('AR taps at a strafing player register where the shooter aimed (interpolated view)', () => {
     const { h, S, T, strafe, offsets } = setup(30, 1200);
     h.run(500, strafe);
     equip(h, S, 'ar');
@@ -1009,7 +1009,7 @@ describe('AT7 lag compensation (150 ms one-way latency)', () => {
     expect(hits / shots).toBeGreaterThan(0.85);
   });
 
-  it.skip('sniper: leading a strafing player by the travel time only is enough', () => {
+  it('sniper: leading a strafing player by the travel time only is enough', () => {
     const { h, S, T, strafe } = setup(140, 3000);
     h.run(500, strafe);
     equip(h, S, 'sniper');

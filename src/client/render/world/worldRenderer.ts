@@ -12,9 +12,11 @@ import { SURFACE_LIST } from '../../../shared/world';
 import type { CameraState, CreateWorldRenderer, RenderCore, WorldRenderer } from '../contracts';
 import type { FrameState, Quality } from '../../game/types';
 import { ENV } from '../core/environment';
-import { qualityProfile } from '../core/quality';
+import { qualityProfile, type QualityProfile, type VegetationProfile } from '../core/quality';
 import { BuildingRenderer } from './buildings';
 import { GrassRenderer } from './grass';
+import { planProps, type PropPlan } from './propPlacement';
+import { PropRenderer, PropVisibility } from './props';
 import { createHeightTexture, type HeightTexture } from './heightTexture';
 import { lodScaleForFov } from './lod';
 import { RoadRenderer } from './roads';
@@ -22,9 +24,15 @@ import { createWorldUniforms, type WorldUniforms } from './shaders';
 import { TerrainRenderer } from './terrain';
 import { computeTerrainNormals, computeTerrainShading, type HeightFieldData, type TerrainShading } from './terrainData';
 import { TrainingRenderer } from './training';
-import { VegetationRenderer } from './vegetation';
+import { VegetationRenderer, applySetQuality } from './vegetation';
+import { assetVegetationSet, proceduralVegetationSet, type VegetationModelSet } from './vegetationSets';
+import { assetGrassSet, loadWorldAssets, type LoadedWorldAssets } from './worldAssets';
 import { WaterRenderer } from './water';
 import { ZoneRenderer } from './zone';
+
+function variantKey(v: Readonly<VegetationProfile>): string {
+  return `${v.treeVariants}/${v.rockVariants}/${v.bushVariants}`;
+}
 
 export const createWorldRenderer: CreateWorldRenderer = (core: RenderCore, world: World): WorldRenderer =>
   new WorldRendererImpl(core, world);
@@ -40,7 +48,13 @@ class WorldRendererImpl implements WorldRenderer {
   private readonly water: WaterRenderer;
   private readonly roads: RoadRenderer;
   private readonly buildings: BuildingRenderer;
-  private readonly vegetation: VegetationRenderer;
+  private vegetation: VegetationRenderer;
+  private vegSet: VegetationModelSet;
+  /** Variant counts the current vegetation renderer was built with. */
+  private vegVariants = '';
+  private readonly propPlans: PropPlan[];
+  private readonly propVis: PropVisibility;
+  private props: PropRenderer | null = null;
   private readonly grass: GrassRenderer;
   private readonly zone: ZoneRenderer;
   private readonly training: TrainingRenderer;
@@ -75,10 +89,18 @@ class WorldRendererImpl implements WorldRenderer {
     this.roads = new RoadRenderer(world);
     if (this.roads.mesh) this.root.add(this.roads.mesh);
 
-    this.buildings = new BuildingRenderer(world);
+    this.propPlans = planProps(world.boxes);
+    this.propVis = new PropVisibility(this.propPlans.length);
+    const propPids = new Map<number, number>();
+    this.propPlans.forEach((p, i) => propPids.set(p.boxId, i + 1));
+    this.buildings = new BuildingRenderer(world, propPids, this.propVis);
     this.root.add(this.buildings.group);
 
-    this.vegetation = new VegetationRenderer(world, this.uniforms);
+    // Procedural vegetation right away; the glTF models replace it once loaded.
+    const p0 = qualityProfile(core.quality);
+    this.vegSet = proceduralVegetationSet(this.uniforms);
+    this.vegetation = new VegetationRenderer(world, this.vegSet, p0.vegetation);
+    this.vegVariants = variantKey(p0.vegetation);
     this.root.add(this.vegetation.group);
 
     this.grass = new GrassRenderer(world, this.shading, this.uniforms);
@@ -93,6 +115,45 @@ class WorldRendererImpl implements WorldRenderer {
     this.root.updateMatrixWorld(true);
     core.scene.add(this.root);
     this.applyQuality(core.quality);
+    void loadWorldAssets().then((a) => this.onAssets(a), () => undefined);
+  }
+
+  /** Swap procedural vegetation / grass / prop boxes for the loaded models (keeps fallbacks on failure). */
+  private onAssets(a: LoadedWorldAssets): void {
+    if (this.disposed) return;
+    try {
+      if (a.nature) {
+        const set = assetVegetationSet(a.nature, this.uniforms);
+        if (set) {
+          const old = this.vegSet;
+          this.vegSet = set;
+          this.rebuildVegetation(qualityProfile(this.quality ?? this.core.quality));
+          old.dispose();
+        }
+      }
+      if (a.grass) {
+        const g = assetGrassSet(a.grass, this.uniforms, this.grass.fade);
+        if (g) this.grass.setModels(g);
+      }
+      if (a.props.size > 0 && this.propPlans.length > 0) {
+        this.props = new PropRenderer(this.propPlans, this.propVis, a.props);
+        this.root.add(this.props.group);
+      }
+      this.quality = null;
+      this.applyQuality(this.core.quality);
+    } catch (err) {
+      console.warn('[world] asset models unavailable, keeping procedural fallbacks', err);
+    }
+  }
+
+  private rebuildVegetation(p: QualityProfile): void {
+    const next = new VegetationRenderer(this.world, this.vegSet, p.vegetation);
+    next.setShadows(p.shadows);
+    this.vegetation.dispose();
+    this.vegetation = next;
+    this.vegVariants = variantKey(p.vegetation);
+    this.root.add(next.group);
+    next.group.updateMatrixWorld(true);
   }
 
   private applyQuality(q: Quality): void {
@@ -104,10 +165,15 @@ class WorldRendererImpl implements WorldRenderer {
     this.terrain.setLodDistances(p.terrainLod[0], p.terrainLod[1]);
     this.buildings.setDetailDistance(p.buildingDetailDistance);
     this.buildings.setAnisotropy(aniso);
+    if (variantKey(p.vegetation) !== this.vegVariants) this.rebuildVegetation(p);
     this.vegetation.setProfile(p.vegetation);
     this.vegetation.setShadows(p.shadows);
-    this.vegetation.setAnisotropy(aniso, p.msaaSamples > 0);
+    applySetQuality(this.vegSet, aniso, p.msaaSamples > 0);
     this.grass.configure(p.grass);
+    this.grass.setMsaa(p.msaaSamples > 0);
+    this.props?.setModelDistance(p.propModelDistance);
+    this.props?.setShadows(p.shadows);
+    this.props?.setAnisotropy(aniso, p.msaaSamples > 0);
     this.training.setAnisotropy(aniso);
   }
 
@@ -127,6 +193,7 @@ class WorldRendererImpl implements WorldRenderer {
     this.water.update(p.x, p.z);
     this.buildings.update(p.x, p.y, p.z, lodScale);
     this.vegetation.update(p.x, p.y, p.z, lodScale, step);
+    this.props?.update(p.x, p.y, p.z, lodScale, step);
     this.grass.update(p.x, p.z);
     const zoneEnabled = frame.config.mode !== 'training' && this.world.kind !== 'training';
     this.zone.update(frame.zone, zoneEnabled, this.world.half, step);
@@ -140,6 +207,9 @@ class WorldRendererImpl implements WorldRenderer {
     this.roads.dispose();
     this.buildings.dispose();
     this.vegetation.dispose();
+    this.vegSet.dispose();
+    this.props?.dispose();
+    this.propVis.dispose();
     this.grass.dispose();
     this.zone.dispose();
     this.training.dispose();

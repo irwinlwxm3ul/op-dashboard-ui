@@ -12,8 +12,12 @@ export const SNAPSHOT_RATE = 20;
 export const INTERP_DELAY_MS = 100;
 /** Max extrapolation when snapshots are late (ms). */
 export const MAX_EXTRAPOLATE_MS = 150;
-/** Lag compensation: maximum rewind applied to a shot (ms). */
-export const MAX_REWIND_MS = 250;
+/**
+ * Lag compensation: hard cap on the rewind applied to a shot (ms). Each shot's rewind is further
+ * bounded per player by its measured RTT + interpolation delay (+ queue wait), so honest players up
+ * to ~350 ms RTT are fully compensated while a client can never rewind further than it really lags.
+ */
+export const MAX_REWIND_MS = 500;
 /** Hitbox history length kept on the server (ms). */
 export const HITBOX_HISTORY_MS = 1000;
 /** Input rate limiting: token bucket refills at TICK_RATE * this per second. */

@@ -1,7 +1,7 @@
 // Modal dialogs (settings, controls, pause menu): a stack with focus trapping and Esc handling.
 
 import type { TKey } from '../i18n';
-import { ariaTx, button, focusFirst, h, trapFocus, tx } from './dom';
+import { ariaTx, button, focusFirst, h, trapFocus, tx, retranslate } from './dom';
 import { ICONS } from './icons';
 
 export class ModalManager {
@@ -126,6 +126,8 @@ export class Modal {
 
   open(): void {
     this.beforeOpen();
+    // Cached modals are detached while closed, so a language switch never reached them.
+    retranslate(this.el);
     this.mgr.push(this);
   }
 

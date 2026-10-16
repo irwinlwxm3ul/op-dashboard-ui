@@ -112,7 +112,7 @@ export interface FaceStyle {
   bottomShade: number;
   /** Ribbed corrugation stripes on vertical faces (containers). */
   ribbed: boolean;
-  /** Optional value for the `bld` attribute (exterior shell). */
+  /** Optional value for the `vid` visibility-index attribute (shell building index / prop pid). */
   bld?: number;
 }
 
@@ -123,11 +123,11 @@ const _cz = new Float64Array(4);
 function emitVertex(out: GeoBuilder, style: FaceStyle, x: number, y: number, z: number, n: readonly number[], r: number, g: number, b: number): number {
   const i = out.vertex(x, y, z, n[0], n[1], n[2], r, g, b);
   out.extra('rm', style.rm[0], style.rm[1]);
-  if (style.bld !== undefined) out.extra('bld', style.bld);
+  if (style.bld !== undefined) out.extra('vid', style.bld);
   return i;
 }
 
-/** Emits the visible faces of an AABB into `out` (builder must declare `rm` and optionally `bld`). */
+/** Emits the visible faces of an AABB into `out` (builder must declare `rm` and optionally `vid`). */
 export function emitBox(out: GeoBuilder, box: Aabb, mask: number, style: FaceStyle): void {
   const mn = box.min, mx = box.max;
   for (let f = 0; f < 6; f++) {

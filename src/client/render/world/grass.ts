@@ -90,6 +90,8 @@ export interface GrassModelSet {
   variants: GrassVariant[];
   /** Multiplier on the profile's tufts per square meter (big textured clumps need fewer). */
   densityScale: number;
+  /** Alpha-tested materials (alpha-to-coverage follows MSAA). */
+  alphaTested: THREE.Material[];
   dispose(): void;
 }
 
@@ -103,6 +105,7 @@ export function proceduralGrassSet(shared: WorldUniforms, fade: { value: THREE.V
   return {
     variants: [{ geometry, material, scaleMin: 0.3, scaleMax: 0.62, tint: 'terrain' }],
     densityScale: 1,
+    alphaTested: [],
     dispose() {
       geometry.dispose();
       material.dispose();
@@ -127,6 +130,7 @@ export class GrassRenderer {
   private slotPx = new Int32Array(0);
   private slotPz = new Int32Array(0);
   private profile: Readonly<GrassProfile> = { enabled: false, radius: 0, density: 0 };
+  private msaa = false;
   private readonly boxScratch: WorldBox[] = [];
   private readonly roadScratch: RoadSegment[] = [];
   private readonly nScratch = { x: 0, y: 1, z: 0 };
@@ -138,6 +142,17 @@ export class GrassRenderer {
     this.set = proceduralGrassSet(shared, this.fade);
   }
 
+  /** Alpha-to-coverage for alpha-tested tufts when MSAA is on. */
+  setMsaa(msaa: boolean): void {
+    this.msaa = msaa;
+    for (const m of this.set.alphaTested) {
+      if (m.alphaToCoverage !== msaa) {
+        m.alphaToCoverage = msaa;
+        m.needsUpdate = true;
+      }
+    }
+  }
+
   /** Swap the tuft models (e.g. once the glTF grass loaded). The previous set is disposed. */
   setModels(set: GrassModelSet): void {
     const old = this.set;
@@ -146,6 +161,7 @@ export class GrassRenderer {
     this.release();
     this.profile = { enabled: false, radius: 0, density: 0 };
     this.configure(p);
+    this.setMsaa(this.msaa);
     old.dispose();
   }
 

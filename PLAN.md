@@ -107,8 +107,9 @@ was looking at when they pressed the button. No positions, hits, damage, ammo or
 **Lag compensation**
 * Server keeps a 1 s ring buffer of every player's hitboxes (pos, stance, yaw, life) per tick.
 * A hitscan shot is traced from the server-authoritative eye position, against hitboxes **rewound to
-  the client's `renderTime`**, clamped to `[now − 250 ms, now]` (max rewind caps the "shot behind a
-  wall" effect for the victim).
+  the client's `renderTime`**, bounded per player by its server-measured RTT + interpolation delay
+  (+ input queue wait) and hard-capped at 500 ms, so a client can never rewind further than it really
+  lags (limits the "shot behind a wall" effect for the victim).
 * **Ballistic projectiles** (DMR/sniper) are simulated in server time with sub-stepped segments
   (gravity + drag) but carry the shooter's rewind offset; each segment is tested against hitboxes at
   `t − offset`, so leading a moving target works the same at any ping.
