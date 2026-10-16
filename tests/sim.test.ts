@@ -1,3 +1,4 @@
+import { REWIND_SLACK_MS } from '../src/shared/sim/tuning';
 // GameSim tests against the real Stage A modules (world, physics, items, vehicles) with scripted
 // players (no bots). Test locations are searched in the generated world so they stay valid when
 // world generation is tuned.
@@ -242,6 +243,7 @@ describe('GameSim combat', () => {
 
     /** Wait for the cooldown, then one shot aimed at the torso `back` s ago with rt = now - rtBack. */
     const shotAt = (back: number, rtBack: number) => {
+      h.p(b).health = 100; // keep the target alive across shots (2-player match would end)
       h.step(15);
       const now = h.sim.time;
       const aim = h.aimAt(a, h.torso(b, now - back));
@@ -255,10 +257,16 @@ describe('GameSim combat', () => {
     // Same aim but claiming to see the present (no rewind) -> miss (target moved ~1 m).
     expect(shotAt(0.2, 0)).toBe(0);
     expect(shotAt(0.2, 0.2)).toBe(1);
-    // rt older than MAX_REWIND_MS is clamped: aiming at the 500 ms old position misses ...
+    // A claimed rewind beyond what this connection explains is clamped to its latency bound
+    // (RTT + interpolation delay + tick slack): aiming at the 500 ms old position misses ...
+    const allowed = (150 + INTERP_DELAY_MS + REWIND_SLACK_MS) / 1000;
     expect(shotAt(0.5, 0.5)).toBe(0);
-    // ... while the clamped (250 ms) position is hit.
-    expect(shotAt(MAX_REWIND_MS / 1000, 0.5)).toBe(1);
+    // ... while the position at the clamped rewind is hit.
+    expect(shotAt(allowed, 0.5)).toBe(1);
+    // A very laggy connection is still hard-capped at MAX_REWIND_MS.
+    h.sim.setPlayerLatency(a, 900);
+    expect(shotAt(0.8, 0.8)).toBe(0);
+    expect(shotAt(MAX_REWIND_MS / 1000, 0.8)).toBe(1);
     expect(h.sim.rewindHitboxes(b, h.sim.time - HITBOX_HISTORY_MS / 1000 + 0.05).length).toBeGreaterThan(0);
   });
 
