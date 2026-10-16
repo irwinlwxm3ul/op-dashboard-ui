@@ -234,3 +234,80 @@ export function errorText(code: LobbyErrorCode): string;
 ```
 Locales live in `src/client/i18n/locales/{en,ru,zh,es,fr,de,pt,ja,ko,ar}.ts`; every non-English
 locale is typed `Record<TKey, string>` so a missing key is a compile error.
+
+---
+
+## Stage B APIs
+
+Foundation added for stage B (hand-written, binding): `src/shared/validate.ts`
+(`validateClientMessage`, `sanitizeInput`, `sanitizeAction`, `sanitizeLobbySettings`,
+`sanitizeMatchConfig`, `sanitizeName`, `sanitizeText`) and `src/shared/sim/view.ts`
+(`SimView`, `SimEvent`, `NoiseEvent`, `BotDriver`).
+
+### `src/shared/sim` — `index.ts`
+
+```ts
+export class GameSim implements SimView {
+  constructor(config: MatchConfig);
+  // SimView members (config, world, time, tick, phase, players, vehicles, loot, projectiles, zone, plane, noises, queries...)
+  addPlayer(init: { name: string; isBot: boolean; team?: TeamId }): EntityId;  // -1 if rejected
+  removePlayer(id: EntityId): void;          // human disconnected: player becomes bot-controlled (isBot = true) so the match stays fair
+  fillBots(): void;                          // config.botFill: fill to maxPlayers respecting teamSize
+  start(): void;                             // waiting -> plane (br) | playing (training)
+  step(): void;                              // one TICK_DT (consumes at most one queued input per player per tick)
+  drainEvents(): SimEvent[];
+  drainLootDelta(): { added: LootItem[]; removed: EntityId[] };
+  isOver(): boolean;
+  results(): MatchResults;
+  /** Hitbox history for lag compensation. */
+  rewindHitboxes(id: EntityId, timeSec: number, out?: Hitbox[]): Hitbox[];
+}
+export class MatchRunner {
+  constructor(opts: {
+    config: MatchConfig;
+    clients: { id: string; name: string; team: TeamId | null; send(msg: ServerMessage): void }[];
+    botDriverFactory?: (sim: SimView) => BotDriver;   // defaults to none (server / worker pass createBotDriver)
+    onEnd?: (results: MatchResults) => void;
+  });
+  readonly sim: GameSim;
+  start(nowMs: number): void;              // adds players, fills bots, sends matchInit to each client
+  update(nowMs: number): void;             // fixed-step accumulator (max 5 catch-up ticks), snapshots at SNAPSHOT_RATE with interest management
+  handleMessage(clientId: string, msg: ClientMessage): void;  // 'input' (token-bucket rate limit, queue), 'ping' -> 'pong', 'leaveMatch'
+  removeClient(clientId: string): void;
+  isOver(): boolean;
+  stats(): { tickMsAvg: number; tickMsMax: number; players: number; bots: number };
+}
+```
+
+### `src/shared/bots` — `index.ts`
+
+```ts
+export function createBotDriver(sim: SimView): BotDriver;   // drives every player with isBot === true via sim.queueInput
+export function botName(rng: Rng): string;                  // proper-noun gamer tags
+```
+
+### `src/server` — Node entry `src/server/index.ts`
+
+HTTP server (serves `dist/` in production, `/healthz`), `ws` WebSocketServer on path `/ws`,
+port `PORT` env or `DEFAULT_SERVER_PORT`. Lobby manager (create/list/join/leave/settings/teams/
+ready/start/chat), one `MatchRunner` per lobby in game, ticked by a shared high-resolution loop.
+Every inbound message passes `validateClientMessage`; per-connection message-rate limits and
+max payload; kicks after repeated invalid messages; heartbeats. `LAG_MS` env adds symmetric
+artificial latency (order preserving). After a match: results, then `backToLobby` + fresh
+`lobbyState` (ready flags reset). Exports `startServer(opts?: { port?: number; lagMs?: number; log?: boolean }): Promise<{ port: number; close(): Promise<void> }>` for tests.
+
+### `src/client/net` and `src/client/game`
+
+* `Transport` (`send`, `onMessage`, `onClose`, `close`, `kind: 'local' | 'ws'`), `WsTransport.connect(url?)`
+  (default `ws(s)://<host>/ws`), `LocalTransport` running `MatchRunner` + bots inside a module Web Worker
+  (`localWorker.ts`) speaking the same protocol (`startLocal`).
+* `InputController`: keyboard/mouse with pointer lock, rebindable keymap, sensitivity/ADS sensitivity/invert,
+  toggle-or-hold crouch/ADS, produces one `PlayerInput` per tick with `seq`, base aim, buttons, stance,
+  slot, `rt`, and queued actions.
+* `ClientGame`: owns the match on the client: clock sync, snapshot buffer + interpolation of remote players,
+  vehicles, projectiles, zone; prediction + reconciliation of the local player (shared `stepCharacter`/`stepDrop`,
+  driver-side vehicle prediction with `stepVehicle`), predicted weapon handling (fire cadence, ammo, recoil,
+  spread directions via shared items functions) for instant feedback; server-confirmed hits/kills;
+  interaction prompt resolution (nearest loot / vehicle / revive target / plane jump / chute); loot map from
+  `MatchInit` + deltas; typed event bus for `GameEvent`s and local predicted events. Exposes a per-frame
+  `FrameState` (defined in `src/client/game/types.ts`) consumed by rendering, UI, audio and feel.
