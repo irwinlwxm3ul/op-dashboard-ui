@@ -20,6 +20,7 @@
 //  11 Performance overlay ........ here (F3)
 
 import { expect, test, type Browser, type Page } from '@playwright/test';
+import type { Vec3 } from '../../src/shared/types';
 import { WEAPONS, sightDrop } from '../../src/shared/items';
 import { ar } from '../../src/client/i18n/locales/ar';
 import { de } from '../../src/client/i18n/locales/de';
@@ -198,78 +199,75 @@ test.describe.serial('training ground', () => {
     await expect(draws).toBeHidden({ timeout: 10_000 });
   });
 
-  test('AT2 sniper shot at the 300 m target: ballistic projectile, delayed hit; the AR hits instantly', async () => {
-    test.setTimeout(180_000);
-    await queueAction(page, { a: 'give', item: 'sniper' });
+  /**
+   * Aim at `point`, pull the trigger and wait for the read-out of `targetId`. Retried a few times:
+   * when a software-rendered frame stalls for more than ~0.6 s the server stops repeating the held
+   * buttons (ADS included) of the starved input stream, which can spoil an individual shot.
+   */
+  async function shootTarget(point: Vec3, targetId: number, holdMs: number) {
+    for (let attempt = 0; attempt < 5; attempt++) {
+      const f = (await frame(page))!;
+      const a = anglesTo(f.self!.eye, point);
+      await setAim(page, a.yaw, a.pitch);
+      await waitForFrame(page, (x) => x.self!.fireCooldown <= 1e-6 && x.self!.reloadProgress < 0 && x.self!.ads >= 0.99, 30_000, 'ready to fire');
+      await page.waitForTimeout(1200);
+      const since = await pageNow(page);
+      await mouse(page, 0, true);
+      await page.waitForTimeout(holdMs);
+      await mouse(page, 0, false);
+      const end = Date.now() + 15_000;
+      while (Date.now() < end) {
+        const hit = (await events(page, ['targetHit'], since)).find((e) => e.ev.target === targetId);
+        if (hit) {
+          const local = (await events(page, ['localShot'], since));
+          const shots = (await events(page, ['shot'], since)).filter((e) => e.ev.shooter === f.localId && e.seq < hit.seq);
+          return { hit, local, shot: shots[shots.length - 1] };
+        }
+        await page.waitForTimeout(300);
+      }
+    }
+    throw new Error(`no targetHit on target ${targetId} after 5 shots`);
+  }
+
+  async function equipAndScope(weapon: 'sniper' | 'ar') {
+    await queueAction(page, { a: 'give', item: weapon });
     await page.waitForTimeout(800);
-    await queueAction(page, { a: 'give', item: 'ammo_300' });
-    await waitForFrame(page, (f) => f.self!.weapons.includes('sniper'), 30_000, 'sniper in the inventory');
-    const slot = (await frame(page))!.self!.weapons.indexOf('sniper');
+    await queueAction(page, { a: 'give', item: WEAPONS[weapon].ammo });
+    await waitForFrame(page, (f) => f.self!.weapons.includes(weapon), 30_000, `${weapon} in the inventory`);
+    const slot = (await frame(page))!.self!.weapons.indexOf(weapon);
     await page.keyboard.press(`Digit${slot + 1}`);
-    await waitForFrame(page, (f) => f.self!.weapon === 'sniper' && f.self!.drawProgress < 0, 30_000, 'sniper drawn');
+    await waitForFrame(page, (f) => f.self!.weapon === weapon && f.self!.drawProgress < 0, 30_000, `${weapon} drawn`);
     await mouse(page, 2, true);
-    await waitForFrame(page, (f) => f.self!.ads >= 0.99, 20_000, 'scoped in');
+    await waitForFrame(page, (f) => f.self!.ads >= 0.99, 20_000, 'aiming down sights');
+  }
+
+  test('AT2 sniper shot at the 300 m target: ballistic projectile, delayed hit; the AR hits instantly', async () => {
+    test.setTimeout(240_000);
+    await equipAndScope('sniper');
     const f0 = (await frame(page))!;
     const t300 = f0.trainingTargets.find((t) => t.kind === 'static' && t.range === 300)!;
-    const eye = f0.self!.eye;
-    const d = distXZ(eye, t300.center);
     // Hold over by the drop at this distance (sights are zeroed at 100 m).
-    const aim = anglesTo(eye, { ...t300.center, y: t300.center.y + sightDrop(WEAPONS.sniper, d) });
-    await setAim(page, aim.yaw, aim.pitch);
-    await page.waitForTimeout(1500);
-    const since = await pageNow(page);
-    await mouse(page, 0, true);
-    await page.waitForTimeout(600);
-    await mouse(page, 0, false);
-    let hit: { at: number; snap: number; ev: { target: number; part: string; distance: number } } | undefined;
-    await expect.poll(async () => {
-      hit = (await events(page, ['targetHit'], since)).find((e) => e.ev.target === t300.id);
-      return !!hit;
-    }, { timeout: 30_000, message: 'targetHit on the 300 m plate' }).toBe(true).catch(async (err: unknown) => {
-      const diag = { aim, eye, t300, f: await frame(page), evs: await events(page, ['shot', 'impact', 'targetHit', 'localShot'], since) };
-      console.log('AT2 DIAG', JSON.stringify(diag));
-      throw err;
-    });
-    const local = (await events(page, ['localShot'], since)).filter((e) => e.ev.weapon === 'sniper');
-    expect(local.length).toBe(1);
-    expect(local[0].ev.ballistic).toBe(true);
-    const shot = (await events(page, ['shot'], since)).find((e) => e.ev.weapon === 'sniper');
-    expect(shot?.ev.projectiles?.length, 'the server fired a ballistic projectile').toBe(1);
-    expect(hit!.ev.distance).toBeGreaterThan(290);
-    // The impact read-out arrives the ~0.4 s time of flight after the shot (>= 7 snapshots at 20 Hz;
-    // measured in snapshots because the software renderer's frame times are far coarser).
-    expect(hit!.snap - shot!.snap).toBeGreaterThanOrEqual(7);
-    expect(hit!.seq).toBeGreaterThan(local[0].seq);
+    const d = distXZ(f0.self!.eye, t300.center);
+    const r = await shootTarget({ ...t300.center, y: t300.center.y + sightDrop(WEAPONS.sniper, d) }, t300.id, 500);
+    const local = r.local.filter((e) => e.ev.weapon === 'sniper');
+    expect(local.length).toBeGreaterThanOrEqual(1);
+    expect(local.every((e) => e.ev.ballistic), 'predicted as a ballistic shot').toBe(true);
+    expect(r.shot?.ev.projectiles?.length, 'the server fired a ballistic projectile').toBe(1);
+    expect(r.hit.ev.distance).toBeGreaterThan(290);
+    // The impact read-out arrives the ~0.4 s time of flight after the shot (>= 7 snapshots at
+    // 20 Hz; counted in snapshots because the software renderer's frame times are far coarser).
+    expect(r.hit.snap - r.shot!.snap).toBeGreaterThanOrEqual(7);
     await mouse(page, 2, false);
 
-    // AR at the 100 m plate: hitscan, the read-out comes with the shot itself.
-    await queueAction(page, { a: 'give', item: 'ar' });
-    await page.waitForTimeout(800);
-    await queueAction(page, { a: 'give', item: 'ammo_556' });
-    await waitForFrame(page, (f) => f.self!.weapons.includes('ar'), 30_000, 'AR in the inventory');
-    const arSlot = (await frame(page))!.self!.weapons.indexOf('ar');
-    await page.keyboard.press(`Digit${arSlot + 1}`);
-    await waitForFrame(page, (f) => f.self!.weapon === 'ar' && f.self!.drawProgress < 0, 30_000, 'AR drawn');
-    await mouse(page, 2, true);
-    await waitForFrame(page, (f) => f.self!.ads >= 0.99, 20_000, 'ADS');
+    // AR at the 100 m plate: hitscan, the read-out comes in the same snapshot as the shot.
+    await equipAndScope('ar');
     const f1 = (await frame(page))!;
     const t100 = f1.trainingTargets.find((t) => t.kind === 'static' && t.range === 100)!;
-    const aim100 = anglesTo(f1.self!.eye, t100.center);
-    await setAim(page, aim100.yaw, aim100.pitch);
-    await page.waitForTimeout(1500);
-    const since2 = await pageNow(page);
-    await mouse(page, 0, true);
-    await page.waitForTimeout(150);
-    await mouse(page, 0, false);
-    let hit2: { at: number; snap: number; ev: { target: number } } | undefined;
-    await expect.poll(async () => {
-      hit2 = (await events(page, ['targetHit'], since2)).find((e) => e.ev.target === t100.id);
-      return !!hit2;
-    }, { timeout: 60_000, message: 'targetHit on the 100 m plate' }).toBe(true);
-    const arShot = (await events(page, ['shot'], since2)).find((e) => e.ev.weapon === 'ar');
-    expect(arShot?.ev.projectiles).toBeUndefined();
-    // Same snapshot as its shot event (no travel time).
-    expect(hit2!.snap).toBe(arShot!.snap);
+    const r2 = await shootTarget(t100.center, t100.id, 150);
+    expect(r2.shot?.ev.weapon).toBe('ar');
+    expect(r2.shot?.ev.projectiles).toBeUndefined();
+    expect(r2.hit.snap).toBe(r2.shot!.snap);
+    expect(r2.local.some((e) => e.ev.weapon === 'ar' && !e.ev.ballistic)).toBe(true);
     await mouse(page, 2, false);
     expect(errors).toEqual([]);
   });

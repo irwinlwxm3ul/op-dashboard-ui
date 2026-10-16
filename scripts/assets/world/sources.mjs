@@ -45,6 +45,13 @@ export const SOURCES = {
     dir: 'world-ayoub5550_inside-copy-/repo',
     sparse: ['/CREDITS.md', ...['rock_moss_set_01', 'wooden_crate_02'].map((m) => `/assets/ph/models/${m}/*`)],
   },
+  /** Poly Haven "Old Military Crate" (CC0), mirror #3. */
+  polyhavenC: {
+    repo: 'https://github.com/AetherRadar/operation-steel-tide',
+    commit: 'd6a33b932e00fb9016dea407eca3f909aeaf2dcb',
+    dir: 'world-steeltide/repo',
+    sparse: ['/assets/models/LICENSE.md', '/assets/models/old_military_crate/*'],
+  },
   /** "LUAZ" by aaadragon on Sketchfab (CC BY 4.0), Sketchfab glTF export mirrored on GitHub. */
   luaz: {
     repo: 'https://github.com/profojak/Brumm-Brumm-Bau',
@@ -76,6 +83,7 @@ export const FANTASY = `${Q}/Fantasy Props MegaKit[Standard]/Exports/glTF`;
 export const MEDIEVAL = `${Q}/Medieval Village MegaKit[Standard]/glTF`;
 export const PHA = `${SOURCES.polyhavenA.dir}/assets/polyhaven/models`;
 export const PHB = `${SOURCES.polyhavenB.dir}/assets/ph/models`;
+export const PHC = `${SOURCES.polyhavenC.dir}/assets/models`;
 export const LUAZ = `${SOURCES.luaz.dir}/assets/models/vehicle/scene.gltf`;
 export const DIRTBIKE = `${SOURCES.dirtbike.dir}/public/models/dirt_bike_off_road_bike_low_poly/scene.gltf`;
 export const SANDBAG = `${SOURCES.sandbag.dir}/assets/sandbag/scene.gltf`;

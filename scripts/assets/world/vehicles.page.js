@@ -59,7 +59,7 @@ const r3 = (v) => v.toArray().map((x) => +x.toFixed(3));
 // LuAZ-969 -> 'uaz'
 // ------------------------------------------------------------------------------------------------
 
-export async function buildLuaz({ src, out, length, rideHeight }) {
+export async function buildLuaz({ src, out, length, rideHeight, seats, hipHeight }) {
   const g = await load(dl(src));
   const all = parts(g.scene);
   const isWheel = (p) => /^wheel_(FR|FL|RL|RR)/.test(p.name);
@@ -98,7 +98,7 @@ export async function buildLuaz({ src, out, length, rideHeight }) {
     wheels[name] = { center: r3(c), ...wheelInfo(geo) };
   }
   const bytes = await exportGlb(root, out);
-  return { file: out, bytes, tris: sceneTris(root), scale: +scale.toFixed(4), wheels, bbox: bboxReport(root) };
+  return { file: out, bytes, tris: sceneTris(root), scale: +scale.toFixed(4), wheels, bbox: bboxReport(root), seatSurfaces: seatSurfaces(root, seats, hipHeight) };
 }
 
 // ------------------------------------------------------------------------------------------------
@@ -159,7 +159,7 @@ function bikeSteers(c) {
   return radial < 0.15 && along > -0.75 && along < 0.25;
 }
 
-export async function buildBike({ src, out, length, rideHeight, targets }) {
+export async function buildBike({ src, out, length, rideHeight, targets, seats, hipHeight }) {
   const g = await load(dl(src));
   const nodes = {};
   g.scene.traverse((o) => { nodes[o.name] = o; });
@@ -241,7 +241,23 @@ export async function buildBike({ src, out, length, rideHeight, targets }) {
     wheels: { Wheel_F: { center: r3(axle), local: r3(wf.position), ...wheelInfo(wheelF) }, Wheel_R: { center: r3(rearC), ...wheelInfo(wheelR) } },
     fork: { pivot: r3(pivot), axis: r3(axis), rake: +rake.toFixed(4) },
     bbox: bboxReport(root),
+    seatSurfaces: seatSurfaces(root, seats, hipHeight),
   };
+}
+
+/**
+ * Seat surface height under each physics seat (VehicleDef.seatOffsets: feet-level origin, hips
+ * SEAT_HIP_HEIGHT above): ray cast down from 0.45 m above the hips (below roofs) onto the model.
+ */
+function seatSurfaces(root, seats, hipHeight) {
+  root.updateMatrixWorld(true);
+  const rc = new THREE.Raycaster();
+  return seats.map((s) => {
+    rc.set(new THREE.Vector3(s.x, s.y + hipHeight + 0.45, s.z), new THREE.Vector3(0, -1, 0));
+    rc.far = 1.2;
+    const hit = rc.intersectObject(root, true)[0];
+    return hit ? +hit.point.y.toFixed(3) : null;
+  });
 }
 
 function bboxReport(root) {

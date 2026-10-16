@@ -1,0 +1,403 @@
+[
+  {
+    "trees": [
+      {
+        "kind": "pine",
+        "file": "/home/user/op-dashboard-ui/public/assets/models/nature/tree_pine.glb",
+        "bytes": 1017000,
+        "variants": [
+          {
+            "id": "pine_1",
+            "source": "Pine_1.gltf",
+            "sourceHeight": 7.082,
+            "tris": 2000,
+            "lod1Tris": 659,
+            "trunkRadius": 0.03,
+            "crownWidth": 0.698,
+            "rootDepth": 0.033
+          },
+          {
+            "id": "pine_2",
+            "source": "Pine_2.gltf",
+            "sourceHeight": 7.141,
+            "tris": 2000,
+            "lod1Tris": 697,
+            "trunkRadius": 0.03,
+            "crownWidth": 0.802,
+            "rootDepth": 0.033
+          },
+          {
+            "id": "pine_3",
+            "source": "Pine_3.gltf",
+            "sourceHeight": 7.157,
+            "tris": 2000,
+            "lod1Tris": 640,
+            "trunkRadius": 0.03,
+            "crownWidth": 0.558,
+            "rootDepth": 0.033
+          },
+          {
+            "id": "pine_4",
+            "source": "Pine_4.gltf",
+            "sourceHeight": 10.001,
+            "tris": 2000,
+            "lod1Tris": 748,
+            "trunkRadius": 0.038,
+            "crownWidth": 0.58,
+            "rootDepth": 0.024
+          },
+          {
+            "id": "pine_5",
+            "source": "Pine_5.gltf",
+            "sourceHeight": 8.489,
+            "tris": 1646,
+            "lod1Tris": 803,
+            "trunkRadius": 0.042,
+            "crownWidth": 0.756,
+            "rootDepth": 0.028
+          }
+        ]
+      },
+      {
+        "kind": "oak",
+        "file": "/home/user/op-dashboard-ui/public/assets/models/nature/tree_oak.glb",
+        "bytes": 1180908,
+        "variants": [
+          {
+            "id": "oak_1",
+            "source": "CommonTree_1.gltf",
+            "sourceHeight": 7.022,
+            "tris": 2001,
+            "lod1Tris": 640,
+            "trunkRadius": 0.071,
+            "crownWidth": 0.668,
+            "rootDepth": 0.035
+          },
+          {
+            "id": "oak_2",
+            "source": "CommonTree_2.gltf",
+            "sourceHeight": 7.4,
+            "tris": 2001,
+            "lod1Tris": 641,
+            "trunkRadius": 0.067,
+            "crownWidth": 0.624,
+            "rootDepth": 0.033
+          },
+          {
+            "id": "oak_3",
+            "source": "CommonTree_3.gltf",
+            "sourceHeight": 9.182,
+            "tris": 2001,
+            "lod1Tris": 640,
+            "trunkRadius": 0.054,
+            "crownWidth": 0.494,
+            "rootDepth": 0.026
+          },
+          {
+            "id": "oak_4",
+            "source": "CommonTree_4.gltf",
+            "sourceHeight": 9.196,
+            "tris": 2000,
+            "lod1Tris": 640,
+            "trunkRadius": 0.055,
+            "crownWidth": 0.416,
+            "rootDepth": 0.026
+          },
+          {
+            "id": "oak_5",
+            "source": "CommonTree_5.gltf",
+            "sourceHeight": 6.763,
+            "tris": 2000,
+            "lod1Tris": 641,
+            "trunkRadius": 0.075,
+            "crownWidth": 0.641,
+            "rootDepth": 0.036
+          }
+        ]
+      },
+      {
+        "kind": "birch",
+        "file": "/home/user/op-dashboard-ui/public/assets/models/nature/tree_birch.glb",
+        "bytes": 1084844,
+        "variants": [
+          {
+            "id": "birch_1",
+            "source": "BirchTree_1.gltf",
+            "sourceHeight": 5.435,
+            "tris": 1994,
+            "lod1Tris": 641,
+            "trunkRadius": 0.03,
+            "crownWidth": 0.52,
+            "rootDepth": 0.003
+          },
+          {
+            "id": "birch_2",
+            "source": "BirchTree_2.gltf",
+            "sourceHeight": 7.54,
+            "tris": 2005,
+            "lod1Tris": 638,
+            "trunkRadius": 0.018,
+            "crownWidth": 0.475,
+            "rootDepth": 0.004
+          },
+          {
+            "id": "birch_3",
+            "source": "BirchTree_3.gltf",
+            "sourceHeight": 5.746,
+            "tris": 1998,
+            "lod1Tris": 640,
+            "trunkRadius": 0.024,
+            "crownWidth": 0.644,
+            "rootDepth": 0.001
+          },
+          {
+            "id": "birch_4",
+            "source": "BirchTree_4.gltf",
+            "sourceHeight": 4.202,
+            "tris": 2000,
+            "lod1Tris": 641,
+            "trunkRadius": 0.029,
+            "crownWidth": 0.661,
+            "rootDepth": 0.003
+          },
+          {
+            "id": "birch_5",
+            "source": "BirchTree_5.gltf",
+            "sourceHeight": 5.508,
+            "tris": 1999,
+            "lod1Tris": 639,
+            "trunkRadius": 0.03,
+            "crownWidth": 0.664,
+            "rootDepth": 0.003
+          }
+        ]
+      },
+      {
+        "kind": "dead",
+        "file": "/home/user/op-dashboard-ui/public/assets/models/nature/tree_dead.glb",
+        "bytes": 883200,
+        "variants": [
+          {
+            "id": "dead_1",
+            "source": "DeadTree_1.gltf",
+            "sourceHeight": 9.16,
+            "tris": 1999,
+            "lod1Tris": 583,
+            "trunkRadius": 0.058,
+            "crownWidth": 0.671,
+            "rootDepth": 0.037
+          },
+          {
+            "id": "dead_2",
+            "source": "DeadTree_2.gltf",
+            "sourceHeight": 11.153,
+            "tris": 1999,
+            "lod1Tris": 586,
+            "trunkRadius": 0.045,
+            "crownWidth": 0.603,
+            "rootDepth": 0.03
+          },
+          {
+            "id": "dead_3",
+            "source": "DeadTree_3.gltf",
+            "sourceHeight": 12.945,
+            "tris": 1994,
+            "lod1Tris": 594,
+            "trunkRadius": 0.05,
+            "crownWidth": 0.494,
+            "rootDepth": 0.026
+          },
+          {
+            "id": "dead_4",
+            "source": "DeadTree_4.gltf",
+            "sourceHeight": 12.435,
+            "tris": 1997,
+            "lod1Tris": 595,
+            "trunkRadius": 0.068,
+            "crownWidth": 0.639,
+            "rootDepth": 0.027
+          },
+          {
+            "id": "dead_5",
+            "source": "DeadTree_5.gltf",
+            "sourceHeight": 16.102,
+            "tris": 2000,
+            "lod1Tris": 600,
+            "trunkRadius": 0.052,
+            "crownWidth": 0.522,
+            "rootDepth": 0.021
+          }
+        ]
+      }
+    ],
+    "bushes": {
+      "file": "/home/user/op-dashboard-ui/public/assets/models/nature/bushes.glb",
+      "bytes": 288116,
+      "variants": [
+        {
+          "id": "bush_1",
+          "source": "Bush_Common.gltf",
+          "tris": 900,
+          "lod1Tris": 300,
+          "height": 1.097,
+          "material": "bush_leaves_1"
+        },
+        {
+          "id": "bush_2",
+          "source": "Bush.gltf",
+          "tris": 400,
+          "lod1Tris": 300,
+          "height": 0.899,
+          "material": "bush_leaves_2"
+        },
+        {
+          "id": "bush_3",
+          "source": "Bush_Large.gltf",
+          "tris": 276,
+          "lod1Tris": 276,
+          "height": 0.874,
+          "material": "bush_leaves_2"
+        }
+      ]
+    },
+    "rocks": {
+      "file": "/home/user/op-dashboard-ui/public/assets/models/nature/rocks.glb",
+      "bytes": 322868,
+      "variants": [
+        {
+          "id": "rock_1",
+          "source": "rock_moss_set_01_rock01",
+          "sourceTris": 11000,
+          "tris": 700,
+          "lod1Tris": 180,
+          "sourceSize": [
+            2.238,
+            1.473,
+            3.369
+          ]
+        },
+        {
+          "id": "rock_2",
+          "source": "rock_moss_set_01_rock02",
+          "sourceTris": 10996,
+          "tris": 698,
+          "lod1Tris": 180,
+          "sourceSize": [
+            2.655,
+            1.262,
+            3.264
+          ]
+        },
+        {
+          "id": "rock_3",
+          "source": "rock_moss_set_01_rock03",
+          "sourceTris": 5000,
+          "tris": 700,
+          "lod1Tris": 180,
+          "sourceSize": [
+            2.109,
+            1.1,
+            2.08
+          ]
+        },
+        {
+          "id": "rock_4",
+          "source": "rock_moss_set_01_rock04",
+          "sourceTris": 10589,
+          "tris": 700,
+          "lod1Tris": 180,
+          "sourceSize": [
+            2.128,
+            1.768,
+            1.965
+          ]
+        },
+        {
+          "id": "rock_5",
+          "source": "rock_moss_set_01_rock05",
+          "sourceTris": 16548,
+          "tris": 700,
+          "lod1Tris": 180,
+          "sourceSize": [
+            1.817,
+            1.205,
+            2.999
+          ]
+        },
+        {
+          "id": "rock_6",
+          "source": "rock_moss_set_01_rock06",
+          "sourceTris": 8994,
+          "tris": 700,
+          "lod1Tris": 180,
+          "sourceSize": [
+            2.126,
+            1.262,
+            2.757
+          ]
+        }
+      ]
+    },
+    "grass": {
+      "file": "/home/user/op-dashboard-ui/public/assets/models/nature/grass.glb",
+      "bytes": 88996,
+      "variants": [
+        {
+          "id": "grass_1",
+          "source": "Grass_Small.gltf",
+          "tris": 58,
+          "width": 1.21,
+          "sourceHeight": 0.389
+        },
+        {
+          "id": "grass_2",
+          "source": "Grass_Large.gltf",
+          "tris": 108,
+          "width": 1.469,
+          "sourceHeight": 0.482
+        },
+        {
+          "id": "grass_3",
+          "source": "Grass_Common_Short.gltf",
+          "tris": 120,
+          "width": 0.562,
+          "sourceHeight": 1.312
+        }
+      ]
+    },
+    "impostors": {
+      "file": "/home/user/op-dashboard-ui/public/assets/models/nature/impostors.png",
+      "size": [
+        1280,
+        512
+      ],
+      "cells": [
+        {
+          "name": "pine",
+          "widthRatio": 0.712,
+          "height": 1
+        },
+        {
+          "name": "oak",
+          "widthRatio": 0.681,
+          "height": 1
+        },
+        {
+          "name": "birch",
+          "widthRatio": 0.53,
+          "height": 1
+        },
+        {
+          "name": "dead",
+          "widthRatio": 0.684,
+          "height": 1
+        },
+        {
+          "name": "bush",
+          "widthRatio": 1.7,
+          "height": 1.097
+        }
+      ]
+    }
+  }
+]

@@ -211,11 +211,17 @@ export async function simplify(g, target, { uvWeight = 1, normalWeight = 0.5, ma
   const flags = [];
   if (lockBorder) flags.push('LockBorder');
   if (regularize) flags.push('Regularize');
+  const t3 = Math.max(3, Math.floor(target)) * 3;
   let best = null;
   for (let err = 0.01; err <= maxError + 1e-9; err *= 1.6) {
-    const [res] = MeshoptSimplifier.simplifyWithAttributes(idx, pos, 3, attrs, stride, weights, null, target * 3, err, flags);
+    const [res] = MeshoptSimplifier.simplifyWithAttributes(idx, pos, 3, attrs, stride, weights, null, t3, err, flags);
     best = res;
-    if (res.length / 3 <= target * 1.04) break;
+    if (res.length <= t3 * 1.04) break;
+  }
+  if (best.length > t3 * 1.04) {
+    // Seams / borders stopped the regular pass: allow collapses across attribute seams.
+    const [res] = MeshoptSimplifier.simplifyWithAttributes(idx, pos, 3, attrs, stride, weights, null, t3, maxError, [...flags, 'Permissive']);
+    if (res.length < best.length) best = res;
   }
   return compact(g, best);
 }

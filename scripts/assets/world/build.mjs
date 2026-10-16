@@ -10,9 +10,9 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { tsImport } from 'tsx/esm/api';
 import { runInPage, MODELS_DIR, REPO_ROOT } from '../harness.mjs';
-import { DL, MEGAKIT, ULTNAT, ZOMBIE, FANTASY, MEDIEVAL, PHA, PHB, LUAZ, DIRTBIKE, SANDBAG } from './sources.mjs';
+import { DL, MEGAKIT, ULTNAT, ZOMBIE, FANTASY, MEDIEVAL, PHA, PHB, PHC, LUAZ, DIRTBIKE, SANDBAG } from './sources.mjs';
 
-const { VEHICLES } = await tsImport('../../../src/shared/vehicles/defs.ts', import.meta.url);
+const { VEHICLES, SEAT_HIP_HEIGHT } = await tsImport('../../../src/shared/vehicles/defs.ts', import.meta.url);
 const rideHeight = (t) => VEHICLES[t].groundClearance + VEHICLES[t].halfExtents.y;
 
 const cats = process.argv.slice(2).length ? process.argv.slice(2) : ['vehicles', 'props', 'nature'];
@@ -28,16 +28,17 @@ const JOBS = {
   vehicles: {
     module: '/scripts/world/vehicles.page.js',
     calls: [
-      ['buildLuaz', { src: LUAZ, out: out('vehicles/uaz.glb'), length: VEHICLES.uaz.halfExtents.z * 2, rideHeight: rideHeight('uaz') }],
+      ['buildLuaz', { src: LUAZ, out: out('vehicles/uaz.glb'), length: VEHICLES.uaz.halfExtents.z * 2, rideHeight: rideHeight('uaz'), seats: VEHICLES.uaz.seatOffsets, hipHeight: SEAT_HIP_HEIGHT }],
       ['buildBike', {
         src: DIRTBIKE, out: out('vehicles/bike.glb'), length: VEHICLES.bike.halfExtents.z * 2, rideHeight: rideHeight('bike'),
+        seats: VEHICLES.bike.seatOffsets, hipHeight: SEAT_HIP_HEIGHT,
         targets: { body: 2100, fork: 560, wheel: 900 },
       }],
     ],
   },
   props: {
     module: '/scripts/world/props.page.js',
-    calls: [['buildProps', { PHA, ZOMBIE, SANDBAG, FANTASY, MEDIEVAL, outDir: path.join(MODELS_DIR, 'props') }]],
+    calls: [['buildProps', { PHA, PHC, ZOMBIE, SANDBAG, FANTASY, MEDIEVAL, outDir: path.join(MODELS_DIR, 'props') }]],
   },
   nature: {
     module: '/scripts/world/nature.page.js',

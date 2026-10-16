@@ -65,7 +65,7 @@ export interface DzWindow {
  * emits a `localSnapshot` event after each snapshot's events, so `snap` measures server time in
  * 50 ms snapshot steps independently of the frame rate).
  */
-export interface TapEvent { at: number; seq: number; snap: number; ev: ClientEvent }
+export interface TapEvent { at: number; seq: number; snap: number; ev: ClientEvent; state?: Record<string, unknown> }
 
 /**
  * Records every client event (server GameEvents and locally predicted events) of whichever match
@@ -86,7 +86,13 @@ async function installEventTap(page: Page): Promise<void> {
           return;
         }
         // Matches can end with large results payloads; everything here is plain JSON data.
-        tap.events.push({ at: performance.now(), seq: tap.seq++, snap: tap.snaps, ev: JSON.parse(JSON.stringify(ev)) as ClientEvent });
+        const rec: TapEvent = { at: performance.now(), seq: tap.seq++, snap: tap.snaps, ev: JSON.parse(JSON.stringify(ev)) as ClientEvent };
+        if (ev.type === 'localShot') {
+          // Predicted shooter state right after the shot (diagnostics for spread / aim).
+          const p = (g as unknown as { predictedState?: { ads: number; onGround: boolean; bloom: number; vel: Vec3; yaw: number; pitch: number } | null }).predictedState;
+          if (p) rec.state = { ads: p.ads, onGround: p.onGround, bloom: p.bloom, speed: Math.hypot(p.vel.x, p.vel.z), yaw: p.yaw, pitch: p.pitch };
+        }
+        tap.events.push(rec);
         if (tap.events.length > 6000) tap.events.splice(0, 1000);
       });
     }, 50);

@@ -262,7 +262,7 @@ async function chainlink({ src, outDir, id, target }) {
 
 const olive = ops.tint([0.62, 0.68, 0.42], 0.85, 1.05);
 
-export async function buildProps({ PHA, ZOMBIE, SANDBAG, FANTASY, MEDIEVAL, outDir }) {
+export async function buildProps({ PHA, PHC, ZOMBIE, SANDBAG, FANTASY, MEDIEVAL, outDir }) {
   const res = [];
   // Wooden crate: Quaternius Medieval Village "Prop_Crate" (cube, plank + X-brace), 1.0 m.
   res.push(await prop({ id: 'crate_wood', src: `${MEDIEVAL}/Prop_Crate.gltf`, outDir, size: [1.0, null, null], longX: false }));
@@ -270,6 +270,11 @@ export async function buildProps({ PHA, ZOMBIE, SANDBAG, FANTASY, MEDIEVAL, outD
   res.push(await prop({
     id: 'crate_military', src: `${FANTASY}/Crate_Wooden.gltf`, outDir, size: [1.0, null, null], longX: false,
     tint: olive, tintMatch: /Furniture/,
+  }));
+  // Ammo crate: Poly Haven "Old Military Crate" (closed variant "a": crate, lid, latch, loop, strap).
+  res.push(await prop({
+    id: 'ammo_crate', src: `${PHC}/old_military_crate/old_military_crate.gltf`, outDir, target: 1500,
+    nodes: ['old_military_crate_a', 'old_military_crate_lid_a', 'old_military_crate_latch_a', 'old_military_crate_loop_a', 'old_military_crate_cloth_a'],
   }));
   // Oil drum (Poly Haven barrel_03) and red fuel drum (Poly Haven Barrel_01).
   res.push(await prop({ id: 'barrel_oil', src: `${PHA}/barrel_03/barrel_03_1k.gltf`, outDir, target: 1100, longX: false }));
